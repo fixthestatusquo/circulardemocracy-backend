@@ -20,7 +20,11 @@
     "docs:spec": "tsx scripts/generate-spec.ts",
     "docs:html": "redocly build-docs doc/openapi.json --output doc/openapi.html",
     "docs:md": "widdershins doc/openapi.json -o doc/openapi.md",
-    "docs:build": "npm run docs:spec && npm run docs:html && npm run docs:md"
+    "docs:build": "npm run docs:spec && npm run docs:html && npm run docs:md",
+    "db:start": "supabase start",
+    "db:reset": "supabase db reset",
+    "db:push": "supabase db push",
+    "db:diff": "supabase db diff -f"
   },
   "dependencies": {
     "@hono/zod-openapi": "^0.8.0",

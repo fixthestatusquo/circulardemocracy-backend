@@ -1,0 +1,7 @@
+name = "circulardemocracy-backend"
+main = "src/api.ts"
+compatibility_date = "2025-09-17"
+
+# Enable the Workers AI binding
+[ai]
+binding = "AI"

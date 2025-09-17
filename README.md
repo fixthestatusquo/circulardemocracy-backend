@@ -6,6 +6,16 @@ A democratic engagement platform that enables citizens to communicate directly w
 
 Circular Democracy is designed to bridge the communication gap between citizens and their elected representatives by providing a structured system for message routing, classification, and response management. The platform processes citizen messages through multiple channels, intelligently categorizes them by campaign/topic, and enables politicians to send personalized replies to their constituents.
 
+Many citizens write to their elected representatives as part of campaigns organised by NGOs. This will be a mix of pre-written messages (copypasta activism) and more personal and customised onces that are part of a campaign (these two are the bulk of the email received) and some edge cases of someone using the campaign but writting on a different topic.
+
+In order to be able let the politicians understand the size of each campaign and their volume of activity at any given time, and to be able to reply automatically (at least when that's the same pre-written messages), we first need to classify these emails
+
+For privacy reasons, we are trying to minimise the personal information of each supporter to the strict minimum possible. For instance, the AI model used to classify a message won't use the name or email of the supporter to be able to decide what is the campaign (if any) that enpowered the supporter to write, so it shouldn't have access to these data. 
+
+For performance reasons, it should be noted that it's quite common that the same supporter will send almost identical emails (may be with the first line "Dear representative Smith", "Dear representative Doe" being different), and in principle, there is no need classify each of them, or at least avoid overfitting the model because of these duplicates.
+
+
+
 ## Key Features
 
 ### 🔄 Multi-Channel Message Processing
@@ -105,37 +115,121 @@ Integration with mail server MTA hooks for direct email processing with automati
 
 ## Getting Started
 
+This guide will walk you through setting up the project for local development, including running the database and the API server.
+
 ### Prerequisites
-- Supabase account and project
-- Cloudflare Workers AI access
-- Stalwart mail server (for email channel)
-- RabbitMQ instance (for message queuing)
 
-### Installation
-```bash
-# Clone the repository
-git clone https://github.com/fixthestatusquo/circulardemocracy-backend.git
-cd circulardemocracy-backend
+- [Node.js](https://nodejs.org/) (v18 or higher)
+- [Docker](https://www.docker.com/get-started) (for running the local database)
+- [Supabase CLI](https://supabase.com/docs/guides/cli) (for database migrations)
 
-# Install dependencies
-npm install
+### Local Development Setup
 
-# Configure environment variables
-cp .env.example .env
-# Edit .env with your Supabase, Cloudflare, and other credentials
+1.  **Clone the Repository**
 
-# Run database migrations
-npm run migrate
+    ```bash
+    git clone https://github.com/fixthestatusquo/circulardemocracy-backend.git
+    cd circulardemocracy-backend
+    ```
 
-# Start the development server
-npm run dev
-```
+2.  **Install Dependencies**
 
-### Configuration
-1. **Supabase Setup**: Configure database with vector storage for BGE-M3 embeddings
-2. **Cloudflare Workers AI**: Set up BGE-M3 model access for message classification
-3. **Stalwart Integration**: Configure MTA hooks for email processing
-4. **Authentication**: Set up politician accounts and access controls
+    ```bash
+    npm install
+    ```
+
+3.  **Start the Local Database**
+
+    This project uses the Supabase CLI to run a local, containerized version of the entire Supabase stack (Postgres, GoTrue, etc.).
+
+    ```bash
+    # This command requires Docker to be running
+    npm run db:start
+    ```
+
+    The first time you run this, it will download the necessary Docker images. Once started, you'll see output with your local database credentials and API keys. These are safe to use for local development.
+
+4.  **Run the API Development Server**
+
+    In a separate terminal, start the Hono API server, which will connect to your local database.
+
+    ```bash
+    npm run dev
+    ```
+
+    The server will typically be available at `http://localhost:8787`.
+
+## Database Schema Management
+
+This project uses the Supabase CLI to manage database schema changes through migration files located in the `supabase/migrations` directory. **Never edit your production database schema through the Supabase web UI.** Always create a migration file and apply it.
+
+Here is the recommended workflow and an explanation of the helper scripts:
+
+-   `npm run db:start`
+    -   **What it does:** Starts the local Supabase Docker containers.
+    -   **When to use it:** At the beginning of every development session.
+
+-   `npm run db:reset`
+    -   **What it does:** Stops the local database, destroys all data, and restarts it by re-applying all migration files from scratch.
+    -   **When to use it:** When you need a clean slate or want to test the entire migration process.
+
+-   `npm run db:diff -- <migration_name>`
+    -   **What it does:** Compares the current state of your local database with the last migration file and generates a *new* migration file containing the differences.
+    -   **When to use it:** After you have made schema changes to your local database (e.g., using a GUI tool or `psql`) and want to commit those changes to a new migration file.
+    -   **Example:** `npm run db:diff -- add_user_profiles`
+
+-   `npm run db:push`
+    -   **What it does:** Applies any new, un-applied migration files to your remote (production) Supabase database.
+    -   **When to use it:** When you are ready to deploy your schema changes to production. You must first link your project with `supabase link --project-ref <your-project-ref>`.
+
+### Typical Workflow for a Schema Change
+
+1.  Make sure your local database is running (`npm run db:start`).
+2.  Connect to the local database with your preferred tool and make your schema changes (e.g., `CREATE TABLE ...`, `ALTER TABLE ...`).
+3.  Generate a new migration file to capture your changes:
+    ```bash
+    npm run db:diff -- name_of_your_change
+    ```
+4.  Commit the new file in `supabase/migrations` to Git.
+5.  When ready to deploy, push the changes to your live Supabase project:
+    ```bash
+    npm run db:push
+    ```
+
+## Deployment
+
+This API is designed to be deployed as a Cloudflare Worker. The `wrangler` CLI, which is included as a dev dependency, is used for deployment.
+
+1.  **Log in to Cloudflare**
+
+    First, you need to authenticate with your Cloudflare account.
+
+    ```bash
+    npx wrangler login
+    ```
+
+2.  **Set Up Secrets**
+
+    The worker needs access to your Supabase credentials. These should be stored as encrypted secrets in your Cloudflare account, not in version control. Your code requires two secrets: `SUPABASE_URL` and `SUPABASE_KEY`.
+
+    Run the following commands, pasting your actual Supabase URL and Key when prompted:
+
+    ```bash
+    npx wrangler secret put SUPABASE_URL
+    npx wrangler secret put SUPABASE_KEY
+    ```
+
+3.  **Deploy the Worker**
+
+    Once your secrets are set, you can deploy the worker using the built-in npm script:
+
+    ```bash
+    npm run deploy
+    ```
+
+    This command bundles your code and uploads it to your Cloudflare account, making it available at the URL provided in the output.
+
+
 
 ## Roadmap
 
@@ -168,118 +262,3 @@ Proca: Campaign action processing infrastructure (shared message queue)
 Fix the Status Quo: Parent organization's civic engagement tools
 
 
-
-# Email Classification
-
-Many citizens write to their elected representatives as part of campaigns organised by NGOs. This will be a mix of pre-written messages (copypasta activism) and more personal and customised onces that are part of a campaign (these two are the bulk of the email received) and some edge cases of someone using the campaign but writting on a different topic.
-
-In order to be able let the politicians understand the size of each campaign and their volume of activity at any given time, and to be able to reply automatically (at least when that's the same pre-written messages), we first need to classify these emails
-
-For privacy reasons, we are trying to minimise the personal information of each supporter to the strict minimum possible. For instance, the AI model used to classify a message won't use the name or email of the supporter to be able to decide what is the campaign (if any) that enpowered the supporter to write, so it shouldn't have access to these data. 
-
-For performance reasons, it should be noted that it's quite common that the same supporter will send almost identical emails (may be with the first line "Dear representative Smith", "Dear representative Doe" being different), and in principle, there is no need classify each of them, or at least avoid overfitting the model because of these duplicates.
-
-
-## Overview
-
-As MVP, we are focussing on being able to classify a message.  For the MVP, we are going to leverage external services:
-
-1.    Cloudflare Workers (REST API receiving the message to classify)
-2.    Cloudflare AI (embedding)
-3.    Supabase (PostgreSQL + pgvector for storage/similarity search)
-
-
-# This is WIP to be fleshed out
-
-
-# cloudflare worker
-
-input (at minima)
-- message id
-- sender identifier (hash of the email?)
-- timestamp
-- subject
-- body (either html or text)
-
-
-returns
-
-if part of a known campaign:
-. campaign_name
-- confidence/similarity (how likely that email belong to that campaign?)
-- language?
-
-Language might be a parameter? in the European parliament, the representatives can speak at least 24 official languages an multiple others. The citizens are usually writing to them in the language of their country or english. It would be better that if I write to my french MEP in english, they reply to me in english, not in french. #possibleV1
-
-
-if unknown:
-- some kind of automatically generated "virtual campaign name?"
-
-Note: how to handle the unknown is not clear to be, should we use LLMs if we can't find an existing campaign that matches the email?)
-
-
-Cloudflare provide you several 
-
-
-    Cloudflare Account
-
-        Workers + AI enabled.
-
-    Supabase Project
-
-        PostgreSQL with pgvector extension.
-
-    Reference Data
-
-        Pre-labeled email examples (to train the system).
-
-Setup
-1. Supabase Configuration
-
-    Enable pgvector extension in your database.
-
-    Create tables:
-
-        categories (predefined labels).
-
-        email_embeddings (stores text + vector embeddings).
-
-    Configure Row-Level Security (RLS) if needed.
-
-2. Cloudflare Worker
-
-    Bind Cloudflare AI and Supabase environment variables.
-
-    Deploy the worker to handle HTTP requests.
-
-3. Cloudflare AI
-
-    Use the @cf/baai/bge-base-en-v1.5 embedding model (no setup required).
-
-Workflow
-
-    Preload Reference Emails
-
-        Generate embeddings for labeled examples and store in Supabase.
-
-    Classify New Emails
-
-        Submit email text → Worker fetches embedding → Supabase finds closest category.
-
-Performance
-
-    Latency: ~100-300ms (varies with email length).
-
-    Accuracy: Improves with more labeled examples.
-
-Limitations
-
-    Cold starts in Cloudflare Workers (rare for frequent requests).
-
-    Euclidean/cosine distance trade-offs (test for your use case).
-
-Next Steps
-
-    Add examples to the reference dataset.
-
-    Configure email triggers (e.g., MailChannels or SMTP).
