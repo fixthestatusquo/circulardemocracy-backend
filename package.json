@@ -5,8 +5,8 @@
   "main": "src/index.ts",
   "type": "module",
   "scripts": {
-    "dev": "wrangler dev src/api.ts --local",
-    "deploy": "wrangler deploy --minify src/api.ts",
+    "dev": "wrangler dev src/index.ts --local",
+    "deploy": "wrangler deploy --minify src/index.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",

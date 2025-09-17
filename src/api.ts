@@ -5,6 +5,7 @@ import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { OpenAPIHono, createRoute, z } from '@hono/zod-openapi'
 import { DatabaseClient, hashEmail, type MessageInsert } from './database'
+import { authMiddleware } from './auth'
 
 // Environment variables interface
 interface Env {
@@ -252,6 +253,11 @@ async function generateEmbedding(ai: Ai, text: string): Promise<number[]> {
 const statsRoute = createRoute({
   method: 'get',
   path: '/api/v1/campaigns/stats',
+  security: [
+    { 
+      Bearer: [],
+    },
+  ],
   responses: {
     200: {
       content: {
@@ -276,7 +282,7 @@ const statsRoute = createRoute({
   summary: 'Get campaign statistics',
 })
 
-app.openapi(statsRoute, async c => {
+app.openapi(statsRoute, authMiddleware, async c => {
   const db = c.get('db') as DatabaseClient
 
   try {
