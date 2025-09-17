@@ -26,7 +26,7 @@ const MessageInputSchema = z.object({
   message: z.string().min(10).max(10000).describe('Message body content'),
   timestamp: z.string().datetime().describe('When the message was originally sent (ISO 8601)'),
   channel_source: z.string().max(100).optional().describe('Source system identifier'),
-  campaign_hint: z.string().max(255).optional().describe('Optional campaign name hint from sender')
+  campaign_hint: z.string().max(255).optional().describe('Optional campaign name hint from sender'),
 })
 
 const MessageResponseSchema = z.object({
@@ -37,13 +37,13 @@ const MessageResponseSchema = z.object({
   campaign_name: z.string().optional(),
   confidence: z.number().min(0).max(1).optional(),
   duplicate_rank: z.number().optional(),
-  errors: z.array(z.string()).optional()
+  errors: z.array(z.string()).optional(),
 })
 
 const ErrorResponseSchema = z.object({
   success: z.boolean().default(false),
   error: z.string(),
-  details: z.string().optional()
+  details: z.string().optional(),
 })
 
 // =============================================================================
@@ -53,18 +53,24 @@ const ErrorResponseSchema = z.object({
 const app = new OpenAPIHono<{ Bindings: Env }>()
 
 // CORS and basic middleware
-app.use('/*', cors({
-  origin: ['https://*.circulardemocracy.org', 'http://localhost:*'],
-  allowHeaders: ['Content-Type', 'Authorization'],
-  allowMethods: ['POST', 'GET', 'OPTIONS'],
-}))
+app.use(
+  '/*',
+  cors({
+    origin: ['https://*.circulardemocracy.org', 'http://localhost:*'],
+    allowHeaders: ['Content-Type', 'Authorization'],
+    allowMethods: ['POST', 'GET', 'OPTIONS'],
+  })
+)
 
 // Database client middleware
 app.use('*', async (c, next) => {
-  c.set('db', new DatabaseClient({
-    url: c.env.SUPABASE_URL,
-    key: c.env.SUPABASE_KEY
-  }))
+  c.set(
+    'db',
+    new DatabaseClient({
+      url: c.env.SUPABASE_URL,
+      key: c.env.SUPABASE_KEY,
+    })
+  )
   await next()
 })
 
@@ -128,45 +134,59 @@ const messageRoute = createRoute({
   },
   tags: ['Messages'],
   summary: 'Process incoming citizen message',
-  description: 'Receives a citizen message, classifies it by campaign, and stores it for politician response'
+  description:
+    'Receives a citizen message, classifies it by campaign, and stores it for politician response',
 })
 
-app.openapi(messageRoute, async (c) => {
+app.openapi(messageRoute, async c => {
   const db = c.get('db') as DatabaseClient
-  
+
   try {
     const data = c.req.valid('json')
-    
+
     // Step 1: Check for duplicate external_id
-    const isDuplicate = await db.checkExternalIdExists(data.external_id, data.channel_source || 'unknown')
+    const isDuplicate = await db.checkExternalIdExists(
+      data.external_id,
+      data.channel_source || 'unknown'
+    )
     if (isDuplicate) {
-      return c.json({
-        success: false,
-        status: 'duplicate',
-        errors: [`Message with external_id ${data.external_id} already exists`]
-      }, 409)
+      return c.json(
+        {
+          success: false,
+          status: 'duplicate',
+          errors: [`Message with external_id ${data.external_id} already exists`],
+        },
+        409
+      )
     }
 
     // Step 2: Find target politician by email
     const politician = await db.findPoliticianByEmail(data.recipient_email)
     if (!politician) {
-      return c.json({
-        success: false,
-        status: 'politician_not_found',
-        errors: [`No politician found for email: ${data.recipient_email}`]
-      }, 404)
+      return c.json(
+        {
+          success: false,
+          status: 'politician_not_found',
+          errors: [`No politician found for email: ${data.recipient_email}`],
+        },
+        404
+      )
     }
 
     // Step 3: Generate message embedding using BGE-M3
     const embedding = await generateEmbedding(c.env.AI, data.message)
-    
+
     // Step 4: Classify message into campaign
     const classification = await db.classifyMessage(embedding, data.campaign_hint)
-    
+
     // Step 5: Check for logical duplicates (same sender + politician + campaign)
     const senderHash = await hashEmail(data.sender_email)
-    const duplicateRank = await db.getDuplicateRank(senderHash, politician.id, classification.campaign_id)
-    
+    const duplicateRank = await db.getDuplicateRank(
+      senderHash,
+      politician.id,
+      classification.campaign_id
+    )
+
     // Step 6: Store message in database
     const messageData: MessageInsert = {
       external_id: data.external_id,
@@ -180,7 +200,7 @@ app.openapi(messageRoute, async (c) => {
       language: 'auto', // TODO: detect language
       received_at: data.timestamp,
       duplicate_rank: duplicateRank,
-      processing_status: 'processed'
+      processing_status: 'processed',
     }
 
     const messageId = await db.insertMessage(messageData)
@@ -192,16 +212,18 @@ app.openapi(messageRoute, async (c) => {
       campaign_id: classification.campaign_id,
       campaign_name: classification.campaign_name,
       confidence: classification.confidence,
-      duplicate_rank: duplicateRank
+      duplicate_rank: duplicateRank,
     })
-
   } catch (error) {
     console.error('Message processing error:', error)
-    return c.json({
-      success: false,
-      error: 'Internal server error',
-      details: error instanceof Error ? error.message : 'Unknown error'
-    }, 500)
+    return c.json(
+      {
+        success: false,
+        error: 'Internal server error',
+        details: error instanceof Error ? error.message : 'Unknown error',
+      },
+      500
+    )
   }
 })
 
@@ -214,7 +236,7 @@ async function generateEmbedding(ai: Ai, text: string): Promise<number[]> {
     const response = await ai.run('@cf/baai/bge-m3', {
       text: text.substring(0, 8000), // Limit to avoid token limits
     })
-    
+
     return response.data[0] as number[]
   } catch (error) {
     console.error('Embedding generation error:', error)
@@ -235,13 +257,15 @@ const statsRoute = createRoute({
       content: {
         'application/json': {
           schema: z.object({
-            campaigns: z.array(z.object({
-              id: z.number(),
-              name: z.string(),
-              message_count: z.number(),
-              recent_count: z.number(),
-              avg_confidence: z.number().optional()
-            }))
+            campaigns: z.array(
+              z.object({
+                id: z.number(),
+                name: z.string(),
+                message_count: z.number(),
+                recent_count: z.number(),
+                avg_confidence: z.number().optional(),
+              })
+            ),
           }),
         },
       },
@@ -252,21 +276,24 @@ const statsRoute = createRoute({
   summary: 'Get campaign statistics',
 })
 
-app.openapi(statsRoute, async (c) => {
+app.openapi(statsRoute, async c => {
   const db = c.get('db') as DatabaseClient
-  
+
   try {
     // This would need a custom RPC function in Supabase
     const stats = await db.request('/rpc/get_campaign_stats')
-    
+
     return c.json({
-      campaigns: stats
+      campaigns: stats,
     })
-  } catch (error) {
-    return c.json({
-      success: false,
-      error: 'Failed to fetch statistics'
-    }, 500)
+  } catch (_error) {
+    return c.json(
+      {
+        success: false,
+        error: 'Failed to fetch statistics',
+      },
+      500
+    )
   }
 })
 
@@ -274,11 +301,11 @@ app.openapi(statsRoute, async (c) => {
 // HEALTH CHECK & DOCS
 // =============================================================================
 
-app.get('/health', (c) => {
-  return c.json({ 
-    status: 'ok', 
+app.get('/health', c => {
+  return c.json({
+    status: 'ok',
     timestamp: new Date().toISOString(),
-    version: '1.0.0'
+    version: '1.0.0',
   })
 })
 
@@ -288,18 +315,18 @@ app.doc('/openapi.json', {
   info: {
     version: '1.0.0',
     title: 'Circular Democracy API',
-    description: 'API for processing citizen messages to politicians'
+    description: 'API for processing citizen messages to politicians',
   },
   servers: [
     {
       url: 'https://api.circulardemocracy.org',
-      description: 'Production server'
+      description: 'Production server',
     },
     {
       url: 'http://localhost:8787',
-      description: 'Development server'
-    }
-  ]
+      description: 'Development server',
+    },
+  ],
 })
 
 export default app

@@ -52,19 +52,16 @@ export class DatabaseClient {
     this.apiKey = config.key
   }
 
-  private async request<T>(
-    endpoint: string, 
-    options: RequestInit = {}
-  ): Promise<T> {
+  private async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
     const url = `${this.baseUrl}${endpoint}`
-    
+
     const response = await fetch(url, {
       ...options,
       headers: {
-        'apikey': this.apiKey,
-        'Authorization': `Bearer ${this.apiKey}`,
+        apikey: this.apiKey,
+        Authorization: `Bearer ${this.apiKey}`,
         'Content-Type': 'application/json',
-        'Prefer': 'return=representation',
+        Prefer: 'return=representation',
         ...options.headers,
       },
     })
@@ -98,7 +95,6 @@ export class DatabaseClient {
       )
 
       return arrayMatch.length > 0 ? arrayMatch[0] : null
-
     } catch (error) {
       console.error('Error finding politician:', error)
       return null
@@ -122,7 +118,10 @@ export class DatabaseClient {
     }
   }
 
-  async findSimilarCampaigns(embedding: number[], limit = 3): Promise<Array<Campaign & { similarity: number }>> {
+  async findSimilarCampaigns(
+    embedding: number[],
+    limit = 3
+  ): Promise<Array<Campaign & { similarity: number }>> {
     try {
       // Use PostgREST RPC call for vector similarity
       const result = await this.request<Array<Campaign & { similarity: number }>>(
@@ -132,20 +131,20 @@ export class DatabaseClient {
           body: JSON.stringify({
             query_embedding: embedding,
             similarity_threshold: 0.1,
-            match_limit: limit
-          })
+            match_limit: limit,
+          }),
         }
       )
 
       return result
     } catch (error) {
       console.error('Error finding similar campaigns:', error)
-      
+
       // Fallback: get all active campaigns without similarity
       const fallback = await this.request<Campaign[]>(
         `/campaigns?status=in.(active,unconfirmed)&reference_vector=not.is.null&select=id,name,slug,status&limit=${limit}`
       )
-      
+
       return fallback.map(camp => ({ ...camp, similarity: 0.1 }))
     }
   }
@@ -153,7 +152,7 @@ export class DatabaseClient {
   async getUncategorizedCampaign(): Promise<Campaign> {
     try {
       const campaigns = await this.request<Campaign[]>(
-        `/campaigns?slug=eq.uncategorized&select=id,name,slug,status`
+        '/campaigns?slug=eq.uncategorized&select=id,name,slug,status'
       )
 
       if (campaigns.length > 0) {
@@ -161,19 +160,16 @@ export class DatabaseClient {
       }
 
       // Create uncategorized campaign
-      const newCampaigns = await this.request<Campaign[]>(
-        '/campaigns',
-        {
-          method: 'POST',
-          body: JSON.stringify({
-            name: 'Uncategorized',
-            slug: 'uncategorized',
-            description: 'Messages that could not be automatically categorized',
-            status: 'active',
-            created_by: 'system'
-          })
-        }
-      )
+      const newCampaigns = await this.request<Campaign[]>('/campaigns', {
+        method: 'POST',
+        body: JSON.stringify({
+          name: 'Uncategorized',
+          slug: 'uncategorized',
+          description: 'Messages that could not be automatically categorized',
+          status: 'active',
+          created_by: 'system',
+        }),
+      })
 
       return newCampaigns[0]
     } catch (error) {
@@ -186,14 +182,18 @@ export class DatabaseClient {
   // MESSAGE OPERATIONS
   // =============================================================================
 
-  async getDuplicateRank(senderHash: string, politicianId: number, campaignId: number): Promise<number> {
+  async getDuplicateRank(
+    senderHash: string,
+    politicianId: number,
+    campaignId: number
+  ): Promise<number> {
     try {
       const result = await this.request<Array<{ count: number }>>(
         `/messages?sender_hash=eq.${senderHash}&politician_id=eq.${politicianId}&campaign_id=eq.${campaignId}&select=count()`,
         {
           headers: {
-            'Prefer': 'count=exact'
-          }
+            Prefer: 'count=exact',
+          },
         }
       )
 
@@ -207,16 +207,13 @@ export class DatabaseClient {
 
   async insertMessage(data: MessageInsert): Promise<number> {
     try {
-      const result = await this.request<Array<{ id: number }>>(
-        '/messages',
-        {
-          method: 'POST',
-          body: JSON.stringify({
-            ...data,
-            message_embedding: JSON.stringify(data.message_embedding) // Convert array to JSON string for PostgreSQL
-          })
-        }
-      )
+      const result = await this.request<Array<{ id: number }>>('/messages', {
+        method: 'POST',
+        body: JSON.stringify({
+          ...data,
+          message_embedding: JSON.stringify(data.message_embedding), // Convert array to JSON string for PostgreSQL
+        }),
+      })
 
       return result[0].id
     } catch (error) {
@@ -250,34 +247,34 @@ export class DatabaseClient {
         return {
           campaign_id: hintCampaign.id,
           campaign_name: hintCampaign.name,
-          confidence: 0.95
+          confidence: 0.95,
         }
       }
     }
 
     // Step 2: Try vector similarity
     const similarCampaigns = await this.findSimilarCampaigns(embedding, 3)
-    
+
     if (similarCampaigns.length > 0) {
       const best = similarCampaigns[0]
-      
+
       // If similarity is high enough, use existing campaign
       if (best.similarity > 0.7) {
         return {
           campaign_id: best.id,
           campaign_name: best.name,
-          confidence: best.similarity
+          confidence: best.similarity,
         }
       }
     }
 
     // Step 3: Fall back to uncategorized
     const uncategorized = await this.getUncategorizedCampaign()
-    
+
     return {
       campaign_id: uncategorized.id,
       campaign_name: uncategorized.name,
-      confidence: 0.1
+      confidence: 0.1,
     }
   }
 }
