@@ -1,0 +1,364 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "version": "1.0.0",
+    "title": "Circular Democracy API",
+    "description": "API for processing citizen messages to politicians"
+  },
+  "servers": [
+    {
+      "url": "https://api.circulardemocracy.org",
+      "description": "Production server"
+    },
+    {
+      "url": "http://localhost:8787",
+      "description": "Development server"
+    }
+  ],
+  "components": {
+    "schemas": {},
+    "parameters": {}
+  },
+  "paths": {
+    "/api/v1/messages": {
+      "post": {
+        "tags": [
+          "Messages"
+        ],
+        "summary": "Process incoming citizen message",
+        "description": "Receives a citizen message, classifies it by campaign, and stores it for politician response",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "external_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 255,
+                    "description": "Unique identifier from source system"
+                  },
+                  "sender_name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 255,
+                    "description": "Full name of the message sender"
+                  },
+                  "sender_email": {
+                    "type": "string",
+                    "maxLength": 255,
+                    "format": "email",
+                    "description": "Email address of the sender"
+                  },
+                  "recipient_email": {
+                    "type": "string",
+                    "maxLength": 255,
+                    "format": "email",
+                    "description": "Email address of the target politician"
+                  },
+                  "subject": {
+                    "type": "string",
+                    "maxLength": 500,
+                    "description": "Message subject line"
+                  },
+                  "message": {
+                    "type": "string",
+                    "minLength": 10,
+                    "maxLength": 10000,
+                    "description": "Message body content"
+                  },
+                  "timestamp": {
+                    "type": "string",
+                    "format": "date-time",
+                    "description": "When the message was originally sent (ISO 8601)"
+                  },
+                  "channel_source": {
+                    "type": "string",
+                    "maxLength": 100,
+                    "description": "Source system identifier"
+                  },
+                  "campaign_hint": {
+                    "type": "string",
+                    "maxLength": 255,
+                    "description": "Optional campaign name hint from sender"
+                  }
+                },
+                "required": [
+                  "external_id",
+                  "sender_name",
+                  "sender_email",
+                  "recipient_email",
+                  "subject",
+                  "message",
+                  "timestamp"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Message processed successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "message_id": {
+                      "type": "number"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "processed",
+                        "failed",
+                        "politician_not_found",
+                        "duplicate"
+                      ]
+                    },
+                    "campaign_id": {
+                      "type": "number"
+                    },
+                    "campaign_name": {
+                      "type": "string"
+                    },
+                    "confidence": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1
+                    },
+                    "duplicate_rank": {
+                      "type": "number"
+                    },
+                    "errors": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "status"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "default": false
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Politician not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "message_id": {
+                      "type": "number"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "processed",
+                        "failed",
+                        "politician_not_found",
+                        "duplicate"
+                      ]
+                    },
+                    "campaign_id": {
+                      "type": "number"
+                    },
+                    "campaign_name": {
+                      "type": "string"
+                    },
+                    "confidence": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1
+                    },
+                    "duplicate_rank": {
+                      "type": "number"
+                    },
+                    "errors": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "status"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Duplicate message",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "message_id": {
+                      "type": "number"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "processed",
+                        "failed",
+                        "politician_not_found",
+                        "duplicate"
+                      ]
+                    },
+                    "campaign_id": {
+                      "type": "number"
+                    },
+                    "campaign_name": {
+                      "type": "string"
+                    },
+                    "confidence": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1
+                    },
+                    "duplicate_rank": {
+                      "type": "number"
+                    },
+                    "errors": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "status"
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "default": false
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/campaigns/stats": {
+      "get": {
+        "tags": [
+          "Statistics"
+        ],
+        "summary": "Get campaign statistics",
+        "responses": {
+          "200": {
+            "description": "Campaign statistics",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "campaigns": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "number"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "message_count": {
+                            "type": "number"
+                          },
+                          "recent_count": {
+                            "type": "number"
+                          },
+                          "avg_confidence": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "name",
+                          "message_count",
+                          "recent_count"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "campaigns"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

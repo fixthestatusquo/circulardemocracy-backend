@@ -198,7 +198,7 @@ export class DatabaseClient {
       )
 
       // PostgREST count response format
-      return parseInt(result[0]?.count?.toString() || '0')
+      return Number.parseInt(result[0]?.count?.toString() || '0')
     } catch (error) {
       console.error('Error getting duplicate rank:', error)
       return 0
