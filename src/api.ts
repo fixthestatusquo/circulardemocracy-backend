@@ -57,11 +57,11 @@ app.doc('/openapi.json', {
   servers: [
     {
       url: 'https://api.circulardemocracy.org',
-      description: 'Production server',
+      description: 'production',
     },
     {
       url: 'http://localhost:8787',
-      description: 'Development server',
+      description: 'development',
     },
   ],
 })

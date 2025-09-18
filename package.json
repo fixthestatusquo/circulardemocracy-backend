@@ -16,7 +16,7 @@
     "format:fix": "biome format src/ --write",
     "check": "biome check src/",
     "check:fix": "biome check src/ --write",
-    "doc:spec": "tsx scripts/generate-spec.ts",
+    "doc:spec": "tsx bin/spec-generate.ts",
     "doc:html": "redocly build-docs doc/openapi.json --output doc/openapi.html",
     "doc:build": "npm run doc:spec && npm run doc:html && npm run doc:md",
     "client:build": "npx swagger-typescript-api generate --path ./doc/openapi.json -o ./src/client -n api.ts",

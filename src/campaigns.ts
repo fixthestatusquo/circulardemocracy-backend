@@ -53,6 +53,45 @@ app.openapi(listCampaignsRoute, authMiddleware, async c => {
   return c.json(data)
 })
 
+// Get campaign statistics
+const statsRoute = createRoute({
+  method: 'get',
+  path: '/api/v1/campaigns/stats',
+  security: [{ Bearer: [] }],
+  responses: {
+    200: {
+      content: {
+        'application/json': {
+          schema: z.object({
+            campaigns: z.array(
+              z.object({
+                id: z.number(),
+                name: z.string(),
+                message_count: z.number(),
+                recent_count: z.number(),
+                avg_confidence: z.number().optional(),
+              })
+            ),
+          }),
+        },
+      },
+      description: 'Campaign statistics',
+    },
+  },
+  tags: ['Campaigns', 'Statistics'], // Added Campaigns tag
+  summary: 'Get campaign statistics',
+})
+
+app.openapi(statsRoute, authMiddleware, async c => {
+  const db = c.get('db') as DatabaseClient
+  try {
+    const stats = await db.request('/rpc/get_campaign_stats')
+    return c.json({ campaigns: stats })
+  } catch (_error) {
+    return c.json({ success: false, error: 'Failed to fetch statistics' }, 500)
+  }
+})
+
 // Get Single Campaign
 const getCampaignRoute = createRoute({
   method: 'get',
@@ -108,44 +147,5 @@ app.openapi(createCampaignRoute, authMiddleware, async c => {
   return c.json(data[0], 201)
 })
 
-
-// Get campaign statistics
-const statsRoute = createRoute({
-  method: 'get',
-  path: '/api/v1/campaigns/stats',
-  security: [{ Bearer: [] }],
-  responses: {
-    200: {
-      content: {
-        'application/json': {
-          schema: z.object({
-            campaigns: z.array(
-              z.object({
-                id: z.number(),
-                name: z.string(),
-                message_count: z.number(),
-                recent_count: z.number(),
-                avg_confidence: z.number().optional(),
-              })
-            ),
-          }),
-        },
-      },
-      description: 'Campaign statistics',
-    },
-  },
-  tags: ['Campaigns', 'Statistics'], // Added Campaigns tag
-  summary: 'Get campaign statistics',
-})
-
-app.openapi(statsRoute, authMiddleware, async c => {
-  const db = c.get('db') as DatabaseClient
-  try {
-    const stats = await db.request('/rpc/get_campaign_stats')
-    return c.json({ campaigns: stats })
-  } catch (_error) {
-    return c.json({ success: false, error: 'Failed to fetch statistics' }, 500)
-  }
-})
 
 export default app

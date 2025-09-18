@@ -2,29 +2,95 @@
 
 import minimist from 'minimist';
 import { hc } from 'hono/client';
+import fs from 'fs';
 
-// Configure your API base URL
-const API_BASE_URL = process.env.API_URL || 'http://localhost:3000';
+// Load API base URL from OpenAPI spec
+function getApiBaseUrl(serverIndex = 0) {
+  try {
+    // Check environment variable first
+    if (process.env.API_URL) {
+      return process.env.API_URL;
+    }
+    
+    // Try to load from OpenAPI spec
+    if (fs.existsSync('./doc/openapi.json')) {
+      const spec = JSON.parse(fs.readFileSync('./doc/openapi.json', 'utf8'));
+      
+      // Get server URL by index or description from the OpenAPI spec
+      if (spec.servers && spec.servers.length > 0) {
+        const numericIndex = parseInt(serverIndex, 10);
+        if (!isNaN(numericIndex) && spec.servers[numericIndex]) {
+          return spec.servers[numericIndex].url;
+        }
+      
+        if (typeof serverIndex === 'string') {
+          const server = spec.servers.find(s => 
+            s.description?.toLowerCase().includes(serverIndex.toLowerCase()) ||
+            s.url.includes(serverIndex)
+          );
+          if (server) {
+            return server.url;
+          } else {
+            return serverIndex;
+          }
+        }
+       
+        console.log("dafuk", serverIndex); 
+        // Fallback to first server
+        return spec.servers[0].url;
+      }
+    }
+    
+    // Fallback to localhost
+    return 'http://localhost:3000';
+  } catch (error) {
+    console.warn('Warning: Could not load API URL from openapi.json, using fallback');
+    return 'http://localhost:3000';
+  }
+}
 
+function listAvailableServers() {
+  try {
+    if (fs.existsSync('./doc/openapi.json')) {
+      const spec = JSON.parse(fs.readFileSync('./doc/openapi.json', 'utf8'));
+      
+      if (spec.servers && spec.servers.length > 0) {
+        console.log('\nAvailable servers:');
+        spec.servers.forEach((server, index) => {
+          console.log(`  ${index}: ${server.url} ${server.description ? `(${server.description})` : ''}`);
+        });
+        console.log('\nUse --server=<index> or --server=<description> to select a server\n');
+        return;
+      }
+    }
+    
+    console.error('No servers found in OpenAPI spec\n');
+  } catch (error) {
+    console.error('Could not load server information\n');
+    
+  }
+}
+
+
+async function makeApiCall(endpoint, method = 'GET', params = {}) {
 // Import your Hono app type - adjust the path as needed
 // import type { AppType } from '../server/app.js';
 
 // For now, we'll use a generic approach without the app type
 // You can replace this with: const client = hc<AppType>(API_BASE_URL);
 const client = hc(API_BASE_URL);
-
-async function makeApiCall(endpoint, method = 'GET', params = {}) {
   try {
-    // Parse endpoint parts
     const parts = endpoint.split('/').filter(Boolean);
-    
-    // Build the client call dynamically
+    if (parts.length === 1) {
+       parts[2]= parts[0];
+       parts[0]= 'api';
+       parts[1]= 'v1';
+  
+    } 
     let apiCall = client;
     
-    // Navigate through the endpoint parts
     for (const part of parts) {
       if (part.startsWith(':')) {
-        // This is a path parameter
         const paramName = part.slice(1);
         const paramValue = params[paramName];
         if (!paramValue) {
@@ -66,11 +132,12 @@ async function makeApiCall(endpoint, method = 'GET', params = {}) {
     }
     
     // Make the API call
-    const methodName = `$${method.toLowerCase()}`;
+    const methodName = `$${method.toLowerCase()}`
+console.log(apiCall,methodName,options); 
     const response = await apiCall[methodName](options);
-    
+console.log(response); 
     if (!response.ok) {
-      console.error(`Error ${response.status}: ${response.statusText}`);
+      console.error(`Error ${response.status}: ${response.statusText} ${response.url}`);
       const errorText = await response.text();
       console.error(errorText);
       process.exit(1);
@@ -87,16 +154,32 @@ async function makeApiCall(endpoint, method = 'GET', params = {}) {
 
 // Parse command line arguments with minimist
 const argv = minimist(process.argv.slice(2), {
-  string: ['method'],
+  string: ['method', 'server'],
   alias: {
     m: 'method',
+    s: 'server',
     h: 'help',
-    v: 'version'
+    v: 'version',
+    l: 'list-servers'
   },
+  boolean: [
+    'post', 'put', 'delete'
+  ],
   default: {
-    method: 'GET'
+    method: 'GET',
+    server: 0
   }
 });
+
+  [
+    'post', 'put', 'delete'
+  ].forEach (method => {
+    if (argv[method]) {
+      argv.method=method.toUpperCase();
+    } else {
+      delete argv[method];
+    }
+  });
 
 async function loadEndpointsHelp() {
   try {
@@ -155,15 +238,19 @@ Arguments:
   <endpoint>    API endpoint path (e.g., campaigns, users/:id)
 
 Options:
-  -m, --method  HTTP method (GET, POST, PUT, DELETE) [default: GET]
-  -h, --help    Show help
-  -v, --version Show version
-  --param=val   Any parameter for the API call
+  -m, --method     HTTP method (GET, POST, PUT, DELETE) [default: GET]
+  -s, --server     Server to use (index or description) [default: 0]
+  -l, --list-servers  List available servers from OpenAPI spec
+  -h, --help       Show help
+  -v, --version    Show version
+  --param=val      Any parameter for the API call
 
 Examples:
   ./cli campaigns --name=example --status=active
+  ./cli campaigns --server=1 --name=example
+  ./cli campaigns --server=prod --name=example
   ./cli campaigns/:id --id=123 --name=updated --method=PUT
-  ./cli users --method=POST --name="John Doe" --email=john@example.com
+  ./cli --list-servers
 
 Note: Run 'node doc-generator.js help' for endpoint-specific help
 `);
@@ -198,7 +285,13 @@ Note: Run 'node doc-generator.js help' for endpoint-specific help
   });
 }
 
+if (argv['list-servers']) {
+  listAvailableServers();
+  process.exit(0);
+}
+
 if (argv.help) {
+  listAvailableServers();
   await showHelp(argv._[0]);
   process.exit(0);
 }
@@ -208,6 +301,10 @@ if (argv.version) {
   process.exit(0);
 }
 
+// Get API base URL with server selection
+const API_BASE_URL = getApiBaseUrl(argv.server);
+
+console.log(argv._);
 const endpoint = argv._[0];
 
 if (!endpoint) {
@@ -216,8 +313,8 @@ if (!endpoint) {
   process.exit(1);
 }
 
-// Extract parameters (everything except method, help, version, and the endpoint)
-const { _, method, help, version, ...params } = argv;
+// Extract parameters (everything except method, help, version, server, list-servers and the endpoint)
+const { _, method, help, version, server, 'list-servers': listServers, ...params } = argv;
 
 // Convert string values to appropriate types
 Object.keys(params).forEach(key => {
