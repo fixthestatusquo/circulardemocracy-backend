@@ -100,8 +100,6 @@ CREATE TABLE reply_templates (
     UNIQUE(politician_id, campaign_id, name)
 );
 
-
-
 -- =============================================================================
 -- INDEXES FOR PERFORMANCE
 -- =============================================================================
@@ -136,7 +134,7 @@ BEGIN
     NEW.updated_at = NOW();
     RETURN NEW;
 END;
-$$ language 'plpgsql';
+$$ LANGUAGE plpgsql;
 
 -- Apply update triggers
 CREATE TRIGGER update_politicians_updated_at BEFORE UPDATE ON politicians FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
@@ -153,7 +151,7 @@ $$ LANGUAGE plpgsql IMMUTABLE;
 
 -- Function to clean up old unconfirmed campaigns
 CREATE OR REPLACE FUNCTION cleanup_unconfirmed_campaigns()
-RETURNS INTEGER AS $
+RETURNS INTEGER AS $$
 DECLARE
     deleted_count INTEGER;
 BEGIN
@@ -167,12 +165,12 @@ BEGIN
     GET DIAGNOSTICS deleted_count = ROW_COUNT;
     RETURN deleted_count;
 END;
-$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql;
 
 
 -- Function to find politician by email (including additional_emails)
 CREATE OR REPLACE FUNCTION find_politician_by_email(email_address TEXT)
-RETURNS INTEGER AS $
+RETURNS INTEGER AS $$
 DECLARE
     politician_id INTEGER;
 BEGIN
@@ -186,6 +184,7 @@ BEGIN
     
     RETURN politician_id;
 END;
+$$ LANGUAGE plpgsql;
 
 CREATE OR REPLACE FUNCTION find_similar_campaigns(
   query_embedding vector(1024),
@@ -200,7 +199,6 @@ RETURNS TABLE (
   reference_vector vector(1024),
   similarity float
 )
-LANGUAGE plpgsql
 AS $$
 BEGIN
   RETURN QUERY
@@ -218,6 +216,4 @@ BEGIN
   ORDER BY c.reference_vector <-> query_embedding
   LIMIT match_limit;
 END;
-$$;
-
-$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql;

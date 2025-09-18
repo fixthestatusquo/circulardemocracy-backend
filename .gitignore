@@ -1,1 +1,7 @@
+.dev.vars
+.env
+*.env
 node_modules
+
+# Generated API client
+/api-client/

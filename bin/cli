@@ -1,0 +1,237 @@
+#!/usr/bin/env node
+
+import minimist from 'minimist';
+import { hc } from 'hono/client';
+
+// Configure your API base URL
+const API_BASE_URL = process.env.API_URL || 'http://localhost:3000';
+
+// Import your Hono app type - adjust the path as needed
+// import type { AppType } from '../server/app.js';
+
+// For now, we'll use a generic approach without the app type
+// You can replace this with: const client = hc<AppType>(API_BASE_URL);
+const client = hc(API_BASE_URL);
+
+async function makeApiCall(endpoint, method = 'GET', params = {}) {
+  try {
+    // Parse endpoint parts
+    const parts = endpoint.split('/').filter(Boolean);
+    
+    // Build the client call dynamically
+    let apiCall = client;
+    
+    // Navigate through the endpoint parts
+    for (const part of parts) {
+      if (part.startsWith(':')) {
+        // This is a path parameter
+        const paramName = part.slice(1);
+        const paramValue = params[paramName];
+        if (!paramValue) {
+          throw new Error(`Missing path parameter: ${paramName}`);
+        }
+        apiCall = apiCall[paramValue];
+      } else {
+        apiCall = apiCall[part];
+      }
+    }
+    
+    // Prepare request options
+    const options = {};
+    
+    // Separate path params from query/body params
+    const pathParams = {};
+    const queryParams = {};
+    const bodyParams = {};
+    
+    Object.entries(params).forEach(([key, value]) => {
+      if (endpoint.includes(`:${key}`)) {
+        pathParams[key] = value;
+      } else if (method === 'GET') {
+        queryParams[key] = value;
+      } else {
+        bodyParams[key] = value;
+      }
+    });
+    
+    // Add parameters to options
+    if (Object.keys(pathParams).length > 0) {
+      options.param = pathParams;
+    }
+    if (Object.keys(queryParams).length > 0) {
+      options.query = queryParams;
+    }
+    if (Object.keys(bodyParams).length > 0) {
+      options.json = bodyParams;
+    }
+    
+    // Make the API call
+    const methodName = `$${method.toLowerCase()}`;
+    const response = await apiCall[methodName](options);
+    
+    if (!response.ok) {
+      console.error(`Error ${response.status}: ${response.statusText}`);
+      const errorText = await response.text();
+      console.error(errorText);
+      process.exit(1);
+    }
+    
+    const result = await response.json();
+    console.log(JSON.stringify(result, null, 2));
+    
+  } catch (error) {
+    console.error('API call failed:', error.message);
+    process.exit(1);
+  }
+}
+
+// Parse command line arguments with minimist
+const argv = minimist(process.argv.slice(2), {
+  string: ['method'],
+  alias: {
+    m: 'method',
+    h: 'help',
+    v: 'version'
+  },
+  default: {
+    method: 'GET'
+  }
+});
+
+async function loadEndpointsHelp() {
+  try {
+    const fs = await import('fs');
+    
+    // Try to load generated endpoints data
+    if (fs.existsSync('./endpoints.json')) {
+      const data = fs.readFileSync('./endpoints.json', 'utf8');
+      return JSON.parse(data);
+    }
+    
+    // Try to load OpenAPI spec directly
+    if (fs.existsSync('./doc/openapi.json')) {
+      const spec = JSON.parse(fs.readFileSync('./doc/openapi.json', 'utf8'));
+      return generateEndpointsFromSpec(spec);
+    }
+    
+    return null;
+  } catch (error) {
+    return null;
+  }
+}
+
+function generateEndpointsFromSpec(spec) {
+  const endpoints = [];
+  
+  Object.entries(spec.paths || {}).forEach(([path, methods]) => {
+    Object.entries(methods).forEach(([method, operation]) => {
+      const endpoint = {
+        path,
+        method: method.toUpperCase(),
+        summary: operation.summary || '',
+        parameters: (operation.parameters || []).map(p => ({
+          name: p.name,
+          type: p.schema?.type || 'string',
+          in: p.in,
+          required: p.required || false,
+          description: p.description || ''
+        }))
+      };
+      endpoints.push(endpoint);
+    });
+  });
+  
+  return endpoints;
+}
+
+async function showHelp(filter = '') {
+  const endpoints = await loadEndpointsHelp();
+  
+  if (!endpoints) {
+    console.log(`
+Usage: ./cli <endpoint> [options]
+
+Arguments:
+  <endpoint>    API endpoint path (e.g., campaigns, users/:id)
+
+Options:
+  -m, --method  HTTP method (GET, POST, PUT, DELETE) [default: GET]
+  -h, --help    Show help
+  -v, --version Show version
+  --param=val   Any parameter for the API call
+
+Examples:
+  ./cli campaigns --name=example --status=active
+  ./cli campaigns/:id --id=123 --name=updated --method=PUT
+  ./cli users --method=POST --name="John Doe" --email=john@example.com
+
+Note: Run 'node doc-generator.js help' for endpoint-specific help
+`);
+    return;
+  }
+  
+  console.log('\nAvailable endpoints:\n');
+  
+  const filtered = filter 
+    ? endpoints.filter(e => 
+        e.path.includes(filter) || 
+        e.method.includes(filter.toUpperCase()) ||
+        e.summary.toLowerCase().includes(filter.toLowerCase())
+      )
+    : endpoints;
+  
+  filtered.forEach(endpoint => {
+    console.log(`${endpoint.method} ${endpoint.path}`);
+    if (endpoint.summary) {
+      console.log(`  ${endpoint.summary}`);
+    }
+    
+    if (endpoint.parameters.length > 0) {
+      console.log('  Parameters:');
+      endpoint.parameters.forEach(param => {
+        const req = param.required ? '(required)' : '(optional)';
+        console.log(`    --${param.name} (${param.type}, ${param.in}) ${req}`);
+      });
+    }
+    
+    console.log('');
+  });
+}
+
+if (argv.help) {
+  await showHelp(argv._[0]);
+  process.exit(0);
+}
+
+if (argv.version) {
+  console.log('1.0.0');
+  process.exit(0);
+}
+
+const endpoint = argv._[0];
+
+if (!endpoint) {
+  console.error('Error: Missing endpoint argument');
+  showHelp();
+  process.exit(1);
+}
+
+// Extract parameters (everything except method, help, version, and the endpoint)
+const { _, method, help, version, ...params } = argv;
+
+// Convert string values to appropriate types
+Object.keys(params).forEach(key => {
+  const value = params[key];
+  if (typeof value === 'string') {
+    if (value === 'true') {
+      params[key] = true;
+    } else if (value === 'false') {
+      params[key] = false;
+    } else if (!isNaN(value) && !isNaN(parseFloat(value)) && value !== '') {
+      params[key] = parseFloat(value);
+    }
+  }
+});
+
+// Make the API call
+makeApiCall(endpoint, method.toUpperCase(), params);

@@ -113,6 +113,49 @@ Integration with mail server MTA hooks for direct email processing with automati
 - Email volume by day/campaign
 - Bounce and delivery tracking
 
+## Authentication
+
+Certain endpoints, such as `/api/v1/campaigns/stats`, require authentication. This API uses JSON Web Tokens (JWTs) issued by Supabase Auth.
+
+To access protected endpoints, clients must include a valid JWT in the `Authorization` header as a Bearer token.
+
+**Example Request:**
+
+```
+GET /api/v1/campaigns/stats
+Host: <your-worker-url>
+Authorization: Bearer <your-supabase-jwt>
+```
+
+### Obtaining a JWT
+
+On a client-side application (e.g., a React or Vue dashboard), you would use the Supabase client library (`@supabase/supabase-js`) to handle user login. After a user successfully signs in, you can retrieve the JWT from the user's session.
+
+```javascript
+// Example using supabase-js on a frontend
+import { createClient } from '@supabase/supabase-js'
+
+const supabase = createClient(YOUR_SUPABASE_URL, YOUR_SUPABASE_ANON_KEY)
+
+// After user logs in...
+const { data, error } = await supabase.auth.signInWithPassword({
+  email: 'user@example.com',
+  password: 'password',
+})
+
+if (data.session) {
+  const jwt = data.session.access_token
+  
+  // Now use this JWT to make requests to the protected API endpoints
+  fetch('https://<your-worker-url>/api/v1/campaigns/stats', {
+    headers: {
+      Authorization: `Bearer ${jwt}`
+    }
+  })
+}
+```
+
+
 ## Getting Started
 
 This guide will walk you through setting up the project for local development, including running the database and the API server.

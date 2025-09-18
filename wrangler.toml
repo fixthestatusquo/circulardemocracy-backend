@@ -2,6 +2,36 @@ name = "circulardemocracy-backend"
 main = "src/index.ts"
 compatibility_date = "2025-09-17"
 
-# Enable the Workers AI binding
-[ai]
+[env.production]
+name = "circular-democracy-prod"
+
+# Environment variables (non-secret)
+[env.production.vars]
+API_DOMAIN = "api.circulardemocracy.org"
+STALWART_DOMAIN = "mail.circulardemocracy.org"
+ENVIRONMENT = "production"
+
+# Custom domain routes
+[[env.production.routes]]
+pattern = "api.circulardemocracy.org"
+custom_domain = true
+
+[env.production.ai]
 binding = "AI"
+
+
+[env.staging]
+name = "circular-democracy-staging"
+
+[env.staging.vars]
+API_DOMAIN = "api-staging.circulardemocracy.org"
+STALWART_DOMAIN = "mail.circulardemocracy.org"
+ENVIRONMENT = "staging"
+
+[[env.staging.routes]]
+pattern = "api-staging.circulardemocracy.org"
+custom_domain = true
+
+[env.staging.ai]
+binding = "AI"
+
