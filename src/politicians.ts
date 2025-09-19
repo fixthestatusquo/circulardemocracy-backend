@@ -44,8 +44,10 @@ const listPoliticiansRoute = createRoute({
 })
 
 app.openapi(listPoliticiansRoute, authMiddleware, async c => {
+console.log ("aaa");
   const db = c.get('db') as DatabaseClient
   const data = await db.request<any[]>('/politicians?select=id,name,email,party,country,region,position,active')
+console.log("data XX",data);
   return c.json(data)
 })
 

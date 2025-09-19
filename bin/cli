@@ -73,20 +73,24 @@ function listAvailableServers() {
 
 
 async function makeApiCall(endpoint, method = 'GET', params = {}) {
-// Import your Hono app type - adjust the path as needed
-// import type { AppType } from '../server/app.js';
-
-// For now, we'll use a generic approach without the app type
-// You can replace this with: const client = hc<AppType>(API_BASE_URL);
-const client = hc(API_BASE_URL);
-  try {
-    const parts = endpoint.split('/').filter(Boolean);
-    if (parts.length === 1) {
-       parts[2]= parts[0];
-       parts[0]= 'api';
-       parts[1]= 'v1';
+  const token = process.env.SUPABASE_ACCESS_TOKEN || params.token;
   
-    } 
+  // Import your Hono app type - adjust the path as needed
+  // import type { AppType } from '../server/app.js';
+  
+  // For now, we'll use a generic approach without the app type
+  // You can replace this with: const client = hc<AppType>(API_BASE_URL);
+  const client = hc(API_BASE_URL, {
+    headers: {
+      ...token && { Authorization: `Bearer ${token}` },
+    },
+  });
+
+  try {
+    if (!endpoint.startsWith ('/api/v1/')) 
+       endpoint = 'api/v1' + endpoint;
+
+    const parts = endpoint.split('/').filter(Boolean);
     let apiCall = client;
     
     for (const part of parts) {
@@ -135,11 +139,11 @@ const client = hc(API_BASE_URL);
     const methodName = `$${method.toLowerCase()}`
 console.log(apiCall,methodName,options); 
     const response = await apiCall[methodName](options);
-console.log(response); 
+    console.log(response);
     if (!response.ok) {
       console.error(`Error ${response.status}: ${response.statusText} ${response.url}`);
-      const errorText = await response.text();
-      console.error(errorText);
+      //const errorText = await response.text();
+      //console.error(errorText);
       process.exit(1);
     }
     
@@ -147,7 +151,7 @@ console.log(response);
     console.log(JSON.stringify(result, null, 2));
     
   } catch (error) {
-    console.error('API call failed:', error.message);
+    console.error('API call failed:', error);
     process.exit(1);
   }
 }
@@ -268,7 +272,7 @@ Note: Run 'node doc-generator.js help' for endpoint-specific help
     : endpoints;
   
   filtered.forEach(endpoint => {
-    console.log(`${endpoint.method} ${endpoint.path}`);
+    console.log(`--${endpoint.method.toLowerCase()} ${endpoint.path}`);
     if (endpoint.summary) {
       console.log(`  ${endpoint.summary}`);
     }
