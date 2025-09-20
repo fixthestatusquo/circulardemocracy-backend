@@ -88,7 +88,7 @@ async function makeApiCall(endpoint, method = 'GET', params = {}) {
 
   try {
     if (!endpoint.startsWith ('/api/v1/')) 
-       endpoint = 'api/v1' + endpoint;
+       endpoint = 'api/v1/' + endpoint;
 
     const parts = endpoint.split('/').filter(Boolean);
     let apiCall = client;
