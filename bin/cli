@@ -3,6 +3,141 @@
 import minimist from 'minimist';
 import { hc } from 'hono/client';
 import fs from 'fs';
+import { createClient } from '@supabase/supabase-js';
+import * as readline from 'readline';
+import * as path from 'path';
+import * as os from 'os';
+
+const CACHE_DIR = path.join(os.homedir(), '.cache', 'circulardemocracy-cli');
+const CONFIG_PATH = path.join(CACHE_DIR, 'session.json');
+
+// Ensure cache directory exists
+fs.mkdirSync(CACHE_DIR, { recursive: true });
+
+
+// =============================================================================
+// AUTHENTICATION
+// =============================================================================
+
+function getSupabase() {
+  const { SUPABASE_URL, SUPABASE_ANON_KEY } = process.env;
+  if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+    console.error('Error: SUPABASE_URL and SUPABASE_ANON_KEY environment variables must be set.');
+    process.exit(1);
+  }
+  return createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+}
+
+async function login() {
+  let email = argv.email;
+  let password = argv.password;
+
+  if (!email || !password) {
+    const rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout
+    });
+
+    if (!email) {
+      email = await new Promise(resolve => rl.question('Email: ', resolve));
+    }
+
+    if (!password) {
+      password = await new Promise(resolve => {
+        process.stdout.write('Password: ');
+        let pass = '';
+        const onData = (char) => {
+          char = char.toString();
+          if (char === '\n' || char === '\r' || char === '\u0004') {
+            process.stdin.removeListener('data', onData);
+            process.stdin.setRawMode(false);
+            process.stdin.pause();
+            resolve(pass);
+          } else if (char === '\u0003') { // Ctrl-C
+            process.exit(1);
+          } else {
+            pass += char;
+          }
+        };
+        process.stdin.setRawMode(true);
+        process.stdin.resume();
+        process.stdin.on('data', onData);
+      });
+    }
+    rl.close();
+  }
+
+  try {
+    const API_BASE_URL = getApiBaseUrl(argv.server);
+    const client = hc(API_BASE_URL);
+    const apiCall = client.api.v1.login;
+
+    const response = await apiCall.$post({ json: { email, password } });
+
+    if (!response.ok) {
+      let errorMsg = response.statusText;
+      try {
+        const errorData = await response.json();
+        errorMsg = errorData.error || errorMsg;
+      } catch (e) {
+        // Ignore if response is not json
+      }
+      console.error(`Login failed: ${errorMsg}`);
+      process.exit(1);
+    }
+
+    const session = await response.json();
+    fs.writeFileSync(CONFIG_PATH, JSON.stringify(session, null, 2));
+    console.log('Logged in successfully.');
+
+  } catch (error) {
+    console.error('Login failed:', error.message);
+    process.exit(1);
+  }
+}
+
+async function logout() {
+  if (fs.existsSync(CONFIG_PATH)) {
+    fs.unlinkSync(CONFIG_PATH);
+  }
+  console.log('Logged out.');
+}
+
+function loadSession() {
+  if (fs.existsSync(CONFIG_PATH)) {
+    const configData = fs.readFileSync(CONFIG_PATH, 'utf8');
+    return JSON.parse(configData);
+  }
+  return null;
+}
+
+async function getAuthToken() {
+  let session = loadSession();
+  if (!session) {
+    return null;
+  }
+
+  const tokenExpiresAt = session.expires_at * 1000;
+  if (Date.now() > tokenExpiresAt) {
+    console.log('Access token expired, refreshing...');
+    const supabase = getSupabase();
+    const { data, error } = await supabase.auth.refreshSession({ refresh_token: session.refresh_token });
+    if (error) {
+      console.error('Failed to refresh token. Please log in again.');
+      logout();
+      return null;
+    }
+    if (data.session) {
+      fs.writeFileSync(CONFIG_PATH, JSON.stringify(data.session, null, 2));
+      session = data.session;
+      console.log('Token refreshed.');
+    } else {
+      return null;
+    }
+  }
+
+  return session.access_token;
+}
 
 // Load API base URL from OpenAPI spec
 function getApiBaseUrl(serverIndex = 0) {
@@ -11,20 +146,20 @@ function getApiBaseUrl(serverIndex = 0) {
     if (process.env.API_URL) {
       return process.env.API_URL;
     }
-    
+
     // Try to load from OpenAPI spec
     if (fs.existsSync('./doc/openapi.json')) {
       const spec = JSON.parse(fs.readFileSync('./doc/openapi.json', 'utf8'));
-      
+
       // Get server URL by index or description from the OpenAPI spec
       if (spec.servers && spec.servers.length > 0) {
         const numericIndex = parseInt(serverIndex, 10);
         if (!isNaN(numericIndex) && spec.servers[numericIndex]) {
           return spec.servers[numericIndex].url;
         }
-      
+
         if (typeof serverIndex === 'string') {
-          const server = spec.servers.find(s => 
+          const server = spec.servers.find(s =>
             s.description?.toLowerCase().includes(serverIndex.toLowerCase()) ||
             s.url.includes(serverIndex)
           );
@@ -34,13 +169,13 @@ function getApiBaseUrl(serverIndex = 0) {
             return serverIndex;
           }
         }
-       
-        console.log("dafuk", serverIndex); 
+
+        console.log("dafuk", serverIndex);
         // Fallback to first server
         return spec.servers[0].url;
       }
     }
-    
+
     // Fallback to localhost
     return 'http://localhost:3000';
   } catch (error) {
@@ -53,7 +188,7 @@ function listAvailableServers() {
   try {
     if (fs.existsSync('./doc/openapi.json')) {
       const spec = JSON.parse(fs.readFileSync('./doc/openapi.json', 'utf8'));
-      
+
       if (spec.servers && spec.servers.length > 0) {
         console.log('\nAvailable servers:');
         spec.servers.forEach((server, index) => {
@@ -63,21 +198,23 @@ function listAvailableServers() {
         return;
       }
     }
-    
+
     console.error('No servers found in OpenAPI spec\n');
   } catch (error) {
     console.error('Could not load server information\n');
-    
+
   }
 }
 
 
 async function makeApiCall(endpoint, method = 'GET', params = {}) {
-  const token = process.env.SUPABASE_ACCESS_TOKEN || params.token;
-  
+  // Token precedence: --token > env var > cached session
+  const explicitToken = params.token || process.env.SUPABASE_ACCESS_TOKEN;
+  const token = explicitToken || await getAuthToken();
+
   // Import your Hono app type - adjust the path as needed
   // import type { AppType } from '../server/app.js';
-  
+
   // For now, we'll use a generic approach without the app type
   // You can replace this with: const client = hc<AppType>(API_BASE_URL);
   const client = hc(API_BASE_URL, {
@@ -87,12 +224,12 @@ async function makeApiCall(endpoint, method = 'GET', params = {}) {
   });
 
   try {
-    if (!endpoint.startsWith ('/api/v1/')) 
-       endpoint = 'api/v1/' + endpoint;
+    if (!endpoint.startsWith('/api/v1/'))
+      endpoint = 'api/v1/' + endpoint;
 
     const parts = endpoint.split('/').filter(Boolean);
     let apiCall = client;
-    
+
     for (const part of parts) {
       if (part.startsWith(':')) {
         const paramName = part.slice(1);
@@ -105,15 +242,15 @@ async function makeApiCall(endpoint, method = 'GET', params = {}) {
         apiCall = apiCall[part];
       }
     }
-    
+
     // Prepare request options
     const options = {};
-    
+
     // Separate path params from query/body params
     const pathParams = {};
     const queryParams = {};
     const bodyParams = {};
-    
+
     Object.entries(params).forEach(([key, value]) => {
       if (endpoint.includes(`:${key}`)) {
         pathParams[key] = value;
@@ -123,7 +260,7 @@ async function makeApiCall(endpoint, method = 'GET', params = {}) {
         bodyParams[key] = value;
       }
     });
-    
+
     // Add parameters to options
     if (Object.keys(pathParams).length > 0) {
       options.param = pathParams;
@@ -134,10 +271,10 @@ async function makeApiCall(endpoint, method = 'GET', params = {}) {
     if (Object.keys(bodyParams).length > 0) {
       options.json = bodyParams;
     }
-    
+
     // Make the API call
     const methodName = `$${method.toLowerCase()}`
-console.log(apiCall,methodName,options); 
+    console.log("calling " + methodName);
     const response = await apiCall[methodName](options);
     console.log(response);
     if (!response.ok) {
@@ -146,10 +283,10 @@ console.log(apiCall,methodName,options);
       //console.error(errorText);
       process.exit(1);
     }
-    
+
     const result = await response.json();
     console.log(JSON.stringify(result, null, 2));
-    
+
   } catch (error) {
     console.error('API call failed:', error);
     process.exit(1);
@@ -175,32 +312,32 @@ const argv = minimist(process.argv.slice(2), {
   }
 });
 
-  [
-    'post', 'put', 'delete'
-  ].forEach (method => {
-    if (argv[method]) {
-      argv.method=method.toUpperCase();
-    } else {
-      delete argv[method];
-    }
-  });
+[
+  'post', 'put', 'delete'
+].forEach(method => {
+  if (argv[method]) {
+    argv.method = method.toUpperCase();
+  } else {
+    delete argv[method];
+  }
+});
 
 async function loadEndpointsHelp() {
   try {
     const fs = await import('fs');
-    
+
     // Try to load generated endpoints data
     if (fs.existsSync('./endpoints.json')) {
       const data = fs.readFileSync('./endpoints.json', 'utf8');
       return JSON.parse(data);
     }
-    
+
     // Try to load OpenAPI spec directly
     if (fs.existsSync('./doc/openapi.json')) {
       const spec = JSON.parse(fs.readFileSync('./doc/openapi.json', 'utf8'));
       return generateEndpointsFromSpec(spec);
     }
-    
+
     return null;
   } catch (error) {
     return null;
@@ -209,7 +346,7 @@ async function loadEndpointsHelp() {
 
 function generateEndpointsFromSpec(spec) {
   const endpoints = [];
-  
+
   Object.entries(spec.paths || {}).forEach(([path, methods]) => {
     Object.entries(methods).forEach(([method, operation]) => {
       const endpoint = {
@@ -227,13 +364,13 @@ function generateEndpointsFromSpec(spec) {
       endpoints.push(endpoint);
     });
   });
-  
+
   return endpoints;
 }
 
 async function showHelp(filter = '') {
   const endpoints = await loadEndpointsHelp();
-  
+
   if (!endpoints) {
     console.log(`
 Usage: ./cli <endpoint> [options]
@@ -260,23 +397,23 @@ Note: Run 'node doc-generator.js help' for endpoint-specific help
 `);
     return;
   }
-  
+
   console.log('\nAvailable endpoints:\n');
-  
-  const filtered = filter 
-    ? endpoints.filter(e => 
-        e.path.includes(filter) || 
-        e.method.includes(filter.toUpperCase()) ||
-        e.summary.toLowerCase().includes(filter.toLowerCase())
-      )
+
+  const filtered = filter
+    ? endpoints.filter(e =>
+      e.path.includes(filter) ||
+      e.method.includes(filter.toUpperCase()) ||
+      e.summary.toLowerCase().includes(filter.toLowerCase())
+    )
     : endpoints;
-  
+
   filtered.forEach(endpoint => {
     console.log(`--${endpoint.method.toLowerCase()} ${endpoint.path}`);
     if (endpoint.summary) {
       console.log(`  ${endpoint.summary}`);
     }
-    
+
     if (endpoint.parameters.length > 0) {
       console.log('  Parameters:');
       endpoint.parameters.forEach(param => {
@@ -284,19 +421,21 @@ Note: Run 'node doc-generator.js help' for endpoint-specific help
         console.log(`    --${param.name} (${param.type}, ${param.in}) ${req}`);
       });
     }
-    
+
     console.log('');
   });
 }
+
+const command = argv._[0];
 
 if (argv['list-servers']) {
   listAvailableServers();
   process.exit(0);
 }
 
-if (argv.help) {
+if (argv.help || !command) {
   listAvailableServers();
-  await showHelp(argv._[0]);
+  await showHelp(command);
   process.exit(0);
 }
 
@@ -305,11 +444,21 @@ if (argv.version) {
   process.exit(0);
 }
 
+if (command === 'login') {
+  await login();
+  process.exit(0);
+}
+
+if (command === 'logout') {
+  await logout();
+  process.exit(0);
+}
+
+
 // Get API base URL with server selection
 const API_BASE_URL = getApiBaseUrl(argv.server);
 
-console.log(argv._);
-const endpoint = argv._[0];
+const endpoint = command;
 
 if (!endpoint) {
   console.error('Error: Missing endpoint argument');

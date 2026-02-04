@@ -8,6 +8,7 @@ import messagesApp from './messages'
 import campaignsApp from './campaigns'
 import politiciansApp from './politicians'
 import replyTemplatesApp from './reply_templates'
+import loginApp from './login'
 
 // Define types for env and app
 interface Env {
@@ -35,6 +36,7 @@ app.route('/', messagesApp)
 app.route('/', campaignsApp)
 app.route('/', politiciansApp)
 app.route('/', replyTemplatesApp)
+app.route('/', loginApp)
 
 
 // Health check for the entire API

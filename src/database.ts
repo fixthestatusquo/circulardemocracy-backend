@@ -49,10 +49,12 @@ export class DatabaseClient {
   private supabase: SupabaseClient;
 
   constructor(config: SupabaseConfig) {
+
     this.supabase = createClient(config.url, config.key);
   }
 
   async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+console.log ("supab"+endpoint);
     const query = this.supabase.from(endpoint).select('*');
 
     const { data, error } = await query;
