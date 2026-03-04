@@ -1,8 +1,8 @@
-
 import { Hono } from 'hono'
 import apiApp from './api'
 import stalwartApp from './stalwart'
 
+console.log('start')
 const app = new Hono()
 
 // Mount the stalwart app under the /stalwart route
