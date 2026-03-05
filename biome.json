@@ -47,7 +47,22 @@
       "bracketSameLine": false
     }
   },
+<<<<<<< HEAD
   "css": {
+=======
+  "overrides": [
+    {
+      "include": ["test/database.test.ts"],
+      "javascript": {
+        "formatter": {
+          "quoteStyle": "double",
+          "semicolons": "always"
+        }
+      }
+    }
+  ],
+  "json": {
+>>>>>>> de90acd (restore double quote and semi colon and trailing coma)
     "formatter": {
       "quoteStyle": "double"
     }
