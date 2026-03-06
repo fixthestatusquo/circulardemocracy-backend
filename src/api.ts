@@ -30,7 +30,7 @@ app.use(
   "/*",
   cors({
     origin: ["https://*.circulardemocracy.org", "http://localhost:*"],
-    allowHeaders: ["Content-Type", "Authorization", "x-api-key"],
+    allowHeaders: ["Content-Type", "Authorization"],
     allowMethods: ["POST", "GET", "OPTIONS"],
   }),
 );
@@ -61,6 +61,11 @@ app.get("/health", (c) => {
     timestamp: new Date().toISOString(),
     version: "1.0.0",
   });
+});
+
+app.openAPIRegistry.registerComponent("securitySchemes", "bearerAuth", {
+  type: "http",
+  scheme: "bearer",
 });
 
 // OpenAPI documentation for all combined routes

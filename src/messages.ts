@@ -82,9 +82,6 @@ const messageRoute = createRoute({
   method: "post",
   path: "/api/v1/messages",
   request: {
-    headers: z.object({
-      "x-api-key": z.string().describe("API Key for authentication"),
-    }),
     body: {
       content: {
         "application/json": {
@@ -93,6 +90,11 @@ const messageRoute = createRoute({
       },
     },
   },
+  security: [
+    {
+      bearerAuth: [],
+    },
+  ],
   responses: {
     200: {
       content: {

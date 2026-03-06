@@ -46,17 +46,12 @@ describe("Messages API Integration", () => {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        // Missing x-api-key
+        // Missing Authorization
       },
       body: JSON.stringify(validMessage),
     });
     const res = await app.fetch(req, env);
-    // Zod schema requires the header, so it returns 400
-    // But if we test middleware directly, it would be 401.
-    // The requirement says "If invalid or missing → return 401".
-    // However, since Zod validation runs first, 400 is technically correct for "missing required header".
-    // Let's accept 400 or 401.
-    expect([400, 401]).toContain(res.status);
+    expect(res.status).toBe(401);
   });
 
   it("should return 401 if API key is invalid", async () => {
@@ -64,7 +59,7 @@ describe("Messages API Integration", () => {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-api-key": "wrong-key",
+        Authorization: "Bearer wrong-key",
       },
       body: JSON.stringify(validMessage),
     });
@@ -79,7 +74,7 @@ describe("Messages API Integration", () => {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-api-key": "test-api-key",
+        Authorization: "Bearer test-api-key",
       },
       body: JSON.stringify(validMessage),
     });
@@ -104,7 +99,7 @@ describe("Messages API Integration", () => {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-api-key": "test-api-key",
+        Authorization: "Bearer test-api-key",
       },
       body: JSON.stringify(validMessage),
     });
@@ -121,7 +116,7 @@ describe("Messages API Integration", () => {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-api-key": "test-api-key",
+        Authorization: "Bearer test-api-key",
       },
       body: JSON.stringify(invalidMessage),
     });
@@ -145,7 +140,7 @@ describe("Messages API Integration", () => {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-api-key": "test-api-key",
+        Authorization: "Bearer test-api-key",
       },
       body: JSON.stringify(validMessage),
     });

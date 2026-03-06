@@ -42,16 +42,17 @@ export interface ApiConfig<SecurityDataType = unknown> {
   baseApiParams?: Omit<RequestParams, "baseUrl" | "cancelToken" | "signal">;
   securityWorker?: (
     securityData: SecurityDataType | null,
-  ) => Promise<RequestParams | undefined> | RequestParams | undefined;
+  ) => Promise<RequestParams | void> | RequestParams | void;
   customFetch?: typeof fetch;
 }
 
-export interface HttpResponse<D, E = unknown> extends Response {
+export interface HttpResponse<D extends unknown, E extends unknown = unknown>
+  extends Response {
   data: D;
   error: E;
 }
 
-type CancelToken = symbol | string | number;
+type CancelToken = Symbol | string | number;
 
 export enum ContentType {
   Json = "application/json",
@@ -62,7 +63,7 @@ export enum ContentType {
 }
 
 export class HttpClient<SecurityDataType = unknown> {
-  public baseUrl = "https://api.circulardemocracy.org";
+  public baseUrl: string = "https://api.circulardemocracy.org";
   private securityData: SecurityDataType | null = null;
   private securityWorker?: ApiConfig<SecurityDataType>["securityWorker"];
   private abortControllers = new Map<CancelToken, AbortController>();
@@ -162,7 +163,7 @@ export class HttpClient<SecurityDataType = unknown> {
       headers: {
         ...(this.baseApiParams.headers || {}),
         ...(params1.headers || {}),
-        ...(params2?.headers || {}),
+        ...((params2 && params2.headers) || {}),
       },
     };
   }
@@ -258,9 +259,7 @@ export class HttpClient<SecurityDataType = unknown> {
         this.abortControllers.delete(cancelToken);
       }
 
-      if (!response.ok) {
-        throw data;
-      }
+      if (!response.ok) throw data;
       return data;
     });
   };
@@ -273,7 +272,9 @@ export class HttpClient<SecurityDataType = unknown> {
  *
  * API for processing citizen messages to politicians
  */
-export class Api<SecurityDataType> extends HttpClient<SecurityDataType> {
+export class Api<
+  SecurityDataType extends unknown,
+> extends HttpClient<SecurityDataType> {
   api = {
     /**
      * @description Receives a citizen message, classifies it by campaign, and stores it for politician response
@@ -282,6 +283,7 @@ export class Api<SecurityDataType> extends HttpClient<SecurityDataType> {
      * @name V1MessagesCreate
      * @summary Process incoming citizen message
      * @request POST:/api/v1/messages
+     * @secure
      */
     v1MessagesCreate: (
       data: {
@@ -378,9 +380,10 @@ export class Api<SecurityDataType> extends HttpClient<SecurityDataType> {
             errors?: string[];
           }
       >({
-        path: "/api/v1/messages",
+        path: `/api/v1/messages`,
         method: "POST",
         body: data,
+        secure: true,
         type: ContentType.Json,
         format: "json",
         ...params,
@@ -406,7 +409,7 @@ export class Api<SecurityDataType> extends HttpClient<SecurityDataType> {
         }[],
         any
       >({
-        path: "/api/v1/campaigns",
+        path: `/api/v1/campaigns`,
         method: "GET",
         secure: true,
         format: "json",
@@ -445,11 +448,40 @@ export class Api<SecurityDataType> extends HttpClient<SecurityDataType> {
         },
         any
       >({
-        path: "/api/v1/campaigns",
+        path: `/api/v1/campaigns`,
         method: "POST",
         body: data,
         secure: true,
         type: ContentType.Json,
+        format: "json",
+        ...params,
+      }),
+
+    /**
+     * No description
+     *
+     * @tags Campaigns, Statistics
+     * @name V1CampaignsStatsList
+     * @summary Get campaign statistics
+     * @request GET:/api/v1/campaigns/stats
+     * @secure
+     */
+    v1CampaignsStatsList: (params: RequestParams = {}) =>
+      this.request<
+        {
+          campaigns: {
+            id: number;
+            name: string;
+            message_count: number;
+            recent_count: number;
+            avg_confidence?: number;
+          }[];
+        },
+        any
+      >({
+        path: `/api/v1/campaigns/stats`,
+        method: "GET",
+        secure: true,
         format: "json",
         ...params,
       }),
@@ -484,35 +516,6 @@ export class Api<SecurityDataType> extends HttpClient<SecurityDataType> {
     /**
      * No description
      *
-     * @tags Campaigns, Statistics
-     * @name V1CampaignsStatsList
-     * @summary Get campaign statistics
-     * @request GET:/api/v1/campaigns/stats
-     * @secure
-     */
-    v1CampaignsStatsList: (params: RequestParams = {}) =>
-      this.request<
-        {
-          campaigns: {
-            id: number;
-            name: string;
-            message_count: number;
-            recent_count: number;
-            avg_confidence?: number;
-          }[];
-        },
-        any
-      >({
-        path: "/api/v1/campaigns/stats",
-        method: "GET",
-        secure: true,
-        format: "json",
-        ...params,
-      }),
-
-    /**
-     * No description
-     *
      * @tags Politicians
      * @name V1PoliticiansList
      * @request GET:/api/v1/politicians
@@ -533,7 +536,7 @@ export class Api<SecurityDataType> extends HttpClient<SecurityDataType> {
         }[],
         any
       >({
-        path: "/api/v1/politicians",
+        path: `/api/v1/politicians`,
         method: "GET",
         secure: true,
         format: "json",
@@ -591,7 +594,7 @@ export class Api<SecurityDataType> extends HttpClient<SecurityDataType> {
         }[],
         any
       >({
-        path: "/api/v1/reply-templates",
+        path: `/api/v1/reply-templates`,
         method: "GET",
         secure: true,
         format: "json",
@@ -628,7 +631,7 @@ export class Api<SecurityDataType> extends HttpClient<SecurityDataType> {
         },
         any
       >({
-        path: "/api/v1/reply-templates",
+        path: `/api/v1/reply-templates`,
         method: "POST",
         body: data,
         secure: true,
@@ -661,6 +664,46 @@ export class Api<SecurityDataType> extends HttpClient<SecurityDataType> {
         path: `/api/v1/reply-templates/${id}`,
         method: "GET",
         secure: true,
+        format: "json",
+        ...params,
+      }),
+
+    /**
+     * No description
+     *
+     * @tags Auth
+     * @name V1LoginCreate
+     * @request POST:/api/v1/login
+     */
+    v1LoginCreate: (
+      data: {
+        /** @format email */
+        email: string;
+        password: string;
+      },
+      params: RequestParams = {},
+    ) =>
+      this.request<
+        {
+          access_token: string;
+          token_type: string;
+          expires_in: number;
+          expires_at: number;
+          refresh_token: string;
+          user: {
+            id: string;
+            /** @format email */
+            email: string;
+          };
+        },
+        {
+          error: string;
+        }
+      >({
+        path: `/api/v1/login`,
+        method: "POST",
+        body: data,
+        type: ContentType.Json,
         format: "json",
         ...params,
       }),

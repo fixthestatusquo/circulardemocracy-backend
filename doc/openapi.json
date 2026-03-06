@@ -16,28 +16,28 @@
     }
   ],
   "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    },
     "schemas": {},
     "parameters": {}
   },
   "paths": {
     "/api/v1/messages": {
       "post": {
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "tags": [
           "Messages"
         ],
         "summary": "Process incoming citizen message",
         "description": "Receives a citizen message, classifies it by campaign, and stores it for politician response",
-        "parameters": [
-          {
-            "schema": {
-              "type": "string",
-              "description": "API Key for authentication"
-            },
-            "required": true,
-            "name": "x-api-key",
-            "in": "header"
-          }
-        ],
         "requestBody": {
           "content": {
             "application/json": {
