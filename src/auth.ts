@@ -14,7 +14,7 @@ export const authMiddleware: MiddlewareHandler<any> = createMiddleware(
       return c.json({ error: "Auth not configured" }, 500);
     }
 
-    const jwks_uri = `${env.SUPABASE_URL}/auth/v1/.well-known/jwks.json`;
+    const jwks_uri = `${c.env.SUPABASE_URL}/auth/v1/.well-known/jwks.json`;
 
     const auth = jwk({
       jwks_uri: jwks_uri,
