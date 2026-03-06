@@ -66,7 +66,6 @@ app.get("/health", (c) => {
 app.openAPIRegistry.registerComponent("securitySchemes", "bearerAuth", {
   type: "http",
   scheme: "bearer",
-  bearerFormat: "JWT",
 });
 
 // OpenAPI documentation for all combined routes
