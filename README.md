@@ -10,26 +10,27 @@ Many citizens write to their elected representatives as part of campaigns organi
 
 In order to be able let the politicians understand the size of each campaign and their volume of activity at any given time, and to be able to reply automatically (at least when that's the same pre-written messages), we first need to classify these emails
 
-For privacy reasons, we are trying to minimise the personal information of each supporter to the strict minimum possible. For instance, the AI model used to classify a message won't use the name or email of the supporter to be able to decide what is the campaign (if any) that enpowered the supporter to write, so it shouldn't have access to these data. 
+For privacy reasons, we are trying to minimise the personal information of each supporter to the strict minimum possible. For instance, the AI model used to classify a message won't use the name or email of the supporter to be able to decide what is the campaign (if any) that enpowered the supporter to write, so it shouldn't have access to these data.
 
 For performance reasons, it should be noted that it's quite common that the same supporter will send almost identical emails (may be with the first line "Dear representative Smith", "Dear representative Doe" being different), and in principle, there is no need classify each of them, or at least avoid overfitting the model because of these duplicates.
-
-
 
 ## Key Features
 
 ### 🔄 Multi-Channel Message Processing
+
 - **REST API**: Integration with NGO campaign tools and citizen engagement platforms
 - **Email Integration**: Direct email processing via Stalwart mail server with MTA hooks
 - **Unified Processing**: All messages flow through the same classification and routing system
 
 ### 🤖 Intelligent Message Classification
+
 - **AI-Powered Clustering**: Uses BGE-M3 embeddings via Cloudflare Workers AI for semantic message analysis
 - **Campaign Detection**: Automatically identifies which political campaign or issue a message relates to
 - **Multi-Language Support**: Processes messages in multiple languages with sentiment analysis capabilities
 - **Duplicate Detection**: Handles multiple messages from the same citizen with spam prevention
 
 ### 📊 Analytics & Insights Dashboard
+
 - **Campaign Metrics**: Track number of actions and engagement per campaign
 - **Activity Trends**: Monitor active campaigns with 7-day activity windows
 - **Email Analytics**: Detailed statistics grouped by day and campaign
@@ -37,12 +38,14 @@ For performance reasons, it should be noted that it's quite common that the same
 - **Population-Adjusted Metrics**: Meaningful comparisons accounting for constituency size differences
 
 ### 💌 Automated Response System
+
 - **Template Management**: Politicians can create custom reply templates for different campaigns
 - **Scheduled Responses**: Flexible timing options (immediate, office hours, before votes)
 - **Personalization**: Support for headers, contact details, and politician branding
 - **Delivery Tracking**: Monitor when and what was sent to each supporter
 
 ### 🛡️ Privacy-First Architecture
+
 - **Two-Tier Storage System**:
   - **Long-term**: Analytics data and model training (anonymized)
   - **Short-term**: Personal information (deleted after reply sent)
@@ -54,6 +57,7 @@ For performance reasons, it should be noted that it's quite common that the same
 ### Core Components
 
 #### Message Processing Pipeline
+
 1. **Input Channels** → REST API or Email (Stalwart webhook)
 2. **Classification** → BGE-M3 embedding generation and campaign clustering
 3. **Storage** → Dual storage system (analytics + temporary personal data)
@@ -63,6 +67,7 @@ For performance reasons, it should be noted that it's quite common that the same
 #### Data Models
 
 **Long-term Storage (Analytics)**
+
 - Message ID (UUID)
 - Channel source (API/email server)
 - Timestamp
@@ -72,32 +77,72 @@ For performance reasons, it should be noted that it's quite common that the same
 - Reply metadata
 
 **Short-term Storage (Personal Data)**
+
 - Sender name and email
 - Original message content
 - Timestamp
 - Reply requirements
 
 ### Technology Stack
+
 - **Database**: Supabase with vector storage support
 - **AI/ML**: Cloudflare Workers AI (BGE-M3 model)
 - **Email**: Stalwart mail server with MTA hooks
 - **Authentication**: Supabase Auth (MVP), OAuth (planned)
 - **Message Queue**: RabbitMQ integration (shared with Proca infrastructure)
 
+## Documentation
+
+### Updating the OpenAPI Specification
+
+The OpenAPI specification is generated from the API routes and schemas.
+
+1. Update the API routes/schemas (for example in `src/api.ts`, `src/messages.ts`, `src/campaigns.ts`, `src/politicians.ts`, or `src/reply_templates.ts`).
+2. Regenerate the OpenAPI JSON file:
+
+```bash
+npm run doc:spec
+```
+
+### Generating Documentation
+
+After updating the spec, regenerate the documentation with these commands:
+
+```bash
+# 1) Generate the OpenAPI specification JSON
+npm run doc:spec
+
+# 2) Generate HTML docs from doc/openapi.json
+npm run doc:html
+
+# 3) Generate Markdown API docs from doc/openapi.json
+npx tsx bin/doc-generate.ts markdown
+```
+
+### Documentation Location
+
+Generated files are written to the `doc/` directory:
+
+- **OpenAPI specification**: [`doc/openapi.json`](doc/openapi.json)
+- **HTML API docs**: [`doc/openapi.html`](doc/openapi.html)
+- **Markdown API docs**: [`doc/API.md`](doc/API.md)
+
 ## API Endpoints
 
 ### REST API Input Channel
+
 ```
 POST /api/messages
 ```
 
 **Request Body:**
+
 ```json
 {
   "messageid": "uuid-string",
   "sender_name": "string",
   "sender_email": "string",
-  "subject": "string", 
+  "subject": "string",
   "message": "string",
   "timestamp": "ISO-8601",
   "campaign_name": "string (optional)"
@@ -105,9 +150,11 @@ POST /api/messages
 ```
 
 ### Stalwart Webhook
+
 Integration with mail server MTA hooks for direct email processing with automatic folder organization by campaign.
 
 ### Analytics API
+
 - Campaign overview statistics
 - Active campaign metrics (7-day windows)
 - Email volume by day/campaign
@@ -133,28 +180,27 @@ On a client-side application (e.g., a React or Vue dashboard), you would use the
 
 ```javascript
 // Example using supabase-js on a frontend
-import { createClient } from '@supabase/supabase-js'
+import { createClient } from "@supabase/supabase-js";
 
-const supabase = createClient(YOUR_SUPABASE_URL, YOUR_SUPABASE_ANON_KEY)
+const supabase = createClient(YOUR_SUPABASE_URL, YOUR_SUPABASE_ANON_KEY);
 
 // After user logs in...
 const { data, error } = await supabase.auth.signInWithPassword({
-  email: 'user@example.com',
-  password: 'password',
-})
+  email: "user@example.com",
+  password: "password",
+});
 
 if (data.session) {
-  const jwt = data.session.access_token
-  
+  const jwt = data.session.access_token;
+
   // Now use this JWT to make requests to the protected API endpoints
-  fetch('https://<your-worker-url>/api/v1/campaigns/stats', {
+  fetch("https://<your-worker-url>/api/v1/campaigns/stats", {
     headers: {
-      Authorization: `Bearer ${jwt}`
-    }
-  })
+      Authorization: `Bearer ${jwt}`,
+    },
+  });
 }
 ```
-
 
 ## Getting Started
 
@@ -208,22 +254,22 @@ This project uses the Supabase CLI to manage database schema changes through mig
 
 Here is the recommended workflow and an explanation of the helper scripts:
 
--   `npm run db:start`
-    -   **What it does:** Starts the local Supabase Docker containers.
-    -   **When to use it:** At the beginning of every development session.
+- `npm run db:start`
+  - **What it does:** Starts the local Supabase Docker containers.
+  - **When to use it:** At the beginning of every development session.
 
--   `npm run db:reset`
-    -   **What it does:** Stops the local database, destroys all data, and restarts it by re-applying all migration files from scratch.
-    -   **When to use it:** When you need a clean slate or want to test the entire migration process.
+- `npm run db:reset`
+  - **What it does:** Stops the local database, destroys all data, and restarts it by re-applying all migration files from scratch.
+  - **When to use it:** When you need a clean slate or want to test the entire migration process.
 
--   `npm run db:diff -- <migration_name>`
-    -   **What it does:** Compares the current state of your local database with the last migration file and generates a *new* migration file containing the differences.
-    -   **When to use it:** After you have made schema changes to your local database (e.g., using a GUI tool or `psql`) and want to commit those changes to a new migration file.
-    -   **Example:** `npm run db:diff -- add_user_profiles`
+- `npm run db:diff -- <migration_name>`
+  - **What it does:** Compares the current state of your local database with the last migration file and generates a _new_ migration file containing the differences.
+  - **When to use it:** After you have made schema changes to your local database (e.g., using a GUI tool or `psql`) and want to commit those changes to a new migration file.
+  - **Example:** `npm run db:diff -- add_user_profiles`
 
--   `npm run db:push`
-    -   **What it does:** Applies any new, un-applied migration files to your remote (production) Supabase database.
-    -   **When to use it:** When you are ready to deploy your schema changes to production. You must first link your project with `supabase link --project-ref <your-project-ref>`.
+- `npm run db:push`
+  - **What it does:** Applies any new, un-applied migration files to your remote (production) Supabase database.
+  - **When to use it:** When you are ready to deploy your schema changes to production. You must first link your project with `supabase link --project-ref <your-project-ref>`.
 
 ### Typical Workflow for a Schema Change
 
@@ -272,19 +318,19 @@ This API is designed to be deployed as a Cloudflare Worker. The `wrangler` CLI, 
 
     This command bundles your code and uploads it to your Cloudflare account, making it available at the URL provided in the output.
 
-
-
 ## Roadmap
 
 ### MVP (Current Focus)
+
 - ✅ Basic message ingestion (REST API + Email)
 - ✅ BGE-M3 embedding and clustering
-- ✅ Simple campaign classification  
+- ✅ Simple campaign classification
 - ✅ Basic reply system
 - ✅ Supabase authentication
 - ⏳ Core analytics dashboard
 
 ### Post-MVP Enhancements
+
 - **Advanced Classification**: Multi-category clustering and sentiment analysis
 - **Enhanced Analytics**: Cross-party benchmarking and advanced metrics
 - **Bounce Management**: Comprehensive email delivery monitoring
@@ -294,6 +340,7 @@ This API is designed to be deployed as a Cloudflare Worker. The `wrangler` CLI, 
 ## Privacy & Data Handling
 
 The platform is designed with privacy-by-design principles:
+
 - **Minimal Data Retention**: Personal information deleted after response sent
 - **Anonymized Analytics**: Long-term storage contains only hashed identifiers
 - **Secure Processing**: All personal data handling follows GDPR principles
@@ -303,5 +350,3 @@ The platform is designed with privacy-by-design principles:
 
 Proca: Campaign action processing infrastructure (shared message queue)
 Fix the Status Quo: Parent organization's civic engagement tools
-
-

@@ -34,6 +34,7 @@ Content-Type: `application/json`
 
 - **200**: Message processed successfully
 - **400**: Invalid input data
+- **401**: Unauthorized - Invalid API Key
 - **404**: Politician not found
 - **409**: Duplicate message
 - **500**: Internal server error
@@ -86,6 +87,24 @@ Content-Type: `application/json`
 
 ---
 
+### /api/v1/campaigns/stats
+
+#### GET
+
+**Summary:** Get campaign statistics
+
+**Responses:**
+
+- **200**: Campaign statistics
+
+**CLI Example:**
+
+```bash
+./cli /api/v1/campaigns/stats
+```
+
+---
+
 ### /api/v1/campaigns/{id}
 
 #### GET
@@ -105,24 +124,6 @@ Content-Type: `application/json`
 
 ```bash
 ./cli /api/v1/campaigns/--id=123
-```
-
----
-
-### /api/v1/campaigns/stats
-
-#### GET
-
-**Summary:** Get campaign statistics
-
-**Responses:**
-
-- **200**: Campaign statistics
-
-**CLI Example:**
-
-```bash
-./cli /api/v1/campaigns/stats
 ```
 
 ---
@@ -227,6 +228,32 @@ Content-Type: `application/json`
 
 ```bash
 ./cli /api/v1/reply-templates/--id=123
+```
+
+---
+
+### /api/v1/login
+
+#### POST
+
+**Request Body:**
+
+Content-Type: `application/json`
+
+| Property | Type | Required | Description |
+|----------|------|----------|--------------|
+| email | string | ✓ |  |
+| password | string | ✓ |  |
+
+**Responses:**
+
+- **200**: Successful login, returns session object
+- **401**: Unauthorized, invalid credentials
+
+**CLI Example:**
+
+```bash
+./cli /api/v1/login --method=POST --name=example --param=value
 ```
 
 ---
