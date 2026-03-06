@@ -1,6 +1,6 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
-import { DatabaseClient } from "./database";
 import { authMiddleware } from "./auth";
+import type { DatabaseClient } from "./database";
 
 // Define types for env and app
 interface Env {
@@ -8,7 +8,14 @@ interface Env {
   SUPABASE_KEY: string;
 }
 
-const app = new OpenAPIHono<{ Bindings: Env }>();
+interface Variables {
+  db: DatabaseClient;
+}
+
+const app = new OpenAPIHono<{ Bindings: Env; Variables: Variables }>();
+
+// Apply auth middleware to all routes in this file
+app.use("/api/v1/campaigns/*", authMiddleware);
 
 // =============================================================================
 // SCHEMAS
@@ -53,7 +60,7 @@ const listCampaignsRoute = createRoute({
   tags: ["Campaigns"],
 });
 
-app.openapi(listCampaignsRoute, authMiddleware, async (c) => {
+app.openapi(listCampaignsRoute, async (c) => {
   const db = c.get("db") as DatabaseClient;
   const data = await db.request<any[]>("/campaigns?select=*");
   return c.json(data);
@@ -88,7 +95,7 @@ const statsRoute = createRoute({
   summary: "Get campaign statistics",
 });
 
-app.openapi(statsRoute, authMiddleware, async (c) => {
+app.openapi(statsRoute, async (c) => {
   const db = c.get("db") as DatabaseClient;
   try {
     const stats = await db.request("/rpc/get_campaign_stats");
@@ -116,7 +123,7 @@ const getCampaignRoute = createRoute({
   tags: ["Campaigns"],
 });
 
-app.openapi(getCampaignRoute, authMiddleware, async (c) => {
+app.openapi(getCampaignRoute, async (c) => {
   const db = c.get("db") as DatabaseClient;
   const { id } = c.req.valid("param");
   const data = await db.request<any[]>(
@@ -145,7 +152,7 @@ const createCampaignRoute = createRoute({
   tags: ["Campaigns"],
 });
 
-app.openapi(createCampaignRoute, authMiddleware, async (c) => {
+app.openapi(createCampaignRoute, async (c) => {
   const db = c.get("db") as DatabaseClient;
   const campaignData = c.req.valid("json");
   const data = await db.request<any[]>("/campaigns", {

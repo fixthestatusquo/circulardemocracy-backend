@@ -1,22 +1,29 @@
-import { cors } from "hono/cors";
 import { OpenAPIHono } from "@hono/zod-openapi";
+import { cors } from "hono/cors";
+import { apiKeyAuthMiddleware } from "./auth_middleware";
 import { DatabaseClient } from "./database";
+import type { Ai } from "./message_processor";
 
+import campaignsApp from "./campaigns";
+import loginApp from "./login";
 // Import modular route handlers
 import messagesApp from "./messages";
-import campaignsApp from "./campaigns";
 import politiciansApp from "./politicians";
 import replyTemplatesApp from "./reply_templates";
-import loginApp from "./login";
 
 // Define types for env and app
 interface Env {
   AI: Ai;
   SUPABASE_URL: string;
   SUPABASE_KEY: string;
+  API_KEY: string;
 }
 
-const app = new OpenAPIHono<{ Bindings: Env }>();
+interface Variables {
+  db: DatabaseClient;
+}
+
+const app = new OpenAPIHono<{ Bindings: Env; Variables: Variables }>();
 
 // Shared middleware
 app.use(
@@ -36,6 +43,9 @@ app.use("*", async (c, next) => {
   await next();
 });
 
+// Auth middleware for API routes
+app.use("/api/v1/messages", apiKeyAuthMiddleware);
+
 // Mount modular routers
 app.route("/", messagesApp);
 app.route("/", campaignsApp);
@@ -51,6 +61,11 @@ app.get("/health", (c) => {
     timestamp: new Date().toISOString(),
     version: "1.0.0",
   });
+});
+
+app.openAPIRegistry.registerComponent("securitySchemes", "bearerAuth", {
+  type: "http",
+  scheme: "bearer",
 });
 
 // OpenAPI documentation for all combined routes

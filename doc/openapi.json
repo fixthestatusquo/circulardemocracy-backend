@@ -16,12 +16,23 @@
     }
   ],
   "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    },
     "schemas": {},
     "parameters": {}
   },
   "paths": {
     "/api/v1/messages": {
       "post": {
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "tags": [
           "Messages"
         ],
@@ -151,6 +162,32 @@
           },
           "400": {
             "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "default": false
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized - Invalid API Key",
             "content": {
               "application/json": {
                 "schema": {
@@ -440,6 +477,66 @@
         }
       }
     },
+    "/api/v1/campaigns/stats": {
+      "get": {
+        "security": [
+          {
+            "Bearer": []
+          }
+        ],
+        "tags": [
+          "Campaigns",
+          "Statistics"
+        ],
+        "summary": "Get campaign statistics",
+        "responses": {
+          "200": {
+            "description": "Campaign statistics",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "campaigns": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "number"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "message_count": {
+                            "type": "number"
+                          },
+                          "recent_count": {
+                            "type": "number"
+                          },
+                          "avg_confidence": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "name",
+                          "message_count",
+                          "recent_count"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "campaigns"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/campaigns/{id}": {
       "get": {
         "security": [
@@ -503,66 +600,6 @@
           },
           "404": {
             "description": "Campaign not found"
-          }
-        }
-      }
-    },
-    "/api/v1/campaigns/stats": {
-      "get": {
-        "security": [
-          {
-            "Bearer": []
-          }
-        ],
-        "tags": [
-          "Campaigns",
-          "Statistics"
-        ],
-        "summary": "Get campaign statistics",
-        "responses": {
-          "200": {
-            "description": "Campaign statistics",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "campaigns": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "id": {
-                            "type": "number"
-                          },
-                          "name": {
-                            "type": "string"
-                          },
-                          "message_count": {
-                            "type": "number"
-                          },
-                          "recent_count": {
-                            "type": "number"
-                          },
-                          "avg_confidence": {
-                            "type": "number"
-                          }
-                        },
-                        "required": [
-                          "id",
-                          "name",
-                          "message_count",
-                          "recent_count"
-                        ]
-                      }
-                    }
-                  },
-                  "required": [
-                    "campaigns"
-                  ]
-                }
-              }
-            }
           }
         }
       }
@@ -926,6 +963,106 @@
           },
           "404": {
             "description": "Reply template not found"
+          }
+        }
+      }
+    },
+    "/api/v1/login": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "format": "email"
+                  },
+                  "password": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "email",
+                  "password"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful login, returns session object",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "access_token": {
+                      "type": "string"
+                    },
+                    "token_type": {
+                      "type": "string"
+                    },
+                    "expires_in": {
+                      "type": "number"
+                    },
+                    "expires_at": {
+                      "type": "number"
+                    },
+                    "refresh_token": {
+                      "type": "string"
+                    },
+                    "user": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "email": {
+                          "type": "string",
+                          "format": "email"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "email"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "access_token",
+                    "token_type",
+                    "expires_in",
+                    "expires_at",
+                    "refresh_token",
+                    "user"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized, invalid credentials",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
           }
         }
       }

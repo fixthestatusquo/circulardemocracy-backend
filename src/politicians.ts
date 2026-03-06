@@ -1,6 +1,6 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
-import { DatabaseClient } from "./database";
 import { authMiddleware } from "./auth";
+import type { DatabaseClient } from "./database";
 
 // Define types for env and app
 interface Env {
@@ -8,7 +8,14 @@ interface Env {
   SUPABASE_KEY: string;
 }
 
-const app = new OpenAPIHono<{ Bindings: Env }>();
+interface Variables {
+  db: DatabaseClient;
+}
+
+const app = new OpenAPIHono<{ Bindings: Env; Variables: Variables }>();
+
+// Apply auth middleware to all routes in this file
+app.use("/api/v1/politicians/*", authMiddleware);
 
 // =============================================================================
 // SCHEMAS
@@ -43,14 +50,11 @@ const listPoliticiansRoute = createRoute({
   tags: ["Politicians"],
 });
 
-app.openapi(listPoliticiansRoute, authMiddleware, async (c) => {
-  console.log("aaa");
-  return c.json({ name: "test" });
+app.openapi(listPoliticiansRoute, async (c) => {
   const db = c.get("db") as DatabaseClient;
   const data = await db.request<any[]>(
     "/politicians?select=id,name,email,party,country,region,position,active",
   );
-  console.log("data XX", data);
   return c.json(data);
 });
 
@@ -72,7 +76,7 @@ const getPoliticianRoute = createRoute({
   tags: ["Politicians"],
 });
 
-app.openapi(getPoliticianRoute, authMiddleware, async (c) => {
+app.openapi(getPoliticianRoute, async (c) => {
   const db = c.get("db") as DatabaseClient;
   const { id } = c.req.valid("param");
   const data = await db.request<any[]>(

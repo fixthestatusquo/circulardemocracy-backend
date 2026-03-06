@@ -1,7 +1,8 @@
 import { serve } from "@hono/node-server";
-import app from "./index.ts";
-serve({ fetch: app.fetch, port: 3000 }, () => {
-  console.log("Server running on http://localhost:3000");
+import app from "./index";
+
+serve(app, (info) => {
+  console.log(`Listening on http://localhost:${info.port}`);
 });
 
 export default app;

@@ -37,6 +37,20 @@ describe("Stalwart API (/mta-hook)", () => {
     timestamp: Math.floor(Date.now() / 1000),
   };
 
+  const createMockResponse = (data: any, status = 200, headers = {}) => {
+    return {
+      ok: status >= 200 && status < 300,
+      status,
+      statusText: status === 200 ? "OK" : "Error",
+      headers: new Headers({ "Content-Type": "application/json", ...headers }),
+      json: async () => data,
+      text: async () => JSON.stringify(data),
+      clone: function () {
+        return this;
+      },
+    } as unknown as Response;
+  };
+
   beforeEach(() => {
     mockFetch.mockClear();
     env.AI.run.mockClear();

@@ -1,14 +1,24 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
-import { DatabaseClient, hashEmail, type MessageInsert } from "./database";
+import type { DatabaseClient } from "./database";
+import {
+  type Ai,
+  PoliticianNotFoundError,
+  processMessage,
+} from "./message_processor";
 
 // Define types for env and app
 interface Env {
   AI: Ai; // Cloudflare Workers AI
   SUPABASE_URL: string;
   SUPABASE_KEY: string;
+  API_KEY: string;
 }
 
-const app = new OpenAPIHono<{ Bindings: Env }>();
+interface Variables {
+  db: DatabaseClient;
+}
+
+const app = new OpenAPIHono<{ Bindings: Env; Variables: Variables }>();
 
 // Schemas specific to message processing
 const MessageInputSchema = z.object({
@@ -80,6 +90,11 @@ const messageRoute = createRoute({
       },
     },
   },
+  security: [
+    {
+      bearerAuth: [],
+    },
+  ],
   responses: {
     200: {
       content: {
@@ -96,6 +111,14 @@ const messageRoute = createRoute({
         },
       },
       description: "Invalid input data",
+    },
+    401: {
+      content: {
+        "application/json": {
+          schema: ErrorResponseSchema,
+        },
+      },
+      description: "Unauthorized - Invalid API Key",
     },
     404: {
       content: {
@@ -134,75 +157,32 @@ app.openapi(messageRoute, async (c) => {
 
   try {
     const data = c.req.valid("json");
+    const result = await processMessage(db, c.env.AI, data);
 
-    const isDuplicate = await db.checkExternalIdExists(
-      data.external_id,
-      data.channel_source || "unknown",
-    );
-    if (isDuplicate) {
-      return c.json(
-        {
-          success: false,
-          status: "duplicate",
-          errors: [
-            `Message with external_id ${data.external_id} already exists`,
-          ],
-        },
-        409,
-      );
+    if (result.status === "duplicate") {
+      // @ts-ignore
+      return c.json(result, 409);
     }
 
-    const politician = await db.findPoliticianByEmail(data.recipient_email);
-    if (!politician) {
+    if (!result.success) {
+      // @ts-ignore
+      return c.json(result, 500);
+    }
+
+    // @ts-ignore
+    return c.json(result, 200);
+  } catch (error) {
+    if (error instanceof PoliticianNotFoundError) {
       return c.json(
         {
           success: false,
           status: "politician_not_found",
-          errors: [`No politician found for email: ${data.recipient_email}`],
+          errors: [error.message],
         },
         404,
       );
     }
 
-    const embedding = await generateEmbedding(c.env.AI, data.message);
-    const classification = await db.classifyMessage(
-      embedding,
-      data.campaign_hint,
-    );
-    const senderHash = await hashEmail(data.sender_email);
-    const duplicateRank = await db.getDuplicateRank(
-      senderHash,
-      politician.id,
-      classification.campaign_id,
-    );
-
-    const messageData: MessageInsert = {
-      external_id: data.external_id,
-      channel: "api",
-      channel_source: data.channel_source || "unknown",
-      politician_id: politician.id,
-      sender_hash: senderHash,
-      campaign_id: classification.campaign_id,
-      classification_confidence: classification.confidence,
-      message_embedding: embedding,
-      language: "auto",
-      received_at: data.timestamp,
-      duplicate_rank: duplicateRank,
-      processing_status: "processed",
-    };
-
-    const messageId = await db.insertMessage(messageData);
-
-    return c.json({
-      success: true,
-      message_id: messageId,
-      status: "processed",
-      campaign_id: classification.campaign_id,
-      campaign_name: classification.campaign_name,
-      confidence: classification.confidence,
-      duplicate_rank: duplicateRank,
-    });
-  } catch (error) {
     console.error("Message processing error:", error);
     return c.json(
       {
@@ -214,18 +194,5 @@ app.openapi(messageRoute, async (c) => {
     );
   }
 });
-
-async function generateEmbedding(ai: Ai, text: string): Promise<number[]> {
-  try {
-    const response = await ai.run("@cf/baai/bge-m3", {
-      text: text.substring(0, 8000), // Limit to avoid token limits
-    });
-
-    return response.data[0] as number[];
-  } catch (error) {
-    console.error("Embedding generation error:", error);
-    throw new Error("Failed to generate message embedding");
-  }
-}
 
 export default app;

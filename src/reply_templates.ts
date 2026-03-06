@@ -1,6 +1,6 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
-import { DatabaseClient } from "./database";
 import { authMiddleware } from "./auth";
+import type { DatabaseClient } from "./database";
 
 // Define types for env and app
 interface Env {
@@ -8,7 +8,14 @@ interface Env {
   SUPABASE_KEY: string;
 }
 
-const app = new OpenAPIHono<{ Bindings: Env }>();
+interface Variables {
+  db: DatabaseClient;
+}
+
+const app = new OpenAPIHono<{ Bindings: Env; Variables: Variables }>();
+
+// Apply auth middleware to all routes in this file
+app.use("/api/v1/reply-templates/*", authMiddleware);
 
 // =============================================================================
 // SCHEMAS
@@ -50,7 +57,7 @@ const listReplyTemplatesRoute = createRoute({
   tags: ["Reply Templates"],
 });
 
-app.openapi(listReplyTemplatesRoute, authMiddleware, async (c) => {
+app.openapi(listReplyTemplatesRoute, async (c) => {
   const db = c.get("db") as DatabaseClient;
   const data = await db.request<any[]>("/reply_templates?select=*");
   return c.json(data);
@@ -74,7 +81,7 @@ const getReplyTemplateRoute = createRoute({
   tags: ["Reply Templates"],
 });
 
-app.openapi(getReplyTemplateRoute, authMiddleware, async (c) => {
+app.openapi(getReplyTemplateRoute, async (c) => {
   const db = c.get("db") as DatabaseClient;
   const { id } = c.req.valid("param");
   const data = await db.request<any[]>(
@@ -105,7 +112,7 @@ const createReplyTemplateRoute = createRoute({
   tags: ["Reply Templates"],
 });
 
-app.openapi(createReplyTemplateRoute, authMiddleware, async (c) => {
+app.openapi(createReplyTemplateRoute, async (c) => {
   const db = c.get("db") as DatabaseClient;
   const templateData = c.req.valid("json");
   const data = await db.request<any[]>("/reply_templates", {

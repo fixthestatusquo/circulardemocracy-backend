@@ -1,4 +1,4 @@
-import { createClient, SupabaseClient } from "@supabase/supabase-js";
+import { type SupabaseClient, createClient } from "@supabase/supabase-js";
 
 // Database Layer - Supabase REST API Client
 // Handles all database operations for Circular Democracy
@@ -49,11 +49,17 @@ export class DatabaseClient {
   private supabase: SupabaseClient;
 
   constructor(config: SupabaseConfig) {
-    this.supabase = createClient(config.url, config.key);
+    this.supabase = createClient(config.url, config.key, {
+      auth: {
+        persistSession: false,
+      },
+      global: {
+        fetch: (...args) => fetch(...args),
+      },
+    });
   }
 
-  async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
-    console.log("supab" + endpoint);
+  async request<T>(endpoint: string, _options: RequestInit = {}): Promise<T> {
     const query = this.supabase.from(endpoint).select("*");
 
     const { data, error } = await query;
@@ -74,22 +80,28 @@ export class DatabaseClient {
       // First try exact email match
       const { data: exactMatch, error: exactError } = await this.supabase
         .from("politicians")
-        .select("id,name,email,additional_emails")
+        .select("id,name,email,additional_emails,active")
         .eq("email", email)
         .eq("active", true);
 
-      if (exactError) throw exactError;
-      if (exactMatch.length > 0) return exactMatch[0];
+      if (exactError) {
+        throw exactError;
+      }
+      if (exactMatch && exactMatch.length > 0) {
+        return exactMatch[0];
+      }
 
       // Then try additional_emails array search
       const { data: arrayMatch, error: arrayError } = await this.supabase
         .from("politicians")
-        .select("id,name,email,additional_emails")
+        .select("id,name,email,additional_emails,active")
         .contains("additional_emails", [email])
         .eq("active", true);
 
-      if (arrayError) throw arrayError;
-      return arrayMatch.length > 0 ? arrayMatch[0] : null;
+      if (arrayError) {
+        throw arrayError;
+      }
+      return arrayMatch && arrayMatch.length > 0 ? arrayMatch[0] : null;
     } catch (error) {
       console.error("Error finding politician:", error);
       return null;
@@ -109,7 +121,9 @@ export class DatabaseClient {
         .in("status", ["active", "unconfirmed"])
         .limit(1);
 
-      if (error) throw error;
+      if (error) {
+        throw error;
+      }
       return campaigns.length > 0 ? campaigns[0] : null;
     } catch (error) {
       console.error("Error finding campaign by hint:", error);
@@ -131,7 +145,9 @@ export class DatabaseClient {
         },
       );
 
-      if (error) throw error;
+      if (error) {
+        throw error;
+      }
       return data;
     } catch (error) {
       console.error("Error finding similar campaigns:", error);
@@ -144,7 +160,9 @@ export class DatabaseClient {
         .not("reference_vector", "is", null)
         .limit(limit);
 
-      if (fallbackError) throw fallbackError;
+      if (fallbackError) {
+        throw fallbackError;
+      }
       return fallback.map((camp) => ({ ...camp, similarity: 0.1 }));
     }
   }
@@ -156,8 +174,12 @@ export class DatabaseClient {
         .select("id,name,slug,status")
         .eq("slug", "uncategorized");
 
-      if (error) throw error;
-      if (campaigns.length > 0) return campaigns[0];
+      if (error) {
+        throw error;
+      }
+      if (campaigns.length > 0) {
+        return campaigns[0];
+      }
 
       // Create uncategorized campaign
       const { data: newCampaigns, error: createError } = await this.supabase
@@ -171,7 +193,9 @@ export class DatabaseClient {
         })
         .select();
 
-      if (createError) throw createError;
+      if (createError) {
+        throw createError;
+      }
       return newCampaigns[0];
     } catch (error) {
       console.error("Error getting uncategorized campaign:", error);
@@ -196,7 +220,9 @@ export class DatabaseClient {
         .eq("politician_id", politicianId)
         .eq("campaign_id", campaignId);
 
-      if (error) throw error;
+      if (error) {
+        throw error;
+      }
       return count || 0;
     } catch (error) {
       console.error("Error getting duplicate rank:", error);
@@ -211,7 +237,9 @@ export class DatabaseClient {
         .insert(data)
         .select("id");
 
-      if (error) throw error;
+      if (error) {
+        throw error;
+      }
       return result[0].id;
     } catch (error) {
       console.error("Error inserting message:", error);
@@ -231,11 +259,36 @@ export class DatabaseClient {
         .eq("channel_source", channelSource)
         .limit(1);
 
-      if (error) throw error;
-      return data.length > 0;
+      if (error) {
+        throw error;
+      }
+      return data && data.length > 0;
     } catch (error) {
       console.error("Error checking external ID:", error);
       return false;
+    }
+  }
+
+  async getMessageByExternalId(
+    externalId: string,
+    channelSource: string,
+  ): Promise<(MessageInsert & { id: number; campaigns: Campaign }) | null> {
+    try {
+      const { data, error } = await this.supabase
+        .from("messages")
+        .select("*, campaigns(id, name)")
+        .eq("external_id", externalId)
+        .eq("channel_source", channelSource)
+        .limit(1);
+
+      if (error) {
+        throw error;
+      }
+      // @ts-ignore - Supabase types are sometimes tricky with joins
+      return data.length > 0 ? data[0] : null;
+    } catch (error) {
+      console.error("Error getting message by external ID:", error);
+      return null;
     }
   }
 

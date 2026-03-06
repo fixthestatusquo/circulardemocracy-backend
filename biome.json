@@ -47,7 +47,18 @@
       "bracketSameLine": false
     }
   },
-  "css": {
+  "overrides": [
+    {
+      "include": ["test/database.test.ts"],
+      "javascript": {
+        "formatter": {
+          "quoteStyle": "double",
+          "semicolons": "always"
+        }
+      }
+    }
+  ],
+  "json": {
     "formatter": {
       "quoteStyle": "double"
     }

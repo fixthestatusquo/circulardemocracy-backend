@@ -1,13 +1,18 @@
 // src/stalwart.ts - Stalwart MTA Hook Worker
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { cors } from "hono/cors";
-import { DatabaseClient, hashEmail, type MessageInsert } from "./database";
+import { DatabaseClient, type MessageInsert, hashEmail } from "./database";
+import type { Ai } from "./message_processor";
 
 // Environment variables interface
 interface Env {
   AI: Ai;
   SUPABASE_URL: string;
   SUPABASE_KEY: string;
+}
+
+interface Variables {
+  db: DatabaseClient;
 }
 
 // =============================================================================
@@ -69,6 +74,13 @@ const StalwartHookSchema = z.object({
     .optional(),
 });
 
+const ErrorResponseSchema = z.object({
+  action: z.literal("accept"),
+  error: z.string(),
+});
+
+type ErrorResponse = z.infer<typeof ErrorResponseSchema>;
+
 const StalwartResponseSchema = z.object({
   action: z.enum(["accept", "reject", "quarantine", "discard"]),
   modifications: z
@@ -82,11 +94,13 @@ const StalwartResponseSchema = z.object({
   confidence: z.number().min(0).max(1).optional(),
 });
 
+type StalwartResponse = z.infer<typeof StalwartResponseSchema>;
+
 // =============================================================================
 // STALWART WORKER APP
 // =============================================================================
 
-const app = new OpenAPIHono<{ Bindings: Env }>();
+const app = new OpenAPIHono<{ Bindings: Env; Variables: Variables }>();
 
 // CORS middleware
 app.use(
@@ -138,10 +152,7 @@ const mtaHookRoute = createRoute({
     500: {
       content: {
         "application/json": {
-          schema: z.object({
-            action: z.literal("accept"),
-            error: z.string(),
-          }),
+          schema: ErrorResponseSchema,
         },
       },
       description: "Error - default to accept",
@@ -153,7 +164,7 @@ const mtaHookRoute = createRoute({
 });
 
 app.openapi(mtaHookRoute, async (c) => {
-  const db = c.get("db") as DatabaseClient;
+  const db = c.get("db");
 
   try {
     const hookData = c.req.valid("json");
@@ -180,8 +191,17 @@ app.openapi(mtaHookRoute, async (c) => {
       }),
     );
 
+    if (results.length === 0) {
+      const emptyRes: StalwartResponse = {
+        action: "accept",
+        confidence: 0,
+        reject_reason: "No recipients",
+      };
+      return c.json<StalwartResponse>(emptyRes);
+    }
+
     // Use the result with highest confidence
-    const bestResult = results.reduce((best, current) =>
+    const bestResult: StalwartResponse = results.reduce((best, current) =>
       (current.confidence || 0) > (best.confidence || 0) ? current : best,
     );
 
@@ -189,18 +209,17 @@ app.openapi(mtaHookRoute, async (c) => {
       `Email processed: campaign=${bestResult.modifications?.headers?.["X-CircularDemocracy-Campaign"]}, confidence=${bestResult.confidence}`,
     );
 
-    return c.json(bestResult);
+    return c.json<StalwartResponse>(bestResult);
   } catch (error) {
     console.error("MTA Hook processing error:", error);
 
     // Always accept on error to avoid email loss
-    return c.json(
-      {
-        action: "accept",
-        error: error instanceof Error ? error.message : "Unknown error",
-      },
-      500,
-    );
+    const errorRes: ErrorResponse = {
+      action: "accept",
+      error: error instanceof Error ? error.message : "Unknown error",
+    };
+// src/stalwart.ts - Stalwart MTA Hook Worker
+    return c.json<ErrorResponse>(errorRes, 500);
   }
 });
 
@@ -222,9 +241,9 @@ async function processEmailForRecipient(
   ai: Ai,
   hookData: z.infer<typeof StalwartHookSchema>,
   senderEmail: string,
-  senderName: string,
+  _senderName: string,
   recipientEmail: string,
-) {
+): Promise<StalwartResponse> {
   try {
     // Step 1: Check for duplicate message
     const isDuplicate = await db.checkExternalIdExists(

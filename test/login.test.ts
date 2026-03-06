@@ -38,7 +38,7 @@ describe("Login API", () => {
     };
 
     mockSignInWithPassword.mockResolvedValue({
-      data: { session: mockSession },
+      data: { session: mockSession, user: mockSession.user },
       error: null,
     });
 

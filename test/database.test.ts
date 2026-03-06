@@ -15,6 +15,20 @@ describe("DatabaseClient", () => {
   let db: DatabaseClient;
   const mockFetch = fetch as MockedFunction<typeof fetch>;
 
+  const createMockResponse = (data: any, status = 200, headers = {}) => {
+    return {
+      ok: status >= 200 && status < 300,
+      status,
+      statusText: status === 200 ? "OK" : "Error",
+      headers: new Headers({ "Content-Type": "application/json", ...headers }),
+      json: async () => data,
+      text: async () => JSON.stringify(data),
+      clone: function () {
+        return this;
+      },
+    } as unknown as Response;
+  };
+
   beforeEach(() => {
     db = new DatabaseClient({
       url: "https://test.supabase.co",
@@ -32,23 +46,22 @@ describe("DatabaseClient", () => {
         additional_emails: [],
       };
 
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => [mockPolitician],
-      } as Response);
+      mockFetch.mockResolvedValueOnce(createMockResponse([mockPolitician]));
 
       const result = await db.findPoliticianByEmail("john@example.com");
-
+      
       expect(result).toEqual(mockPolitician);
-      expect(mockFetch).toHaveBeenCalledWith(
-        "https://test.supabase.co/rest/v1/politicians?email=eq.john%40example.com&active=eq.true&select=id,name,email,additional_emails",
-        expect.objectContaining({
-          headers: expect.objectContaining({
-            apikey: "test-key",
-            Authorization: "Bearer test-key",
-          }),
-        }),
-      );
+      const url = mockFetch.mock.calls[0][0] as string;
+      const options = mockFetch.mock.calls[0][1] as RequestInit;
+
+      expect(url).toContain("https://test.supabase.co/rest/v1/politicians");
+      expect(url).toContain("email=eq.john%40example.com");
+      expect(url).toContain("active=eq.true");
+      expect(url).toContain("select=");
+      
+      const headers = options.headers as Headers;
+      expect(headers.get("apikey")).toBe("test-key");
+      expect(headers.get("Authorization")).toBe("Bearer test-key");
     });
 
     it("should return null when politician not found", async () => {

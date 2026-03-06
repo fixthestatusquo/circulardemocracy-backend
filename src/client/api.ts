@@ -283,6 +283,7 @@ export class Api<
      * @name V1MessagesCreate
      * @summary Process incoming citizen message
      * @request POST:/api/v1/messages
+     * @secure
      */
     v1MessagesCreate: (
       data: {
@@ -382,6 +383,7 @@ export class Api<
         path: `/api/v1/messages`,
         method: "POST",
         body: data,
+        secure: true,
         type: ContentType.Json,
         format: "json",
         ...params,
@@ -458,33 +460,6 @@ export class Api<
     /**
      * No description
      *
-     * @tags Campaigns
-     * @name V1CampaignsDetail
-     * @request GET:/api/v1/campaigns/{id}
-     * @secure
-     */
-    v1CampaignsDetail: (id: string, params: RequestParams = {}) =>
-      this.request<
-        {
-          id: number;
-          name: string;
-          slug: string;
-          description: string | null;
-          status: string;
-          created_at: string;
-        },
-        void
-      >({
-        path: `/api/v1/campaigns/${id}`,
-        method: "GET",
-        secure: true,
-        format: "json",
-        ...params,
-      }),
-
-    /**
-     * No description
-     *
      * @tags Campaigns, Statistics
      * @name V1CampaignsStatsList
      * @summary Get campaign statistics
@@ -505,6 +480,33 @@ export class Api<
         any
       >({
         path: `/api/v1/campaigns/stats`,
+        method: "GET",
+        secure: true,
+        format: "json",
+        ...params,
+      }),
+
+    /**
+     * No description
+     *
+     * @tags Campaigns
+     * @name V1CampaignsDetail
+     * @request GET:/api/v1/campaigns/{id}
+     * @secure
+     */
+    v1CampaignsDetail: (id: string, params: RequestParams = {}) =>
+      this.request<
+        {
+          id: number;
+          name: string;
+          slug: string;
+          description: string | null;
+          status: string;
+          created_at: string;
+        },
+        void
+      >({
+        path: `/api/v1/campaigns/${id}`,
         method: "GET",
         secure: true,
         format: "json",
@@ -662,6 +664,46 @@ export class Api<
         path: `/api/v1/reply-templates/${id}`,
         method: "GET",
         secure: true,
+        format: "json",
+        ...params,
+      }),
+
+    /**
+     * No description
+     *
+     * @tags Auth
+     * @name V1LoginCreate
+     * @request POST:/api/v1/login
+     */
+    v1LoginCreate: (
+      data: {
+        /** @format email */
+        email: string;
+        password: string;
+      },
+      params: RequestParams = {},
+    ) =>
+      this.request<
+        {
+          access_token: string;
+          token_type: string;
+          expires_in: number;
+          expires_at: number;
+          refresh_token: string;
+          user: {
+            id: string;
+            /** @format email */
+            email: string;
+          };
+        },
+        {
+          error: string;
+        }
+      >({
+        path: `/api/v1/login`,
+        method: "POST",
+        body: data,
+        type: ContentType.Json,
         format: "json",
         ...params,
       }),
