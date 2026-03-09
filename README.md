@@ -93,39 +93,89 @@ For performance reasons, it should be noted that it's quite common that the same
 
 ## Documentation
 
-### Updating the OpenAPI Specification
+### `/doc` - Interactive API Documentation
 
-The OpenAPI specification is generated from the API routes and schemas.
+When running the development server (`npm run dev`), you can access the complete interactive API documentation at:
 
-1. Update the API routes/schemas (for example in `src/api.ts`, `src/messages.ts`, `src/campaigns.ts`, `src/politicians.ts`, or `src/reply_templates.ts`).
-2. Regenerate the OpenAPI JSON file:
-
-```bash
-npm run doc:spec
+```
+http://localhost:3000/doc
 ```
 
-### Generating Documentation
+This endpoint displays the `doc/openapi.html` file and provides access to **all API endpoints** with an interactive UI for testing and exploration. The documentation includes:
 
-After updating the spec, regenerate the documentation with these commands:
+- **Complete API Reference**: All endpoints with `/api/v1/xxx` URL format
+- **Endpoint Descriptions**: Available descriptions for each endpoint (e.g., "Get campaign statistics")
+- **Interactive Testing**: Try endpoints directly from your browser
+- **Request/Response Examples**: Clear examples for all API calls
+- **Authentication Information**: Bearer token authentication details
 
-```bash
-# 1) Generate the OpenAPI specification JSON
-npm run doc:spec
+### Documentation Files
 
-# 2) Generate HTML docs from doc/openapi.json
-npm run doc:html
+Generated documentation files are located in the `doc/` directory:
 
-# 3) Generate Markdown API docs from doc/openapi.json
-npx tsx bin/doc-generate.ts markdown
-```
+- **OpenAPI specification**: [`doc/openapi.json`](doc/openapi.json) - Machine-readable API specification
+- **HTML API docs**: [`doc/openapi.html`](doc/openapi.html) - Interactive web documentation (served at `/doc`)
+- **Markdown API docs**: [`doc/API.md`](doc/API.md) - Static markdown documentation
 
-### Documentation Location
+### Updating OpenAPI Documentation
 
-Generated files are written to the `doc/` directory:
+The OpenAPI specification is automatically generated from the API routes and schemas defined in the codebase using Hono's OpenAPI integration with Zod schemas.
 
-- **OpenAPI specification**: [`doc/openapi.json`](doc/openapi.json)
-- **HTML API docs**: [`doc/openapi.html`](doc/openapi.html)
-- **Markdown API docs**: [`doc/API.md`](doc/API.md)
+#### When to Update Documentation
+
+Update the documentation whenever you:
+- Add new API endpoints
+- Modify existing endpoint schemas
+- Update request/response parameters
+- Change authentication requirements
+
+#### Update Process
+
+1. **Update API routes/schemas** - Modify your API definitions in files such as:
+   - `src/api.ts` - Main API routes and configurations
+   - `src/messages.ts` - Message-related endpoints
+   - `src/campaigns.ts` - Campaign management endpoints
+   - `src/politicians.ts` - Politician-related endpoints
+   - `src/reply_templates.ts` - Reply template functionality
+
+2. **Regenerate the OpenAPI JSON specification**:
+   ```bash
+   npm run doc:spec
+   ```
+   This command processes your Hono routes and Zod schemas to generate `doc/openapi.json`.
+
+3. **Generate updated documentation**:
+   ```bash
+   # Generate HTML docs from the OpenAPI specification
+   npm run doc:html
+   
+   # Generate Markdown API documentation
+   npm run doc:md
+   
+   # Or run all documentation generation steps at once:
+   npm run doc:build
+   ```
+
+4. **Verify the documentation**:
+   - Start the development server: `npm run dev`
+   - Visit `http://localhost:3000/doc` to view the updated documentation
+   - Test the interactive features to ensure everything works correctly
+
+### Development Workflow
+
+1. Make changes to your API routes or Zod schemas
+2. Run `npm run doc:spec` to update the OpenAPI specification
+3. Run `npm run doc:html` to regenerate the HTML documentation
+4. Access the updated documentation at `http://localhost:3000/doc` (with dev server running)
+5. Optionally run `npm run doc:build` to update all documentation formats at once
+
+### Documentation Features
+
+- **Auto-generated**: Documentation is generated directly from your code
+- **Always up-to-date**: Reflects the current API implementation
+- **Interactive testing**: Try API calls directly from the browser
+- **Comprehensive coverage**: Includes all endpoints with proper descriptions
+- **Multiple formats**: Available as HTML, JSON, and Markdown
 
 ## API Endpoints
 
