@@ -10,6 +10,7 @@ import loginApp from "./login";
 import messagesApp from "./messages";
 import politiciansApp from "./politicians";
 import replyTemplatesApp from "./reply_templates";
+import stalwartHookApp from "./stalwart_hook";
 
 // Define types for env and app
 interface Env {
@@ -52,6 +53,7 @@ app.route("/", campaignsApp);
 app.route("/", politiciansApp);
 app.route("/", replyTemplatesApp);
 app.route("/", loginApp);
+app.route("/", stalwartHookApp);
 
 // Health check for the entire API
 app.get("/health", (c) => {
