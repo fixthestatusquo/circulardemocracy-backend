@@ -211,4 +211,212 @@ describe("Stalwart API (/mta-hook)", () => {
     expect(data.action).toBe("reject");
     expect(data.reject_reason).toContain("Unauthorized");
   });
+
+  it("should convert HTML body to Markdown for embedding and prefer it over plain text", async () => {
+    // Mock AI embedding for shared classification
+    env.AI.run.mockResolvedValueOnce({ data: [new Array(1024).fill(0.2)] });
+    // 1. classifyMessage (shared)
+    mockFetch.mockResolvedValueOnce(createMockResponse([{ id: 10, name: "Test Campaign", similarity: 0.8 }]));
+    // 2. checkExternalIdExists -> not duplicate
+    mockFetch.mockResolvedValueOnce(createMockResponse([]));
+    // 3. findPoliticianByEmail -> found
+    mockFetch.mockResolvedValueOnce(createMockResponse([{ id: 1, name: "Test Politician" }]));
+    // 4. AI embedding for message storage (called with Markdown text)
+    env.AI.run.mockResolvedValueOnce({ data: [new Array(1024).fill(0.2)] });
+    // 5. getDuplicateRank -> 0
+    mockFetch.mockResolvedValueOnce(createMockResponse([{ count: 0 }]));
+    // 6. insertMessage -> success
+    mockFetch.mockResolvedValueOnce(createMockResponse([{ id: 102 }]));
+
+    const htmlPayload = {
+      ...stalwartPayload,
+      body: {
+        text: "Plain text version",
+        html: "<p>HTML <strong>bold</strong> and <em>italic</em></p>",
+      },
+    };
+
+    const req = new Request("http://localhost/mta-hook", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-API-KEY": "test-api-key" },
+      body: JSON.stringify(htmlPayload),
+    });
+
+    const res = await app.fetch(req, env);
+    expect(res.status).toBe(200);
+
+    // The AI run for embedding should have been called with Markdown, not raw HTML
+    const embeddingCallArgs = env.AI.run.mock.calls[1]?.[1]?.text as string;
+    expect(embeddingCallArgs).toContain("**bold**");
+    expect(embeddingCallArgs).toContain("*italic*");
+    expect(embeddingCallArgs).not.toContain("<strong>");
+    expect(embeddingCallArgs).not.toContain("Plain text version");
+  });
+
+  it("should fallback to plain text when HTML is not available", async () => {
+    env.AI.run.mockResolvedValueOnce({ data: [new Array(1024).fill(0.2)] });
+    mockFetch.mockResolvedValueOnce(createMockResponse([{ id: 10, name: "Test Campaign", similarity: 0.8 }]));
+    mockFetch.mockResolvedValueOnce(createMockResponse([]));
+    mockFetch.mockResolvedValueOnce(createMockResponse([{ id: 1, name: "Test Politician" }]));
+    env.AI.run.mockResolvedValueOnce({ data: [new Array(1024).fill(0.2)] });
+    mockFetch.mockResolvedValueOnce(createMockResponse([{ count: 0 }]));
+    mockFetch.mockResolvedValueOnce(createMockResponse([{ id: 103 }]));
+
+    const req = new Request("http://localhost/mta-hook", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-API-KEY": "test-api-key" },
+      body: JSON.stringify(stalwartPayload), // has body.text only
+    });
+
+    const res = await app.fetch(req, env);
+    expect(res.status).toBe(200);
+
+    const embeddingCallArgs = env.AI.run.mock.calls[1]?.[1]?.text as string;
+    expect(embeddingCallArgs).toContain("important issue");
+  });
+
+  it("should route reply emails to [campaign]/replied folder", async () => {
+    env.AI.run.mockResolvedValueOnce({ data: [new Array(1024).fill(0.2)] });
+    mockFetch.mockResolvedValueOnce(createMockResponse([{ id: 10, name: "Test Campaign", similarity: 0.8 }]));
+    mockFetch.mockResolvedValueOnce(createMockResponse([]));
+    mockFetch.mockResolvedValueOnce(createMockResponse([{ id: 1, name: "Test Politician" }]));
+    env.AI.run.mockResolvedValueOnce({ data: [new Array(1024).fill(0.2)] });
+    mockFetch.mockResolvedValueOnce(createMockResponse([{ count: 0 }]));
+    mockFetch.mockResolvedValueOnce(createMockResponse([{ id: 104 }]));
+
+    const replyPayload = {
+      ...stalwartPayload,
+      headers: {
+        ...stalwartPayload.headers,
+        "in-reply-to": "<original-msg-id@example.com>",
+      },
+    };
+
+    const req = new Request("http://localhost/mta-hook", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-API-KEY": "test-api-key" },
+      body: JSON.stringify(replyPayload),
+    });
+
+    const res = await app.fetch(req, env);
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(data.action).toBe("accept");
+    expect(data.modifications.folder).toBe("Test-Campaign/replied");
+  });
+
+  it("should store sender_flag in insertMessage when Reply-To differs", async () => {
+    env.AI.run.mockResolvedValueOnce({ data: [new Array(1024).fill(0.2)] });
+    mockFetch.mockResolvedValueOnce(createMockResponse([{ id: 10, name: "Test Campaign", similarity: 0.8 }]));
+    mockFetch.mockResolvedValueOnce(createMockResponse([]));
+    mockFetch.mockResolvedValueOnce(createMockResponse([{ id: 1, name: "Test Politician" }]));
+    env.AI.run.mockResolvedValueOnce({ data: [new Array(1024).fill(0.2)] });
+    mockFetch.mockResolvedValueOnce(createMockResponse([{ count: 0 }]));
+    mockFetch.mockResolvedValueOnce(createMockResponse([{ id: 105 }]));
+
+    const flaggedPayload = {
+      ...stalwartPayload,
+      sender: "envelope@example.com",
+      headers: {
+        from: '"Sender" <from@example.com>',
+        "reply-to": "different@example.com",
+        subject: "Important Issue",
+      },
+    };
+
+    const req = new Request("http://localhost/mta-hook", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-API-KEY": "test-api-key" },
+      body: JSON.stringify(flaggedPayload),
+    });
+
+    const res = await app.fetch(req, env);
+    expect(res.status).toBe(200);
+
+    // The last fetch call should be the insertMessage call; verify body contains sender_flag
+    const insertCall = mockFetch.mock.calls[mockFetch.mock.calls.length - 1];
+    const insertBody = JSON.parse(insertCall[1]?.body as string);
+    expect(Array.isArray(insertBody) ? insertBody[0].sender_flag : insertBody.sender_flag).toBe("replyToDiffers");
+  });
+
+  it("should fail-open and accept email when a backend error occurs during processing", async () => {
+    env.AI.run.mockResolvedValueOnce({ data: [new Array(1024).fill(0.2)] });
+    // classifyMessage (shared) -> success
+    mockFetch.mockResolvedValueOnce(createMockResponse([{ id: 10, name: "Test Campaign", similarity: 0.8 }]));
+    // checkExternalIdExists -> not duplicate
+    mockFetch.mockResolvedValueOnce(createMockResponse([]));
+    // findPoliticianByEmail -> found
+    mockFetch.mockResolvedValueOnce(createMockResponse([{ id: 1, name: "Test Politician" }]));
+    // AI embedding
+    env.AI.run.mockResolvedValueOnce({ data: [new Array(1024).fill(0.2)] });
+    // getDuplicateRank -> 0
+    mockFetch.mockResolvedValueOnce(createMockResponse([{ count: 0 }]));
+    // insertMessage -> DB error (500)
+    mockFetch.mockResolvedValueOnce(createMockResponse({ message: "DB error" }, 500));
+
+    const req = new Request("http://localhost/mta-hook", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-API-KEY": "test-api-key" },
+      body: JSON.stringify(stalwartPayload),
+    });
+
+    const res = await app.fetch(req, env);
+    const data = await res.json();
+
+    // Email must never be lost - always accept (fail-open)
+    expect(data.action).toBe("accept");
+    expect(data.modifications.folder).toBe("System/Unprocessed");
+  });
+
+  it("should assign the same campaign folder to all recipients of a multi-recipient email", async () => {
+    // AI always returns a valid embedding
+    env.AI.run.mockResolvedValue({ data: [new Array(1024).fill(0.2)] });
+
+    // URL-aware mock: Promise.all interleaves fetch calls between recipients,
+    // so we use mockImplementation to return the right response regardless of order.
+    mockFetch.mockImplementation(async (url: string | URL | Request, options: any) => {
+      const urlStr = url instanceof Request ? url.url : url.toString();
+      // classifyMessage RPC
+      if (urlStr.includes("find_similar_campaigns")) {
+        return createMockResponse([{ id: 10, name: "Test Campaign", similarity: 0.8 }]);
+      }
+      // getDuplicateRank uses HEAD with count=exact
+      if (options?.method === "HEAD") {
+        return createMockResponse(null, 200, { "Content-Range": "0/0" });
+      }
+      // findPoliticianByEmail - exact match (GET to politicians table)
+      if (urlStr.includes("/politicians")) {
+        if (urlStr.includes("politician%40example.com")) {
+          return createMockResponse([{ id: 1, name: "Politician One", email: "politician@example.com", active: true }]);
+        }
+        return createMockResponse([{ id: 2, name: "Politician Two", email: "other@example.com", active: true }]);
+      }
+      // insertMessage uses POST body
+      if (options?.method === "POST") {
+        return createMockResponse([{ id: 200 }]);
+      }
+      // checkExternalIdExists (GET to messages, not HEAD) -> not duplicate
+      return createMockResponse([]);
+    });
+
+    const multiPayload = {
+      ...stalwartPayload,
+      recipients: ["politician@example.com", "other@example.com"],
+    };
+
+    const req = new Request("http://localhost/mta-hook", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-API-KEY": "test-api-key" },
+      body: JSON.stringify(multiPayload),
+    });
+
+    const res = await app.fetch(req, env);
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(data.action).toBe("accept");
+    // Both recipients use the shared campaign classification → same campaign in folder
+    expect(data.modifications.folder).toContain("Test-Campaign");
+  });
 });

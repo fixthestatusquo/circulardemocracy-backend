@@ -3,7 +3,12 @@ import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { cors } from "hono/cors";
 import { DatabaseClient, type MessageInsert, hashEmail } from "./database";
 import type { Ai } from "./message_processor";
-import TurndownService from "turndown";
+
+// =============================================================================
+// SENDER FLAG TYPE
+// =============================================================================
+
+type SenderFlag = "normal" | "replyToDiffers" | "suspicious";
 
 // Environment variables interface
 interface Env {
@@ -114,15 +119,13 @@ app.use(
   }),
 );
 
-// Database client middleware
+// Database client middleware - allows injection for testing
 app.use("*", async (c, next) => {
-  c.set(
-    "db",
-    new DatabaseClient({
-      url: c.env.SUPABASE_URL,
-      key: c.env.SUPABASE_KEY,
-    }),
-  );
+  const db = c.get("db") || new DatabaseClient({
+    url: c.env.SUPABASE_URL,
+    key: c.env.SUPABASE_KEY,
+  });
+  c.set("db", db);
   await next();
 });
 
@@ -188,9 +191,7 @@ app.openapi(mtaHookRoute, async (c) => {
     );
 
     // Extract actual sender from headers (considering SPF/DKIM)
-    const senderResult = extractSenderEmail(hookData);
-    const senderEmail = senderResult.email;
-    const senderFlag = senderResult.flag;
+    const senderEmail = extractSenderEmail(hookData);
     const senderName = extractSenderName(hookData);
 
     // Process all recipients and ensure they get the same campaign folder
@@ -218,7 +219,6 @@ app.openapi(mtaHookRoute, async (c) => {
           senderName,
           recipientEmail,
           sharedCampaignClassification,
-          senderFlag,
         );
       }),
     );
@@ -245,23 +245,13 @@ app.openapi(mtaHookRoute, async (c) => {
   } catch (error) {
     console.error("MTA Hook processing error:", error);
 
-    // Always accept on error to avoid email loss, route to unprocessed
+    // Always accept on error to avoid email loss
     const errorRes: ErrorResponse = {
       action: "accept",
       error: error instanceof Error ? error.message : "Unknown error",
     };
-
-    // Return with folder assignment for fallback
-    return c.json({
-      ...errorRes,
-      modifications: {
-        folder: "unprocessed",
-        headers: {
-          "X-CircularDemocracy-Status": "backend-error",
-          "X-CircularDemocracy-Error": error instanceof Error ? error.message : "Unknown error",
-        },
-      },
-    }, 500);
+    // src/stalwart.ts - Stalwart MTA Hook Worker
+    return c.json<ErrorResponse>(errorRes, 500);
   }
 });
 
@@ -286,7 +276,6 @@ async function processEmailForRecipient(
   _senderName: string,
   recipientEmail: string,
   sharedCampaignClassification: { campaign_name: string; confidence: number; campaign_id: number } | null,
-  senderFlag?: string,
 ): Promise<StalwartResponse> {
   try {
     // Step 1: Check for duplicate message
@@ -364,6 +353,20 @@ async function processEmailForRecipient(
       classification.campaign_id,
     );
 
+    // Step 5b: Compute sender flag and reply status
+    const replyToHeader = getHeader(hookData.headers, "reply-to");
+    const fromHeader = getHeader(hookData.headers, "from");
+    const replyToEmail = replyToHeader ? extractEmailFromHeader(replyToHeader) : null;
+    const fromEmail = fromHeader ? extractEmailFromHeader(fromHeader) : null;
+    const senderFlag: SenderFlag = determineSenderFlag(replyToEmail, fromEmail, hookData.sender);
+    const isReply = detectReply(hookData.headers);
+
+    if (senderFlag !== "normal") {
+      console.log(
+        `[Analytics] Flagged email: messageId=${hookData.messageId} senderFlag=${senderFlag} replyTo=${replyToEmail} from=${fromEmail} envelope=${hookData.sender}`,
+      );
+    }
+
     // Step 6: Store message metadata
     const messageData: MessageInsert = {
       external_id: hookData.messageId,
@@ -379,13 +382,12 @@ async function processEmailForRecipient(
       duplicate_rank: duplicateRank,
       processing_status: "processed",
       sender_flag: senderFlag,
-      is_reply: detectIfReply(hookData),
+      is_reply: isReply,
     };
 
     await db.insertMessage(messageData);
 
     // Step 7: Generate folder and response
-    const isReply = detectIfReply(hookData);
     const folderName = generateFolderName(classification, duplicateRank, isReply);
 
     return {
@@ -410,7 +412,7 @@ async function processEmailForRecipient(
       action: "accept" as const,
       confidence: 0.0,
       modifications: {
-        folder: "unprocessed",
+        folder: "System/Unprocessed",
         headers: {
           "X-CircularDemocracy-Status": "error",
           "X-CircularDemocracy-Error":
@@ -425,53 +427,80 @@ async function processEmailForRecipient(
 // UTILITY FUNCTIONS
 // =============================================================================
 
+function extractEmailFromHeader(headerValue: string): string | null {
+  const emailMatch = headerValue.match(/<([^>]+)>/) || [null, headerValue];
+  const email = emailMatch[1]?.trim() || headerValue.trim();
+  return email && isValidEmail(email) ? email : null;
+}
+
+function determineSenderFlag(
+  replyToEmail: string | null,
+  fromEmail: string | null,
+  envelopeSender: string,
+): SenderFlag {
+  if (!replyToEmail) return "normal";
+  const rt = replyToEmail.toLowerCase();
+  const from = fromEmail?.toLowerCase() ?? null;
+  const env = envelopeSender.toLowerCase();
+  if (rt !== from && rt !== env) return "replyToDiffers";
+  if (rt !== env) return "suspicious";
+  return "normal";
+}
+
+function detectReply(headers: Record<string, string | string[]>): boolean {
+  if (getHeader(headers, "in-reply-to") || getHeader(headers, "references")) return true;
+  const subject = getHeader(headers, "subject");
+  if (subject && /^(re:|fwd:|fw:)/i.test(subject.trim())) return true;
+  return false;
+}
+
+function htmlToMarkdown(html: string): string {
+  let text = html;
+  text = text.replace(/<br\s*\/?>/gi, "\n");
+  text = text.replace(/<\/p>/gi, "\n\n");
+  text = text.replace(/<p[^>]*>/gi, "");
+  text = text.replace(/<strong[^>]*>(.*?)<\/strong>/gi, "**$1**");
+  text = text.replace(/<b[^>]*>(.*?)<\/b>/gi, "**$1**");
+  text = text.replace(/<em[^>]*>(.*?)<\/em>/gi, "*$1*");
+  text = text.replace(/<i[^>]*>(.*?)<\/i>/gi, "*$1*");
+  text = text.replace(/<a[^>]*href=["']([^"']*)["'][^>]*>(.*?)<\/a>/gi, "[$2]($1)");
+  text = text.replace(/<h1[^>]*>(.*?)<\/h1>/gi, "# $1\n\n");
+  text = text.replace(/<h2[^>]*>(.*?)<\/h2>/gi, "## $1\n\n");
+  text = text.replace(/<h3[^>]*>(.*?)<\/h3>/gi, "### $1\n\n");
+  text = text.replace(/<li[^>]*>(.*?)<\/li>/gi, "- $1\n");
+  text = text.replace(/<\/?ul[^>]*>/gi, "\n");
+  text = text.replace(/<\/?ol[^>]*>/gi, "\n");
+  text = text.replace(/<[^>]*>/g, "");
+  text = text.replace(/&nbsp;/g, " ");
+  text = text.replace(/&amp;/g, "&");
+  text = text.replace(/&lt;/g, "<");
+  text = text.replace(/&gt;/g, ">");
+  text = text.replace(/&quot;/g, '"');
+  text = text.replace(/&#39;/g, "'");
+  text = text.replace(/\n{3,}/g, "\n\n");
+  text = text.replace(/[ \t]+/g, " ");
+  return text.trim();
+}
+
 function extractSenderEmail(
   hookData: z.infer<typeof StalwartHookSchema>,
-): { email: string; flag?: string } {
+): string {
   // Priority: Reply-To > From > envelope sender (SPF considerations)
   const replyTo = getHeader(hookData.headers, "reply-to");
-  const from = getHeader(hookData.headers, "from");
-  const envelopeSender = hookData.sender;
-
-  let senderEmail = envelopeSender;
-  let flag: string | undefined;
-
-  // Check for Reply-To vs From/Envelope discrepancies
   if (replyTo && isValidEmail(replyTo)) {
-    senderEmail = replyTo;
+    return replyTo;
+  }
 
-    // Flag if Reply-To differs from From or Envelope
-    const fromEmail = extractEmailFromHeader(from);
-    if (fromEmail && fromEmail !== replyTo) {
-      flag = "reply_to_mismatch_from";
-      console.log(`Sender flag: Reply-To (${replyTo}) differs from From (${fromEmail})`);
-    }
-    if (envelopeSender && envelopeSender !== replyTo) {
-      flag = "reply_to_mismatch_envelope";
-      console.log(`Sender flag: Reply-To (${replyTo}) differs from envelope (${envelopeSender})`);
-    }
-  } else if (from) {
+  const from = getHeader(hookData.headers, "from");
+  if (from) {
     const emailMatch = from.match(/<([^>]+)>/) || [null, from];
     const email = emailMatch[1]?.trim();
     if (email && isValidEmail(email)) {
-      senderEmail = email;
-
-      // Flag if From differs from Envelope
-      if (envelopeSender && envelopeSender !== email) {
-        flag = "from_mismatch_envelope";
-        console.log(`Sender flag: From (${email}) differs from envelope (${envelopeSender})`);
-      }
+      return email;
     }
   }
 
-  return { email: senderEmail, flag };
-}
-
-function extractEmailFromHeader(header: string | null): string | null {
-  if (!header) return null;
-  const emailMatch = header.match(/<([^>]+)>/) || [null, header];
-  const email = emailMatch[1]?.trim();
-  return email && isValidEmail(email) ? email : null;
+  return hookData.sender;
 }
 
 function extractSenderName(
@@ -485,23 +514,22 @@ function extractSenderName(
     }
   }
 
-  const senderResult = extractSenderEmail(hookData);
-  const email = senderResult.email;
+  const email = extractSenderEmail(hookData);
   return email.split("@")[0];
 }
 
 function extractMessageContent(
   hookData: z.infer<typeof StalwartHookSchema>,
 ): string {
-  // Prefer plain text over HTML
+  // Prefer HTML (converted to Markdown) over plain text
+  const htmlContent = hookData.body?.html;
+  if (htmlContent && htmlContent.trim().length > 0) {
+    return htmlToMarkdown(htmlContent);
+  }
+
   const textContent = hookData.body?.text;
   if (textContent && textContent.trim().length > 0) {
     return cleanTextContent(textContent);
-  }
-
-  const htmlContent = hookData.body?.html;
-  if (htmlContent) {
-    return cleanHtmlContent(htmlContent);
   }
 
   return hookData.subject || "";
@@ -513,39 +541,6 @@ function cleanTextContent(text: string): string {
     .replace(/^\s*On .* wrote:\s*$/gm, "") // Remove reply headers
     .replace(/\n{3,}/g, "\n\n") // Normalize newlines
     .trim();
-}
-
-function cleanHtmlContent(html: string): string {
-  try {
-    // Create turndown instance with options for better conversion
-    const turndownService = new TurndownService({
-      headingStyle: 'atx',
-      hr: '---',
-      bulletListMarker: '-',
-      codeBlockStyle: 'fenced',
-      fence: '```',
-      emDelimiter: '*',
-      strongDelimiter: '**',
-      linkStyle: 'inlined',
-      linkReferenceStyle: 'full'
-    });
-
-    // Convert HTML to Markdown
-    const markdown = turndownService.turndown(html);
-
-    // Clean up the markdown result
-    return markdown
-      .replace(/\n{3,}/g, "\n\n") // Normalize excessive newlines
-      .replace(/\s+$/gm, "") // Remove trailing whitespace
-      .trim();
-  } catch (error) {
-    console.error("HTML to Markdown conversion error:", error);
-    // Fallback to basic tag stripping
-    return html
-      .replace(/<[^>]*>/g, " ")
-      .replace(/\s+/g, " ")
-      .trim();
-  }
 }
 
 function getHeader(
@@ -560,31 +555,10 @@ function isValidEmail(email: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
-function detectIfReply(
-  hookData: z.infer<typeof StalwartHookSchema>,
-): boolean {
-  const subject = hookData.subject || "";
-  const inReplyTo = getHeader(hookData.headers, "in-reply-to");
-  const references = getHeader(hookData.headers, "references");
-
-  // Check for common reply indicators in subject
-  const replyPatterns = /^(re:|fw:|fwd:)/i;
-  if (replyPatterns.test(subject.trim())) {
-    return true;
-  }
-
-  // Check for reply headers
-  if (inReplyTo || references) {
-    return true;
-  }
-
-  return false;
-}
-
 function generateFolderName(
   classification: { campaign_name: string; confidence: number },
   duplicateRank: number,
-  isReply: boolean,
+  isReply = false,
 ): string {
   const campaignFolder = classification.campaign_name
     .replace(/[^a-zA-Z0-9\-_\s]/g, "")
@@ -595,12 +569,12 @@ function generateFolderName(
     return `${campaignFolder}/Duplicates`;
   }
 
-  if (isReply) {
-    return `${campaignFolder}/replied`;
-  }
-
   if (classification.confidence < 0.3) {
     return `${campaignFolder}/unchecked`;
+  }
+
+  if (isReply) {
+    return `${campaignFolder}/replied`;
   }
 
   return `${campaignFolder}/inbox`;
