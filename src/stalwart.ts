@@ -9,6 +9,7 @@ interface Env {
   AI: Ai;
   SUPABASE_URL: string;
   SUPABASE_KEY: string;
+  API_KEY: string;
 }
 
 interface Variables {
@@ -164,6 +165,18 @@ const mtaHookRoute = createRoute({
 });
 
 app.openapi(mtaHookRoute, async (c) => {
+  // Authentication check
+  const apiKey = c.req.header("X-API-KEY");
+  if (!apiKey || apiKey !== c.env.API_KEY) {
+    return c.json(
+      {
+        action: "reject" as const,
+        reject_reason: "Unauthorized: Invalid or missing API key",
+      },
+      401,
+    );
+  }
+
   const db = c.get("db");
 
   try {
@@ -177,7 +190,21 @@ app.openapi(mtaHookRoute, async (c) => {
     const senderEmail = extractSenderEmail(hookData);
     const senderName = extractSenderName(hookData);
 
-    // Process each recipient
+    // Process all recipients and ensure they get the same campaign folder
+    // First, classify the message once to determine the campaign
+    const messageContent = extractMessageContent(hookData);
+    let sharedCampaignClassification: { campaign_name: string; confidence: number; campaign_id: number } | null = null;
+
+    if (messageContent.length >= 10) {
+      try {
+        const embedding = await generateEmbedding(c.env.AI, messageContent);
+        sharedCampaignClassification = await db.classifyMessage(embedding);
+      } catch (error) {
+        console.error("Failed to classify message:", error);
+      }
+    }
+
+    // Process each recipient with the shared campaign classification
     const results = await Promise.all(
       hookData.recipients.map(async (recipientEmail) => {
         return await processEmailForRecipient(
@@ -187,6 +214,7 @@ app.openapi(mtaHookRoute, async (c) => {
           senderEmail,
           senderName,
           recipientEmail,
+          sharedCampaignClassification,
         );
       }),
     );
@@ -200,7 +228,7 @@ app.openapi(mtaHookRoute, async (c) => {
       return c.json<StalwartResponse>(emptyRes);
     }
 
-    // Use the result with highest confidence
+    // Use the result with highest confidence (they should all have same folder now)
     const bestResult: StalwartResponse = results.reduce((best, current) =>
       (current.confidence || 0) > (best.confidence || 0) ? current : best,
     );
@@ -218,7 +246,7 @@ app.openapi(mtaHookRoute, async (c) => {
       action: "accept",
       error: error instanceof Error ? error.message : "Unknown error",
     };
-// src/stalwart.ts - Stalwart MTA Hook Worker
+    // src/stalwart.ts - Stalwart MTA Hook Worker
     return c.json<ErrorResponse>(errorRes, 500);
   }
 });
@@ -243,6 +271,7 @@ async function processEmailForRecipient(
   senderEmail: string,
   _senderName: string,
   recipientEmail: string,
+  sharedCampaignClassification: { campaign_name: string; confidence: number; campaign_id: number } | null,
 ): Promise<StalwartResponse> {
   try {
     // Step 1: Check for duplicate message
@@ -251,11 +280,25 @@ async function processEmailForRecipient(
       "stalwart",
     );
     if (isDuplicate) {
+      if (sharedCampaignClassification) {
+        const campaignFolder = sharedCampaignClassification.campaign_name
+          .replace(/[^a-zA-Z0-9\-_\s]/g, "")
+          .replace(/\s+/g, "-")
+          .substring(0, 50);
+        return {
+          action: "accept" as const,
+          confidence: 1.0,
+          modifications: {
+            folder: `${campaignFolder}/Duplicates`,
+            headers: { "X-CircularDemocracy-Status": "duplicate" },
+          },
+        };
+      }
       return {
         action: "accept" as const,
         confidence: 1.0,
         modifications: {
-          folder: "CircularDemocracy/System/Duplicates",
+          folder: "System/Duplicates",
           headers: { "X-CircularDemocracy-Status": "duplicate" },
         },
       };
@@ -268,7 +311,7 @@ async function processEmailForRecipient(
         action: "accept" as const,
         confidence: 0.0,
         modifications: {
-          folder: "CircularDemocracy/System/Unknown",
+          folder: "System/Unknown",
           headers: { "X-CircularDemocracy-Status": "politician-not-found" },
         },
       };
@@ -281,15 +324,22 @@ async function processEmailForRecipient(
         action: "accept" as const,
         confidence: 0.1,
         modifications: {
-          folder: "CircularDemocracy/System/TooShort",
+          folder: "System/TooShort",
           headers: { "X-CircularDemocracy-Status": "message-too-short" },
         },
       };
     }
 
-    // Step 4: Generate embedding and classify
-    const embedding = await generateEmbedding(ai, messageContent);
-    const classification = await db.classifyMessage(embedding);
+    // Step 4: Use shared classification or classify if not available
+    let classification: { campaign_name: string; confidence: number; campaign_id: number };
+    let embedding: number[];
+    if (sharedCampaignClassification) {
+      classification = sharedCampaignClassification;
+      embedding = await generateEmbedding(ai, messageContent);
+    } else {
+      embedding = await generateEmbedding(ai, messageContent);
+      classification = await db.classifyMessage(embedding);
+    }
 
     // Step 5: Check for logical duplicates
     const senderHash = await hashEmail(senderEmail);
@@ -342,7 +392,7 @@ async function processEmailForRecipient(
       action: "accept" as const,
       confidence: 0.0,
       modifications: {
-        folder: "CircularDemocracy/System/ProcessingError",
+        folder: "System/ProcessingError",
         headers: {
           "X-CircularDemocracy-Status": "error",
           "X-CircularDemocracy-Error":
@@ -441,21 +491,20 @@ function generateFolderName(
   classification: { campaign_name: string; confidence: number },
   duplicateRank: number,
 ): string {
-  const baseFolder = "CircularDemocracy";
   const campaignFolder = classification.campaign_name
     .replace(/[^a-zA-Z0-9\-_\s]/g, "")
     .replace(/\s+/g, "-")
     .substring(0, 50); // Limit folder name length
 
   if (duplicateRank > 0) {
-    return `${baseFolder}/${campaignFolder}/Duplicates`;
+    return `${campaignFolder}/Duplicates`;
   }
 
   if (classification.confidence < 0.3) {
-    return `${baseFolder}/${campaignFolder}/LowConfidence`;
+    return `${campaignFolder}/unchecked`;
   }
 
-  return `${baseFolder}/${campaignFolder}`;
+  return `${campaignFolder}/inbox`;
 }
 
 async function generateEmbedding(ai: Ai, text: string): Promise<number[]> {

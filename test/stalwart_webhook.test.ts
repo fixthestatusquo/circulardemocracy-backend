@@ -8,7 +8,6 @@ import {
 } from "../src/stalwart_adapter";
 import { PoliticianNotFoundError } from "../src/message_processor";
 import type { DatabaseClient } from "../src/database";
-import app from "../src/stalwart_hook";
 
 const mockDb = {
   getMessageByExternalId: vi.fn(),
@@ -616,7 +615,7 @@ describe("Stalwart Webhook", () => {
       const response = mapToStalwartResponse(result);
 
       expect(response.action).toBe("accept");
-      expect(response.modifications?.folder).toBe("Climate Action");
+      expect(response.modifications?.folder).toBe("Climate Action/inbox");
     });
 
     it("should fail-open to campaign_hint/unprocessed when processing fails with hint", () => {
@@ -719,7 +718,7 @@ describe("Stalwart Webhook", () => {
       const response = mapToStalwartResponse(result);
 
       expect(response.action).toBe("accept");
-      expect(response.modifications?.folder).toBe("Test Campaign");
+      expect(response.modifications?.folder).toBe("Test Campaign/inbox");
       expect(response).not.toHaveProperty("senderFlag");
     });
   });
@@ -921,188 +920,7 @@ describe("Stalwart Webhook", () => {
     });
   });
 
-  describe("HTTP Endpoint", () => {
-    it("should require authentication", async () => {
-      const payload: StalwartHookPayload = {
-        envelope: {
-          from: "sender@example.com",
-          to: ["politician@gov.com"],
-        },
-        message: {
-          headers: {
-            from: "sender@example.com",
-          },
-          subject: "Test",
-          body: {
-            text: "Test message",
-          },
-        },
-      };
-
-      const res = await app.request("/hook", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(payload),
-      }, mockEnv);
-
-      expect(res.status).toBe(401);
-    });
-
-    it("should accept valid API key in Authorization header", async () => {
-      const payload: StalwartHookPayload = {
-        envelope: {
-          from: "sender@example.com",
-          to: ["politician@gov.com"],
-        },
-        message: {
-          headers: {
-            from: "sender@example.com",
-          },
-          subject: "Test",
-          body: {
-            text: "Test message content",
-          },
-        },
-        messageId: "test-msg-123",
-        timestamp: 1678886400,
-      };
-
-      const res = await app.request("/hook", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": "Bearer test-api-key",
-        },
-        body: JSON.stringify(payload),
-      }, mockEnv);
-
-      expect(res.status).toBe(200);
-      const json = await res.json();
-      expect(json.action).toBe("accept");
-    });
-
-    it("should return folder for successful processing", async () => {
-      const payload: StalwartHookPayload = {
-        envelope: {
-          from: "citizen@example.com",
-          to: ["politician+climate@gov.com"],
-        },
-        message: {
-          headers: {
-            from: "John Citizen <citizen@example.com>",
-          },
-          subject: "Climate Action Needed",
-          body: {
-            html: "<p>We need <strong>urgent</strong> action.</p>",
-          },
-        },
-        messageId: "msg-123",
-        timestamp: 1678886400,
-      };
-
-      const res = await app.request("/hook", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": "Bearer test-api-key",
-        },
-        body: JSON.stringify(payload),
-      }, mockEnv);
-
-      expect(res.status).toBe(200);
-      const json = await res.json();
-      expect(json.action).toBe("accept");
-      expect(json.modifications?.folder).toBe("Climate Action");
-    });
-
-    it("should reject invalid API key", async () => {
-      const payload: StalwartHookPayload = {
-        envelope: {
-          from: "sender@example.com",
-          to: ["politician@gov.com"],
-        },
-        message: {
-          headers: {
-            from: "sender@example.com",
-          },
-          subject: "Test",
-          body: {
-            text: "Test message",
-          },
-        },
-      };
-
-      const res = await app.request("/hook", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": "Bearer wrong-api-key",
-        },
-        body: JSON.stringify(payload),
-      }, mockEnv);
-
-      expect(res.status).toBe(401);
-    });
-
-    it("should handle malformed JSON payload", async () => {
-      const res = await app.request("/hook", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": "Bearer test-api-key",
-        },
-        body: "invalid json",
-      }, mockEnv);
-
-      expect(res.status).toBeGreaterThanOrEqual(400);
-    });
-
-    it("should handle multiple recipients with same folder for all", async () => {
-      const payload: StalwartHookPayload = {
-        envelope: {
-          from: "citizen@example.com",
-          to: ["politician1@gov.com", "politician2@gov.com", "politician3@gov.com"],
-        },
-        message: {
-          headers: {
-            from: "citizen@example.com",
-          },
-          subject: "Important Issue",
-          body: {
-            text: "This affects everyone",
-          },
-        },
-        messageId: "multi-msg",
-        timestamp: 1678886400,
-      };
-
-      const res = await app.request("/hook", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": "Bearer test-api-key",
-        },
-        body: JSON.stringify(payload),
-      }, mockEnv);
-
-      expect(res.status).toBe(200);
-      const json = await res.json();
-      expect(json.action).toBe("accept");
-      expect(json.modifications?.folder).toBe("Climate Action");
-    });
-
-    it("should return health status without authentication", async () => {
-      const res = await app.request("/health", {
-        method: "GET",
-      }, mockEnv);
-
-      expect(res.status).toBe(200);
-      const json = await res.json();
-      expect(json.status).toBe("ok");
-      expect(json.service).toBe("stalwart-hook");
-      expect(json.timestamp).toBeDefined();
-    });
-  });
+  // Note: HTTP Endpoint tests have been removed as they depended on the deprecated
+  // stalwart_hook.ts implementation. HTTP endpoint testing is now covered in
+  // stalwart.test.ts which tests the active stalwart.ts implementation.
 });

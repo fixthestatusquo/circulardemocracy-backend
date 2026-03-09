@@ -28,6 +28,8 @@ export interface MessageInput {
   timestamp: string;
   channel_source?: string;
   campaign_hint?: string;
+  sender_flag?: string;
+  is_reply?: boolean;
 }
 
 export interface MessageProcessingResult {
@@ -116,6 +118,8 @@ export async function processMessage(
     received_at: data.timestamp,
     duplicate_rank: duplicateRank,
     processing_status: "processed",
+    sender_flag: data.sender_flag,
+    is_reply: data.is_reply,
   };
 
   const messageId = await db.insertMessage(messageData);

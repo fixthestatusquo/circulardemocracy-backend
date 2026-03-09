@@ -30,6 +30,7 @@ export type SenderFlag = "normal" | "replyToDiffers" | "suspicious";
 export interface StalwartAdapterResult {
   messageInput: MessageInput;
   senderFlag: SenderFlag;
+  isReply: boolean;
 }
 
 function getHeader(
@@ -119,6 +120,22 @@ function extractCampaignHint(recipientEmail: string, subject: string): string | 
   return undefined;
 }
 
+function detectReply(headers: Record<string, string | string[]>): boolean {
+  const inReplyTo = getHeader(headers, "in-reply-to");
+  const references = getHeader(headers, "references");
+  const subject = getHeader(headers, "subject");
+
+  if (inReplyTo || references) {
+    return true;
+  }
+
+  if (subject && /^(re:|fwd:|fw:)/i.test(subject.trim())) {
+    return true;
+  }
+
+  return false;
+}
+
 function determineSenderFlag(
   replyToEmail: string | null,
   fromEmail: string | null,
@@ -196,6 +213,8 @@ export function adaptStalwartHookToMessageInput(
 
   const campaignHint = extractCampaignHint(recipientEmail, subject);
 
+  const isReply = detectReply(headers);
+
   const messageInput: MessageInput = {
     external_id: externalId,
     sender_name: senderName,
@@ -206,17 +225,21 @@ export function adaptStalwartHookToMessageInput(
     timestamp: timestamp,
     channel_source: "stalwart",
     campaign_hint: campaignHint,
+    sender_flag: senderFlag,
+    is_reply: isReply,
   };
 
   return {
     messageInput,
     senderFlag,
+    isReply,
   };
 }
 
 export interface StalwartProcessingResult extends MessageProcessingResult {
   senderFlag: SenderFlag;
   campaign_hint?: string;
+  isReply?: boolean;
 }
 
 export const StalwartResponseSchema = z.object({
@@ -259,10 +282,11 @@ export function mapToStalwartResponse(
   }
 
   if (result.campaign_name) {
+    const folderSuffix = result.isReply ? "replied" : "inbox";
     return {
       action: "accept",
       modifications: {
-        folder: result.campaign_name,
+        folder: `${result.campaign_name}/${folderSuffix}`,
       },
     };
   }
@@ -277,7 +301,7 @@ export async function processStalwartHook(
   ai: Ai,
   payload: StalwartHookPayload,
 ): Promise<StalwartProcessingResult> {
-  const { messageInput, senderFlag } = adaptStalwartHookToMessageInput(payload);
+  const { messageInput, senderFlag, isReply } = adaptStalwartHookToMessageInput(payload);
 
   const result = await processMessage(db, ai, messageInput);
 
@@ -285,5 +309,6 @@ export async function processStalwartHook(
     ...result,
     senderFlag,
     campaign_hint: messageInput.campaign_hint,
+    isReply,
   };
 }
