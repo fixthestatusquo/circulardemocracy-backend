@@ -10,7 +10,7 @@ API for processing citizen messages to politicians
 
 #### POST
 
-**Summary:** Process incoming citizen message
+**Summary:** api/v1/messages
 
 Receives a citizen message, classifies it by campaign, and stores it for politician response
 
@@ -91,7 +91,7 @@ Content-Type: `application/json`
 
 #### GET
 
-**Summary:** Get campaign statistics
+**Summary:** api/v1/campaigns/stats
 
 **Responses:**
 
@@ -254,6 +254,46 @@ Content-Type: `application/json`
 
 ```bash
 ./cli /api/v1/login --method=POST --name=example --param=value
+```
+
+---
+
+### /mta-hook
+
+#### POST
+
+**Summary:** /mta-hook
+
+Processes incoming emails and provides routing instructions
+
+**Request Body:**
+
+Content-Type: `application/json`
+
+| Property | Type | Required | Description |
+|----------|------|----------|--------------|
+| messageId | string | ✓ | Stalwart internal message ID |
+| queueId | string |  | Queue ID for tracking |
+| sender | string | ✓ | Envelope sender |
+| recipients | array | ✓ | All envelope recipients |
+| headers | object | ✓ | All email headers |
+| subject | string |  |  |
+| body | object |  |  |
+| size | number | ✓ | Message size in bytes |
+| timestamp | number | ✓ | Unix timestamp when received |
+| spf | object |  |  |
+| dkim | array |  |  |
+| dmarc | object |  |  |
+
+**Responses:**
+
+- **200**: Instructions for message handling
+- **500**: Error - default to accept
+
+**CLI Example:**
+
+```bash
+./cli /mta-hook --method=POST --name=example --param=value
 ```
 
 ---

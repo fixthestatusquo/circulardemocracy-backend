@@ -146,7 +146,7 @@ const messageRoute = createRoute({
     },
   },
   tags: ["Messages"],
-  summary: "Process incoming citizen message",
+  summary: "api/v1/messages",
   description:
     "Receives a citizen message, classifies it by campaign, and stores it for politician response",
 });
