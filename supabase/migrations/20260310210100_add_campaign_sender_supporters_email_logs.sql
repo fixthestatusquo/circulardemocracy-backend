@@ -55,6 +55,7 @@ CREATE INDEX IF NOT EXISTS idx_email_logs_campaign_sent_at
 ON email_logs(campaign_id, sent_at DESC);
 
 -- Keep supporters.updated_at fresh
+DROP TRIGGER IF EXISTS update_supporters_updated_at ON supporters;
 CREATE TRIGGER update_supporters_updated_at
 BEFORE UPDATE ON supporters
 FOR EACH ROW

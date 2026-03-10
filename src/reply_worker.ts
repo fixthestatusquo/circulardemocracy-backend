@@ -1,7 +1,7 @@
 // Reply Worker - Background worker for sending scheduled auto-replies
 // Runs periodically to process pending and scheduled reply emails
 
-import type { DatabaseClient, ReplyTemplate } from "./database";
+import type { DatabaseClient } from "./database";
 import { JMAPClient, type EmailMessage } from "./jmap_client";
 import { renderEmailLayout } from "./email_layout";
 
