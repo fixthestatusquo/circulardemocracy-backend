@@ -79,6 +79,16 @@
                     "maxLength": 10000,
                     "description": "Message body content"
                   },
+                  "html_content": {
+                    "type": "string",
+                    "maxLength": 50000,
+                    "description": "HTML version of message content"
+                  },
+                  "text_content": {
+                    "type": "string",
+                    "maxLength": 50000,
+                    "description": "Plain text version of message content"
+                  },
                   "timestamp": {
                     "type": "string",
                     "format": "date-time",
@@ -1066,6 +1076,251 @@
           }
         }
       }
+    },
+    "/mta-hook": {
+      "post": {
+        "tags": [
+          "Stalwart"
+        ],
+        "summary": "/mta-hook",
+        "description": "Processes incoming emails and provides routing instructions",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "messageId": {
+                    "type": "string",
+                    "description": "Stalwart internal message ID"
+                  },
+                  "queueId": {
+                    "type": "string",
+                    "description": "Queue ID for tracking"
+                  },
+                  "sender": {
+                    "type": "string",
+                    "format": "email",
+                    "description": "Envelope sender"
+                  },
+                  "recipients": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "format": "email"
+                    },
+                    "description": "All envelope recipients"
+                  },
+                  "headers": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      ]
+                    },
+                    "description": "All email headers"
+                  },
+                  "subject": {
+                    "type": "string"
+                  },
+                  "body": {
+                    "type": "object",
+                    "properties": {
+                      "text": {
+                        "type": "string",
+                        "description": "Plain text body"
+                      },
+                      "html": {
+                        "type": "string",
+                        "description": "HTML body"
+                      }
+                    }
+                  },
+                  "size": {
+                    "type": "number",
+                    "description": "Message size in bytes"
+                  },
+                  "timestamp": {
+                    "type": "number",
+                    "description": "Unix timestamp when received"
+                  },
+                  "spf": {
+                    "type": "object",
+                    "properties": {
+                      "result": {
+                        "type": "string",
+                        "enum": [
+                          "pass",
+                          "fail",
+                          "softfail",
+                          "neutral",
+                          "temperror",
+                          "permerror",
+                          "none"
+                        ]
+                      },
+                      "domain": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "result"
+                    ]
+                  },
+                  "dkim": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "result": {
+                          "type": "string",
+                          "enum": [
+                            "pass",
+                            "fail",
+                            "temperror",
+                            "permerror",
+                            "neutral",
+                            "none"
+                          ]
+                        },
+                        "domain": {
+                          "type": "string"
+                        },
+                        "selector": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "result"
+                      ]
+                    }
+                  },
+                  "dmarc": {
+                    "type": "object",
+                    "properties": {
+                      "result": {
+                        "type": "string",
+                        "enum": [
+                          "pass",
+                          "fail",
+                          "temperror",
+                          "permerror",
+                          "none"
+                        ]
+                      },
+                      "policy": {
+                        "type": "string",
+                        "enum": [
+                          "none",
+                          "quarantine",
+                          "reject"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "result"
+                    ]
+                  }
+                },
+                "required": [
+                  "messageId",
+                  "sender",
+                  "recipients",
+                  "headers",
+                  "size",
+                  "timestamp"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Instructions for message handling",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "action": {
+                      "type": "string",
+                      "enum": [
+                        "accept",
+                        "reject",
+                        "quarantine",
+                        "discard"
+                      ]
+                    },
+                    "modifications": {
+                      "type": "object",
+                      "properties": {
+                        "folder": {
+                          "type": "string",
+                          "description": "IMAP folder to store message"
+                        },
+                        "headers": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "type": "string"
+                          }
+                        },
+                        "subject": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "reject_reason": {
+                      "type": "string"
+                    },
+                    "confidence": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1
+                    }
+                  },
+                  "required": [
+                    "action"
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Error - default to accept",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "action": {
+                      "type": "string",
+                      "enum": [
+                        "accept"
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "action",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
     }
-  }
+  },
+  "tags": []
 }
