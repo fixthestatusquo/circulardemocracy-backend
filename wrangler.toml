@@ -2,6 +2,10 @@ name = "circulardemocracy-backend"
 main = "src/index.ts"
 compatibility_date = "2025-09-17"
 
+# Cron Triggers for scheduled tasks
+[triggers]
+crons = ["*/5 * * * *"]  # Run every 5 minutes
+
 [env.production]
 name = "circular-democracy-prod"
 
@@ -19,6 +23,10 @@ custom_domain = true
 [env.production.ai]
 binding = "AI"
 
+# Cron Triggers for production
+[env.production.triggers]
+crons = ["*/5 * * * *"]  # Run every 5 minutes
+
 
 [env.staging]
 name = "circular-democracy-staging"
@@ -34,4 +42,8 @@ custom_domain = true
 
 [env.staging.ai]
 binding = "AI"
+
+# Cron Triggers for staging
+[env.staging.triggers]
+crons = ["*/5 * * * *"]  # Run every 5 minutes
 

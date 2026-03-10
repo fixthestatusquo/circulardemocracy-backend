@@ -13,6 +13,8 @@ const mockDb = {
   classifyMessage: vi.fn(),
   getDuplicateRank: vi.fn(),
   insertMessage: vi.fn(),
+  getActiveTemplateForCampaign: vi.fn(),
+  storeSenderEmail: vi.fn(),
 } as unknown as DatabaseClient;
 
 // Mock Ai
@@ -80,7 +82,9 @@ describe("message_processor", () => {
       confidence: 0.9,
     });
     vi.spyOn(mockDb, "getDuplicateRank").mockResolvedValue(0);
+    vi.spyOn(mockDb, "getActiveTemplateForCampaign").mockResolvedValue(null);
     vi.spyOn(mockDb, "insertMessage").mockResolvedValue(100);
+    vi.spyOn(mockDb, "storeSenderEmail").mockResolvedValue(undefined);
 
     const result = await processMessage(mockDb, mockAi as any, validInput);
 

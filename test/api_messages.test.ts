@@ -11,6 +11,8 @@ const mockDbInstance = {
   classifyMessage: vi.fn(),
   getDuplicateRank: vi.fn(),
   insertMessage: vi.fn(),
+  getActiveTemplateForCampaign: vi.fn(),
+  storeSenderEmail: vi.fn(),
 };
 
 // --- Mock the entire database module ---
@@ -25,6 +27,10 @@ describe("Messages API Integration", () => {
     SUPABASE_URL: "https://test.supabase.co",
     SUPABASE_KEY: "test-key",
     API_KEY: "test-api-key",
+    JMAP_API_URL: "https://jmap.example.com",
+    JMAP_ACCOUNT_ID: "account-1",
+    JMAP_USERNAME: "user",
+    JMAP_PASSWORD: "pass",
   };
 
   const validMessage = {
@@ -132,7 +138,9 @@ describe("Messages API Integration", () => {
       confidence: 0.9,
     });
     mockDbInstance.getDuplicateRank.mockResolvedValue(0);
+    mockDbInstance.getActiveTemplateForCampaign.mockResolvedValue(null);
     mockDbInstance.insertMessage.mockResolvedValue(100);
+    mockDbInstance.storeSenderEmail.mockResolvedValue(undefined);
     // @ts-ignore
     env.AI.run.mockResolvedValue({ data: [[0.1, 0.2]] });
 
