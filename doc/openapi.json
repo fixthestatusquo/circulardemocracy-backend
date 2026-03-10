@@ -79,6 +79,16 @@
                     "maxLength": 10000,
                     "description": "Message body content"
                   },
+                  "html_content": {
+                    "type": "string",
+                    "maxLength": 50000,
+                    "description": "HTML version of message content"
+                  },
+                  "text_content": {
+                    "type": "string",
+                    "maxLength": 50000,
+                    "description": "Plain text version of message content"
+                  },
                   "timestamp": {
                     "type": "string",
                     "format": "date-time",

@@ -44,6 +44,8 @@ const MessageInputSchema = z.object({
     .describe("Email address of the target politician"),
   subject: z.string().max(500).describe("Message subject line"),
   message: z.string().min(10).max(10000).describe("Message body content"),
+  html_content: z.string().max(50000).optional().describe("HTML version of message content"),
+  text_content: z.string().max(50000).optional().describe("Plain text version of message content"),
   timestamp: z
     .string()
     .datetime()

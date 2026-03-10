@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { MessageInput } from "./message_processor";
 import { processMessage, type Ai, type MessageProcessingResult } from "./message_processor";
 import type { DatabaseClient } from "./database";
+import Turndown from "turndown";
 
 export const StalwartHookSchema = z.object({
   context: z.object({}).passthrough().optional(),
@@ -56,54 +57,31 @@ function extractNameFromHeader(headerValue: string): string {
 }
 
 function htmlToMarkdown(html: string): string {
-  let text = html;
+  if (!html || html.trim().length === 0) {
+    return "";
+  }
 
-  text = text.replace(/<br\s*\/?>/gi, "\n");
-  text = text.replace(/<\/p>/gi, "\n\n");
-  text = text.replace(/<p[^>]*>/gi, "");
+  const turndownService = new Turndown({
+    headingStyle: "atx",
+    bulletListMarker: "-",
+    codeBlockStyle: "fenced",
+    fence: "```",
+    emDelimiter: "*",
+    strongDelimiter: "**",
+    linkStyle: "inlined"
+  });
 
-  text = text.replace(/<strong[^>]*>(.*?)<\/strong>/gi, "**$1**");
-  text = text.replace(/<b[^>]*>(.*?)<\/b>/gi, "**$1**");
-  text = text.replace(/<em[^>]*>(.*?)<\/em>/gi, "*$1*");
-  text = text.replace(/<i[^>]*>(.*?)<\/i>/gi, "*$1*");
-
-  text = text.replace(/<a[^>]*href=["']([^"']*)["'][^>]*>(.*?)<\/a>/gi, "[$2]($1)");
-
-  text = text.replace(/<h1[^>]*>(.*?)<\/h1>/gi, "# $1\n\n");
-  text = text.replace(/<h2[^>]*>(.*?)<\/h2>/gi, "## $1\n\n");
-  text = text.replace(/<h3[^>]*>(.*?)<\/h3>/gi, "### $1\n\n");
-
-  text = text.replace(/<li[^>]*>(.*?)<\/li>/gi, "- $1\n");
-  text = text.replace(/<\/?ul[^>]*>/gi, "\n");
-  text = text.replace(/<\/?ol[^>]*>/gi, "\n");
-
-  text = text.replace(/<[^>]*>/g, "");
-
-  text = text.replace(/&nbsp;/g, " ");
-  text = text.replace(/&amp;/g, "&");
-  text = text.replace(/&lt;/g, "<");
-  text = text.replace(/&gt;/g, ">");
-  text = text.replace(/&quot;/g, '"');
-  text = text.replace(/&#39;/g, "'");
-
-  text = text.replace(/\n{3,}/g, "\n\n");
-  text = text.replace(/[ \t]+/g, " ");
-
-  return text.trim();
+  return turndownService.turndown(html).trim();
 }
 
-function extractBody(payload: StalwartHookPayload): string {
+function extractBody(payload: StalwartHookPayload): { htmlContent?: string; textContent?: string } {
   const htmlContent = payload.message.body?.html;
-  if (htmlContent && htmlContent.trim().length > 0) {
-    return htmlToMarkdown(htmlContent);
-  }
-
   const textContent = payload.message.body?.text;
-  if (textContent && textContent.trim().length > 0) {
-    return textContent.trim();
-  }
 
-  return "";
+  return {
+    htmlContent: htmlContent || undefined,
+    textContent: textContent || undefined
+  };
 }
 
 function extractCampaignHint(recipientEmail: string, subject: string): string | undefined {
@@ -201,7 +179,7 @@ export function adaptStalwartHookToMessageInput(
 
   const subject = payload.message.subject || "";
 
-  const body = extractBody(payload);
+  const { htmlContent, textContent } = extractBody(payload);
 
   const externalId = payload.messageId || `stalwart-${Date.now()}-${Math.random().toString(36).substring(7)}`;
 
@@ -221,7 +199,9 @@ export function adaptStalwartHookToMessageInput(
     sender_email: senderEmail,
     recipient_email: recipientEmail,
     subject: subject,
-    message: body,
+    message: textContent || "",
+    html_content: htmlContent,
+    text_content: textContent,
     timestamp: timestamp,
     channel_source: "stalwart",
     campaign_hint: campaignHint,

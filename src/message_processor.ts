@@ -25,6 +25,8 @@ export interface MessageInput {
   recipient_email: string;
   subject: string;
   message: string;
+  html_content?: string;
+  text_content?: string;
   timestamp: string;
   channel_source?: string;
   campaign_hint?: string;
@@ -89,7 +91,8 @@ export async function processMessage(
   }
 
   // 3. Embedding
-  const embedding = await generateEmbedding(ai, data.message);
+  const textForEmbedding = data.text_content || data.message;
+  const embedding = await generateEmbedding(ai, textForEmbedding);
 
   // 4. Classification
   const classification = await db.classifyMessage(

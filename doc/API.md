@@ -26,6 +26,8 @@ Content-Type: `application/json`
 | recipient_email | string | ✓ | Email address of the target politician |
 | subject | string | ✓ | Message subject line |
 | message | string | ✓ | Message body content |
+| html_content | string |  | HTML version of message content |
+| text_content | string |  | Plain text version of message content |
 | timestamp | string | ✓ | When the message was originally sent (ISO 8601) |
 | channel_source | string |  | Source system identifier |
 | campaign_hint | string |  | Optional campaign name hint from sender |
