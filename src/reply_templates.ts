@@ -21,35 +21,6 @@ const app = new OpenAPIHono<{ Bindings: Env; Variables: Variables }>();
 // Apply auth middleware to all routes in this file
 app.use("/api/v1/reply-templates/*", authMiddleware);
 
-function getAuthUserId(c: any): string | null {
-  const jwtPayload =
-    (c.get("jwtPayload") as { sub?: string } | undefined) ||
-    (c.get("jwt") as { payload?: { sub?: string } } | undefined)?.payload;
-
-  if (jwtPayload?.sub) {
-    return jwtPayload.sub;
-  }
-
-  const authHeader = c.req.header("Authorization");
-  if (!authHeader?.startsWith("Bearer ")) {
-    return null;
-  }
-
-  const token = authHeader.replace("Bearer ", "");
-  const parts = token.split(".");
-  if (parts.length < 2) {
-    return null;
-  }
-
-  try {
-    const payloadJson = atob(parts[1].replace(/-/g, "+").replace(/_/g, "/"));
-    const payload = JSON.parse(payloadJson) as { sub?: string };
-    return payload.sub || null;
-  } catch {
-    return null;
-  }
-}
-
 // =============================================================================
 // SCHEMAS
 // =============================================================================
@@ -120,22 +91,8 @@ const listReplyTemplatesRoute = createRoute({
 
 app.openapi(listReplyTemplatesRoute, async (c) => {
   const db = c.get("db") as DatabaseClient;
-  const authUserId = getAuthUserId(c);
-  if (!authUserId) {
-    return c.json({ error: "Unauthorized" }, 401);
-  }
   const data = await db.request<any[]>("/reply_templates?select=*");
-  const filtered = [];
-  for (const template of data) {
-    const canAccess = await db.userCanAccessPolitician(
-      authUserId,
-      template.politician_id,
-    );
-    if (canAccess) {
-      filtered.push(toApiTemplate(template));
-    }
-  }
-  return c.json(filtered);
+  return c.json(data.map(toApiTemplate));
 });
 
 // Get Single Reply Template
@@ -160,23 +117,12 @@ const getReplyTemplateRoute = createRoute({
 
 app.openapi(getReplyTemplateRoute, async (c) => {
   const db = c.get("db") as DatabaseClient;
-  const authUserId = getAuthUserId(c);
-  if (!authUserId) {
-    return c.json({ error: "Unauthorized" }, 401);
-  }
   const { id } = c.req.valid("param");
   const data = await db.request<any[]>(
     `/reply_templates?id=eq.${id}&select=*&limit=1`,
   );
   if (!data || data.length === 0) {
     return c.json({ error: "Not found" }, 404);
-  }
-  const canAccess = await db.userCanAccessPolitician(
-    authUserId,
-    data[0].politician_id,
-  );
-  if (!canAccess) {
-    return c.json({ error: "Forbidden - not authorized to access this template" }, 403);
   }
   return c.json(toApiTemplate(data[0]));
 });
@@ -208,18 +154,7 @@ const createReplyTemplateRoute = createRoute({
 
 app.openapi(createReplyTemplateRoute, async (c) => {
   const db = c.get("db") as DatabaseClient;
-  const authUserId = getAuthUserId(c);
-  if (!authUserId) {
-    return c.json({ error: "Unauthorized" }, 401);
-  }
   const templateDataInput = c.req.valid("json");
-  const canManageCampaign = await db.userOwnsCampaign(
-    authUserId,
-    templateDataInput.campaign_id,
-  );
-  if (!canManageCampaign) {
-    return c.json({ error: "Forbidden - not authorized for this campaign" }, 403);
-  }
   const templateData = {
     ...templateDataInput,
     body: templateDataInput.message_body,
@@ -270,25 +205,9 @@ const updateReplyTemplateRoute = createRoute({
 
 app.openapi(updateReplyTemplateRoute, async (c) => {
   const db = c.get("db") as DatabaseClient;
-  const authUserId = getAuthUserId(c);
-  if (!authUserId) {
-    return c.json({ error: "Unauthorized" }, 401);
-  }
   const { id } = c.req.valid("param");
   const updatesInput = c.req.valid("json");
   const templateId = Number.parseInt(id);
-
-  const existingTemplate = await db.getReplyTemplateById(templateId);
-  if (!existingTemplate) {
-    return c.json({ error: "Template not found" }, 404);
-  }
-  const canManageCampaign = await db.userOwnsCampaign(
-    authUserId,
-    existingTemplate.campaign_id,
-  );
-  if (!canManageCampaign) {
-    return c.json({ error: "Forbidden - not authorized to update this template" }, 403);
-  }
 
   const updates: Record<string, unknown> = { ...updatesInput };
   if (updatesInput.message_body !== undefined) {
@@ -336,28 +255,10 @@ const deleteReplyTemplateRoute = createRoute({
 
 app.openapi(deleteReplyTemplateRoute, async (c) => {
   const db = c.get("db") as DatabaseClient;
-  const authUserId = getAuthUserId(c);
-  if (!authUserId) {
-    return c.json({ error: "Unauthorized" }, 401);
-  }
   const { id } = c.req.valid("param");
   const templateId = Number.parseInt(id);
 
   try {
-    // Verify template exists
-    const existingTemplate = await db.getReplyTemplateById(templateId);
-    if (!existingTemplate) {
-      return c.json({ error: "Template not found" }, 404);
-    }
-    const canManageCampaign = await db.userOwnsCampaign(
-      authUserId,
-      existingTemplate.campaign_id,
-    );
-    if (!canManageCampaign) {
-      return c.json({ error: "Forbidden - not authorized to delete this template" }, 403);
-    }
-
-    // Delete the template
     await db.deleteReplyTemplate(templateId);
     return c.body(null, 204);
   } catch (error) {
@@ -404,10 +305,6 @@ const toggleTemplateActiveRoute = createRoute({
 
 app.openapi(toggleTemplateActiveRoute, async (c) => {
   const db = c.get("db") as DatabaseClient;
-  const authUserId = getAuthUserId(c);
-  if (!authUserId) {
-    return c.json({ error: "Unauthorized" }, 401);
-  }
   const { id } = c.req.valid("param");
   const { active } = c.req.valid("json");
   const templateId = Number.parseInt(id);
@@ -416,13 +313,6 @@ app.openapi(toggleTemplateActiveRoute, async (c) => {
     const existingTemplate = await db.getReplyTemplateById(templateId);
     if (!existingTemplate) {
       return c.json({ error: "Template not found" }, 404);
-    }
-    const canManageCampaign = await db.userOwnsCampaign(
-      authUserId,
-      existingTemplate.campaign_id,
-    );
-    if (!canManageCampaign) {
-      return c.json({ error: "Forbidden - not authorized to update this template" }, 403);
     }
 
     // If activating, deactivate other templates for this campaign
