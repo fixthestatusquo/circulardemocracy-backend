@@ -1,12 +1,17 @@
 import { Hono } from "hono";
-import apiApp from "./api";
+import apiApp, { handleScheduledEvent } from "./api";
 import { type AuthEnv, apiKeyAuthMiddleware } from "./auth_middleware";
 import stalwartApp from "./stalwart";
 
 // Combine Envs if necessary, or just use a generic Env that includes API_KEY
 interface Env extends AuthEnv {
-  // Add other env vars if needed at the top level,
-  // but usually sub-apps handle their own specific env types.
+  AI: any; // Cloudflare AI binding
+  SUPABASE_URL: string;
+  SUPABASE_KEY: string;
+  JMAP_API_URL: string;
+  JMAP_ACCOUNT_ID: string;
+  JMAP_USERNAME: string;
+  JMAP_PASSWORD: string;
 }
 
 const app = new Hono<{ Bindings: Env }>();
@@ -18,7 +23,32 @@ app.use("/stalwart/*", apiKeyAuthMiddleware);
 // Mount the stalwart app under the /stalwart route
 app.route("/stalwart", stalwartApp);
 
-// Mount the main API app at the root
+// Mount the main API app at the root (includes worker endpoints)
 app.route("/", apiApp);
 
-export default app;
+// Export the Hono app instance for local development
+export { app };
+
+// Export default for Cloudflare Workers
+export default {
+  fetch: app.fetch,
+  // Handle scheduled events (Cloudflare Cron Triggers)
+  async scheduled(
+    event: ScheduledEvent,
+    env: Env,
+    ctx: ExecutionContext,
+  ): Promise<void> {
+    await handleScheduledEvent(env);
+  },
+};
+
+// Types for Cloudflare Workers
+interface ScheduledEvent {
+  cron: string;
+  scheduledTime: number;
+}
+
+interface ExecutionContext {
+  waitUntil(promise: Promise<any>): void;
+  passThroughOnException(): void;
+}

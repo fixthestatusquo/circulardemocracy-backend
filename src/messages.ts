@@ -5,6 +5,7 @@ import {
   PoliticianNotFoundError,
   processMessage,
 } from "./message_processor";
+import { processReplyImmediately, type WorkerConfig } from "./reply_worker";
 
 // Define types for env and app
 interface Env {
@@ -12,6 +13,10 @@ interface Env {
   SUPABASE_URL: string;
   SUPABASE_KEY: string;
   API_KEY: string;
+  JMAP_API_URL: string;
+  JMAP_ACCOUNT_ID: string;
+  JMAP_USERNAME: string;
+  JMAP_PASSWORD: string;
 }
 
 interface Variables {
@@ -146,7 +151,7 @@ const messageRoute = createRoute({
     },
   },
   tags: ["Messages"],
-  summary: "Process incoming citizen message",
+  summary: "/api/v1/messages",
   description:
     "Receives a citizen message, classifies it by campaign, and stores it for politician response",
 });
@@ -157,7 +162,20 @@ app.openapi(messageRoute, async (c) => {
 
   try {
     const data = c.req.valid("json");
-    const result = await processMessage(db, c.env.AI, data);
+    const workerConfig: WorkerConfig = {
+      jmapApiUrl: c.env.JMAP_API_URL,
+      jmapAccountId: c.env.JMAP_ACCOUNT_ID,
+      jmapUsername: c.env.JMAP_USERNAME,
+      jmapPassword: c.env.JMAP_PASSWORD,
+    };
+    const result = await processMessage(
+      db,
+      c.env.AI,
+      data,
+      async (messageId: number) => {
+        await processReplyImmediately(db, workerConfig, messageId);
+      },
+    );
 
     if (result.status === "duplicate") {
       // @ts-ignore

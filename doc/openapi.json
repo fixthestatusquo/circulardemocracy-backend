@@ -753,6 +753,8 @@
     },
     "/api/v1/reply-templates": {
       "get": {
+        "summary": "/api/v1/reply-templates",
+        "description": "Retrieve a list of all campaign auto-reply templates. Templates define automated email responses sent to supporters.",
         "security": [
           {
             "Bearer": []
@@ -786,11 +788,40 @@
                       "subject": {
                         "type": "string"
                       },
-                      "body": {
-                        "type": "string"
+                      "message_body": {
+                        "type": "string",
+                        "description": "Markdown formatted email body"
                       },
                       "active": {
                         "type": "boolean"
+                      },
+                      "layout_type": {
+                        "type": "string",
+                        "enum": [
+                          "text_only",
+                          "standard_header"
+                        ]
+                      },
+                      "send_timing": {
+                        "type": "string",
+                        "enum": [
+                          "immediate",
+                          "office_hours",
+                          "scheduled"
+                        ]
+                      },
+                      "scheduled_for": {
+                        "type": "string",
+                        "nullable": true,
+                        "format": "date-time"
+                      },
+                      "created_at": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      "updated_at": {
+                        "type": "string",
+                        "format": "date-time"
                       }
                     },
                     "required": [
@@ -799,8 +830,12 @@
                       "campaign_id",
                       "name",
                       "subject",
-                      "body",
-                      "active"
+                      "message_body",
+                      "active",
+                      "layout_type",
+                      "send_timing",
+                      "created_at",
+                      "updated_at"
                     ]
                   }
                 }
@@ -810,6 +845,8 @@
         }
       },
       "post": {
+        "summary": "/api/v1/reply-templates",
+        "description": "Create a new auto-reply template for a campaign. The template defines the email content, layout, and scheduling for automated responses to supporters. If active=true, this will deactivate other templates for the same campaign.",
         "security": [
           {
             "Bearer": []
@@ -819,6 +856,7 @@
           "Reply Templates"
         ],
         "requestBody": {
+          "description": "Reply template data including subject, message body (markdown), layout type, and send timing.",
           "content": {
             "application/json": {
               "schema": {
@@ -831,13 +869,42 @@
                     "type": "number"
                   },
                   "name": {
-                    "type": "string"
+                    "type": "string",
+                    "minLength": 3
                   },
                   "subject": {
-                    "type": "string"
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 255
                   },
-                  "body": {
-                    "type": "string"
+                  "message_body": {
+                    "type": "string",
+                    "minLength": 10
+                  },
+                  "layout_type": {
+                    "type": "string",
+                    "enum": [
+                      "text_only",
+                      "standard_header"
+                    ],
+                    "default": "standard_header"
+                  },
+                  "send_timing": {
+                    "type": "string",
+                    "enum": [
+                      "immediate",
+                      "office_hours",
+                      "scheduled"
+                    ],
+                    "default": "office_hours"
+                  },
+                  "scheduled_for": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "active": {
+                    "type": "boolean",
+                    "default": true
                   }
                 },
                 "required": [
@@ -845,7 +912,10 @@
                   "campaign_id",
                   "name",
                   "subject",
-                  "body"
+                  "message_body",
+                  "layout_type",
+                  "send_timing",
+                  "active"
                 ]
               }
             }
@@ -874,11 +944,40 @@
                     "subject": {
                       "type": "string"
                     },
-                    "body": {
-                      "type": "string"
+                    "message_body": {
+                      "type": "string",
+                      "description": "Markdown formatted email body"
                     },
                     "active": {
                       "type": "boolean"
+                    },
+                    "layout_type": {
+                      "type": "string",
+                      "enum": [
+                        "text_only",
+                        "standard_header"
+                      ]
+                    },
+                    "send_timing": {
+                      "type": "string",
+                      "enum": [
+                        "immediate",
+                        "office_hours",
+                        "scheduled"
+                      ]
+                    },
+                    "scheduled_for": {
+                      "type": "string",
+                      "nullable": true,
+                      "format": "date-time"
+                    },
+                    "created_at": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "updated_at": {
+                      "type": "string",
+                      "format": "date-time"
                     }
                   },
                   "required": [
@@ -887,18 +986,27 @@
                     "campaign_id",
                     "name",
                     "subject",
-                    "body",
-                    "active"
+                    "message_body",
+                    "active",
+                    "layout_type",
+                    "send_timing",
+                    "created_at",
+                    "updated_at"
                   ]
                 }
               }
             }
+          },
+          "400": {
+            "description": "Validation failed - check request body"
           }
         }
       }
     },
     "/api/v1/reply-templates/{id}": {
       "get": {
+        "summary": "/api/v1/reply-templates/{id}",
+        "description": "Retrieve detailed information about a specific campaign auto-reply template.",
         "security": [
           {
             "Bearer": []
@@ -911,7 +1019,8 @@
           {
             "schema": {
               "type": "string",
-              "pattern": "^\\\\d+$"
+              "pattern": "^\\\\d+$",
+              "description": "Template ID"
             },
             "required": true,
             "name": "id",
@@ -941,11 +1050,40 @@
                     "subject": {
                       "type": "string"
                     },
-                    "body": {
-                      "type": "string"
+                    "message_body": {
+                      "type": "string",
+                      "description": "Markdown formatted email body"
                     },
                     "active": {
                       "type": "boolean"
+                    },
+                    "layout_type": {
+                      "type": "string",
+                      "enum": [
+                        "text_only",
+                        "standard_header"
+                      ]
+                    },
+                    "send_timing": {
+                      "type": "string",
+                      "enum": [
+                        "immediate",
+                        "office_hours",
+                        "scheduled"
+                      ]
+                    },
+                    "scheduled_for": {
+                      "type": "string",
+                      "nullable": true,
+                      "format": "date-time"
+                    },
+                    "created_at": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "updated_at": {
+                      "type": "string",
+                      "format": "date-time"
                     }
                   },
                   "required": [
@@ -954,8 +1092,329 @@
                     "campaign_id",
                     "name",
                     "subject",
-                    "body",
-                    "active"
+                    "message_body",
+                    "active",
+                    "layout_type",
+                    "send_timing",
+                    "created_at",
+                    "updated_at"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Reply template not found"
+          }
+        }
+      },
+      "patch": {
+        "summary": "/api/v1/reply-templates/{id}",
+        "description": "Update an existing auto-reply template. You can modify the subject, message body, layout type, send timing, and active status. Setting active=true will deactivate other templates for the same campaign.",
+        "security": [
+          {
+            "Bearer": []
+          }
+        ],
+        "tags": [
+          "Reply Templates"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d+$",
+              "description": "Template ID"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "description": "Fields to update. All fields are optional.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 3
+                  },
+                  "subject": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 255
+                  },
+                  "message_body": {
+                    "type": "string",
+                    "minLength": 10
+                  },
+                  "layout_type": {
+                    "type": "string",
+                    "enum": [
+                      "text_only",
+                      "standard_header"
+                    ]
+                  },
+                  "send_timing": {
+                    "type": "string",
+                    "enum": [
+                      "immediate",
+                      "office_hours",
+                      "scheduled"
+                    ]
+                  },
+                  "scheduled_for": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "active": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The updated reply template",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "number"
+                    },
+                    "politician_id": {
+                      "type": "number"
+                    },
+                    "campaign_id": {
+                      "type": "number"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "subject": {
+                      "type": "string"
+                    },
+                    "message_body": {
+                      "type": "string",
+                      "description": "Markdown formatted email body"
+                    },
+                    "active": {
+                      "type": "boolean"
+                    },
+                    "layout_type": {
+                      "type": "string",
+                      "enum": [
+                        "text_only",
+                        "standard_header"
+                      ]
+                    },
+                    "send_timing": {
+                      "type": "string",
+                      "enum": [
+                        "immediate",
+                        "office_hours",
+                        "scheduled"
+                      ]
+                    },
+                    "scheduled_for": {
+                      "type": "string",
+                      "nullable": true,
+                      "format": "date-time"
+                    },
+                    "created_at": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "updated_at": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "politician_id",
+                    "campaign_id",
+                    "name",
+                    "subject",
+                    "message_body",
+                    "active",
+                    "layout_type",
+                    "send_timing",
+                    "created_at",
+                    "updated_at"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failed - check request body"
+          },
+          "403": {
+            "description": "Forbidden - not authorized to update this template"
+          },
+          "404": {
+            "description": "Reply template not found"
+          }
+        }
+      },
+      "delete": {
+        "summary": "/api/v1/reply-templates/{id}",
+        "description": "Permanently delete an auto-reply template. This action cannot be undone.",
+        "security": [
+          {
+            "Bearer": []
+          }
+        ],
+        "tags": [
+          "Reply Templates"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d+$",
+              "description": "Template ID"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Reply template deleted successfully"
+          },
+          "403": {
+            "description": "Forbidden - not authorized to delete this template"
+          },
+          "404": {
+            "description": "Reply template not found"
+          }
+        }
+      }
+    },
+    "/api/v1/reply-templates/{id}/toggle-active": {
+      "post": {
+        "summary": "/api/v1/reply-templates/{id}/toggle-active",
+        "description": "Activate or deactivate an auto-reply template. Only one template can be active per campaign. Setting active=true will automatically deactivate other templates for the same campaign.",
+        "security": [
+          {
+            "Bearer": []
+          }
+        ],
+        "tags": [
+          "Reply Templates"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d+$",
+              "description": "Template ID"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "description": "Activation status to set",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "active": {
+                    "type": "boolean",
+                    "description": "Set to true to activate, false to deactivate"
+                  }
+                },
+                "required": [
+                  "active"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Template activation status updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "number"
+                    },
+                    "politician_id": {
+                      "type": "number"
+                    },
+                    "campaign_id": {
+                      "type": "number"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "subject": {
+                      "type": "string"
+                    },
+                    "message_body": {
+                      "type": "string",
+                      "description": "Markdown formatted email body"
+                    },
+                    "active": {
+                      "type": "boolean"
+                    },
+                    "layout_type": {
+                      "type": "string",
+                      "enum": [
+                        "text_only",
+                        "standard_header"
+                      ]
+                    },
+                    "send_timing": {
+                      "type": "string",
+                      "enum": [
+                        "immediate",
+                        "office_hours",
+                        "scheduled"
+                      ]
+                    },
+                    "scheduled_for": {
+                      "type": "string",
+                      "nullable": true,
+                      "format": "date-time"
+                    },
+                    "created_at": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "updated_at": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "politician_id",
+                    "campaign_id",
+                    "name",
+                    "subject",
+                    "message_body",
+                    "active",
+                    "layout_type",
+                    "send_timing",
+                    "created_at",
+                    "updated_at"
                   ]
                 }
               }

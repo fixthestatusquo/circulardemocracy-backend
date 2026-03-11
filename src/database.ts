@@ -21,6 +21,8 @@ export interface Campaign {
   name: string;
   slug: string;
   status: string;
+  technical_email?: string | null;
+  reply_to_email?: string | null;
   reference_vector?: number[];
 }
 
@@ -37,6 +39,23 @@ export interface MessageInsert {
   received_at: string;
   duplicate_rank: number;
   processing_status: string;
+  reply_status?: 'pending' | 'scheduled' | 'sent' | null;
+  reply_scheduled_at?: string | null;
+}
+
+export interface ReplyTemplate {
+  id: number;
+  politician_id: number;
+  campaign_id: number;
+  name: string;
+  subject: string;
+  body: string;
+  active: boolean;
+  layout_type: 'text_only' | 'standard_header';
+  send_timing: 'immediate' | 'office_hours' | 'scheduled';
+  scheduled_for?: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface ClassificationResult {
@@ -59,16 +78,82 @@ export class DatabaseClient {
     });
   }
 
-  async request<T>(endpoint: string, _options: RequestInit = {}): Promise<T> {
-    const query = this.supabase.from(endpoint).select("*");
+  async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+    const [rawTable, rawQuery] = endpoint.split("?");
+    const table = rawTable.replace(/^\//, "");
+    const queryParams = new URLSearchParams(rawQuery || "");
+    const method = (options.method || "GET").toUpperCase();
+    const body = options.body ? JSON.parse(options.body.toString()) : undefined;
 
-    const { data, error } = await query;
+    try {
+      if (method === "GET") {
+        let query: any = this.supabase.from(table).select(queryParams.get("select") || "*");
 
-    if (error) {
-      throw new Error(`Database error: ${error.message}`);
+        for (const [key, value] of queryParams.entries()) {
+          if (key === "select" || key === "limit") {
+            continue;
+          }
+
+          const [operator, ...rest] = value.split(".");
+          const filterValue = rest.join(".");
+          if (operator === "eq") {
+            query = query.eq(key, filterValue);
+          }
+        }
+
+        if (queryParams.get("limit")) {
+          query = query.limit(Number.parseInt(queryParams.get("limit") || "0"));
+        }
+
+        const { data, error } = await query;
+        if (error) {
+          throw new Error(`Database error: ${error.message}`);
+        }
+        return data as T;
+      }
+
+      if (method === "POST") {
+        const { data, error } = await this.supabase.from(table).insert(body).select();
+        if (error) {
+          throw new Error(`Database error: ${error.message}`);
+        }
+        return data as T;
+      }
+
+      if (method === "PATCH") {
+        const id = queryParams.get("id");
+        if (!id?.startsWith("eq.")) {
+          throw new Error("PATCH requests require id=eq.<value> in endpoint");
+        }
+        const patchId = id.replace("eq.", "");
+        const { data, error } = await this.supabase
+          .from(table)
+          .update(body)
+          .eq("id", patchId)
+          .select();
+        if (error) {
+          throw new Error(`Database error: ${error.message}`);
+        }
+        return data as T;
+      }
+
+      if (method === "DELETE") {
+        const id = queryParams.get("id");
+        if (!id?.startsWith("eq.")) {
+          throw new Error("DELETE requests require id=eq.<value> in endpoint");
+        }
+        const deleteId = id.replace("eq.", "");
+        const { error } = await this.supabase.from(table).delete().eq("id", deleteId);
+        if (error) {
+          throw new Error(`Database error: ${error.message}`);
+        }
+        return [] as T;
+      }
+
+      throw new Error(`Unsupported request method: ${method}`);
+    } catch (error) {
+      throw error instanceof Error ? error : new Error("Unknown database request error");
     }
-
-    return data as T;
   }
 
   // =============================================================================
@@ -289,6 +374,373 @@ export class DatabaseClient {
     } catch (error) {
       console.error("Error getting message by external ID:", error);
       return null;
+    }
+  }
+
+  // =============================================================================
+  // REPLY TEMPLATE OPERATIONS
+  // =============================================================================
+
+  async getReplyTemplateById(id: number): Promise<ReplyTemplate | null> {
+    try {
+      const { data, error } = await this.supabase
+        .from("reply_templates")
+        .select("*")
+        .eq("id", id)
+        .limit(1);
+
+      if (error) {
+        throw error;
+      }
+      return data.length > 0 ? data[0] : null;
+    } catch (error) {
+      console.error("Error getting reply template:", error);
+      return null;
+    }
+  }
+
+  async getActiveTemplateForCampaign(
+    politicianId: number,
+    campaignId: number,
+  ): Promise<ReplyTemplate | null> {
+    try {
+      const { data, error } = await this.supabase
+        .from("reply_templates")
+        .select("*")
+        .eq("politician_id", politicianId)
+        .eq("campaign_id", campaignId)
+        .eq("active", true)
+        .limit(1);
+
+      if (error) {
+        throw error;
+      }
+      return data.length > 0 ? data[0] : null;
+    } catch (error) {
+      console.error("Error getting active template:", error);
+      return null;
+    }
+  }
+
+  async deactivateOtherTemplates(
+    politicianId: number,
+    campaignId: number,
+    excludeTemplateId?: number,
+  ): Promise<void> {
+    try {
+      let query = this.supabase
+        .from("reply_templates")
+        .update({ active: false })
+        .eq("politician_id", politicianId)
+        .eq("campaign_id", campaignId);
+
+      if (excludeTemplateId) {
+        query = query.neq("id", excludeTemplateId);
+      }
+
+      const { error } = await query;
+
+      if (error) {
+        throw error;
+      }
+    } catch (error) {
+      console.error("Error deactivating templates:", error);
+      throw new Error("Failed to deactivate other templates");
+    }
+  }
+
+  async updateReplyTemplate(
+    id: number,
+    updates: Partial<Omit<ReplyTemplate, "id" | "created_at" | "updated_at">>,
+  ): Promise<ReplyTemplate> {
+    try {
+      const { data, error } = await this.supabase
+        .from("reply_templates")
+        .update(updates)
+        .eq("id", id)
+        .select();
+
+      if (error) {
+        throw error;
+      }
+      if (!data || data.length === 0) {
+        throw new Error("Template not found");
+      }
+      return data[0];
+    } catch (error) {
+      console.error("Error updating reply template:", error);
+      throw new Error("Failed to update reply template");
+    }
+  }
+
+  async deleteReplyTemplate(id: number): Promise<void> {
+    try {
+      const { error } = await this.supabase
+        .from("reply_templates")
+        .delete()
+        .eq("id", id);
+
+      if (error) {
+        throw error;
+      }
+    } catch (error) {
+      console.error("Error deleting reply template:", error);
+      throw new Error("Failed to delete reply template");
+    }
+  }
+
+  async verifyPoliticianOwnsTemplate(
+    templateId: number,
+    politicianId: number,
+  ): Promise<boolean> {
+    try {
+      const { data, error } = await this.supabase
+        .from("reply_templates")
+        .select("id")
+        .eq("id", templateId)
+        .eq("politician_id", politicianId)
+        .limit(1);
+
+      if (error) {
+        throw error;
+      }
+      return data && data.length > 0;
+    } catch (error) {
+      console.error("Error verifying template ownership:", error);
+      return false;
+    }
+  }
+
+  async userCanAccessPolitician(
+    authUserId: string,
+    politicianId: number,
+  ): Promise<boolean> {
+    try {
+      const { data, error } = await this.supabase
+        .from("politician_staff")
+        .select("politician_id")
+        .eq("user_id", authUserId)
+        .eq("politician_id", politicianId)
+        .limit(1);
+
+      if (error) {
+        throw error;
+      }
+
+      return !!data && data.length > 0;
+    } catch (error) {
+      console.error("Error checking politician access:", error);
+      return false;
+    }
+  }
+
+  async userOwnsCampaign(
+    authUserId: string,
+    campaignId: number,
+  ): Promise<boolean> {
+    try {
+      const { data, error } = await this.supabase
+        .from("campaigns")
+        .select("id")
+        .eq("id", campaignId)
+        .eq("created_by", authUserId)
+        .limit(1);
+
+      if (error) {
+        throw error;
+      }
+
+      return !!data && data.length > 0;
+    } catch (error) {
+      console.error("Error checking campaign ownership:", error);
+      return false;
+    }
+  }
+
+  // =============================================================================
+  // SENDER EMAIL OPERATIONS (for auto-reply)
+  // =============================================================================
+
+  async storeSenderEmail(
+    messageId: number,
+    senderHash: string,
+    email: string,
+  ): Promise<void> {
+    try {
+      const { error } = await this.supabase
+        .from("sender_emails")
+        .insert({
+          message_id: messageId,
+          sender_hash: senderHash,
+          email: email,
+        });
+
+      if (error) {
+        throw error;
+      }
+    } catch (error) {
+      console.error("Error storing sender email:", error);
+      throw new Error("Failed to store sender email");
+    }
+  }
+
+  async getSenderEmailByMessageId(messageId: number): Promise<string | null> {
+    try {
+      const { data, error } = await this.supabase
+        .from("sender_emails")
+        .select("email")
+        .eq("message_id", messageId)
+        .eq("reply_sent", false)
+        .is("purged_at", null)
+        .limit(1);
+
+      if (error) {
+        throw error;
+      }
+
+      return data && data.length > 0 ? data[0].email : null;
+    } catch (error) {
+      console.error("Error getting sender email:", error);
+      return null;
+    }
+  }
+
+  async upsertSupporter(
+    campaignId: number,
+    politicianId: number,
+    senderHash: string,
+    email: string,
+    name?: string,
+  ): Promise<number | null> {
+    try {
+      const { data, error } = await this.supabase
+        .from("supporters")
+        .upsert(
+          {
+            campaign_id: campaignId,
+            politician_id: politicianId,
+            sender_hash: senderHash,
+            email,
+            name: name || null,
+            last_message_at: new Date().toISOString(),
+          },
+          { onConflict: "campaign_id,politician_id,sender_hash" },
+        )
+        .select("id")
+        .limit(1);
+
+      if (error) {
+        throw error;
+      }
+
+      return data && data.length > 0 ? data[0].id : null;
+    } catch (error) {
+      console.error("Error upserting supporter:", error);
+      return null;
+    }
+  }
+
+  async getCampaignTechnicalEmail(campaignId: number): Promise<string | null> {
+    try {
+      const { data, error } = await this.supabase
+        .from("campaigns")
+        .select("technical_email")
+        .eq("id", campaignId)
+        .limit(1);
+
+      if (error) {
+        throw error;
+      }
+
+      return data && data.length > 0
+        ? (data[0].technical_email as string | null)
+        : null;
+    } catch (error) {
+      console.error("Error fetching campaign technical email:", error);
+      return null;
+    }
+  }
+
+  async logEmailEvent(data: {
+    message_id: number;
+    campaign_id: number;
+    politician_id: number;
+    supporter_id?: number | null;
+    sender_email: string;
+    recipient_email: string;
+    subject: string;
+    status: "sent" | "failed";
+    provider?: string;
+    provider_message_id?: string;
+    error_message?: string;
+  }): Promise<void> {
+    try {
+      const { error } = await this.supabase.from("email_logs").insert({
+        ...data,
+        provider: data.provider || "jmap",
+      });
+      if (error) {
+        throw error;
+      }
+    } catch (error) {
+      console.error("Error logging email event:", error);
+    }
+  }
+
+  async updateMessageRetryCount(
+    messageId: number,
+    retryCount: number,
+    failureReason?: string,
+    nextRetryAt?: string,
+  ): Promise<void> {
+    try {
+      const updateData: any = {
+        reply_retry_count: retryCount,
+        reply_last_retry_at: new Date().toISOString(),
+      };
+
+      if (failureReason) {
+        updateData.reply_failure_reason = failureReason;
+      }
+
+      if (nextRetryAt) {
+        updateData.reply_status = "scheduled";
+        updateData.reply_scheduled_at = nextRetryAt;
+      }
+
+      const { error } = await this.supabase
+        .from("messages")
+        .update(updateData)
+        .eq("id", messageId);
+
+      if (error) {
+        throw error;
+      }
+    } catch (error) {
+      console.error("Error updating message retry count:", error);
+      throw error;
+    }
+  }
+
+  async markMessageAsFailed(
+    messageId: number,
+    failureReason: string,
+  ): Promise<void> {
+    try {
+      const { error } = await this.supabase
+        .from("messages")
+        .update({
+          reply_status: null,
+          reply_failure_reason: failureReason,
+        })
+        .eq("id", messageId);
+
+      if (error) {
+        throw error;
+      }
+    } catch (error) {
+      console.error("Error marking message as failed:", error);
+      throw error;
     }
   }
 

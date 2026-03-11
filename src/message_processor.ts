@@ -2,8 +2,10 @@ import {
   type Campaign,
   type DatabaseClient,
   type MessageInsert,
+  type ReplyTemplate,
   hashEmail,
 } from "./database";
+import { calculateReplySchedule } from "./scheduling";
 
 export class PoliticianNotFoundError extends Error {
   constructor(email: string) {
@@ -38,13 +40,19 @@ export interface MessageProcessingResult {
   campaign_name?: string;
   confidence?: number;
   duplicate_rank?: number;
+  reply_status?: "pending" | "scheduled" | null;
+  reply_scheduled_at?: string | null;
+  send_immediately?: boolean;
   errors?: string[];
 }
+
+export type ImmediateReplyHandler = (messageId: number) => Promise<void>;
 
 export async function processMessage(
   db: DatabaseClient,
   ai: Ai,
   data: MessageInput,
+  immediateReplyHandler?: ImmediateReplyHandler,
 ): Promise<MessageProcessingResult> {
   // 1. Politician Lookup
   const politician = await db.findPoliticianByEmail(data.recipient_email);
@@ -103,6 +111,24 @@ export async function processMessage(
     classification.campaign_id,
   );
 
+  // 6. Determine reply scheduling (only for first message from sender)
+  let replySchedule = null;
+  if (duplicateRank === 0) {
+    // Get active template for this politician/campaign to determine send_timing
+    const activeTemplate = await db.getActiveTemplateForCampaign(
+      politician.id,
+      classification.campaign_id,
+    );
+
+    if (activeTemplate) {
+      replySchedule = calculateReplySchedule(
+        activeTemplate.send_timing,
+        activeTemplate.scheduled_for,
+        data.timestamp,
+      );
+    }
+  }
+
   const messageData: MessageInsert = {
     external_id: data.external_id,
     channel: "api",
@@ -116,9 +142,30 @@ export async function processMessage(
     received_at: data.timestamp,
     duplicate_rank: duplicateRank,
     processing_status: "processed",
+    reply_status: replySchedule?.reply_status || null,
+    reply_scheduled_at: replySchedule?.reply_scheduled_at || null,
   };
 
   const messageId = await db.insertMessage(messageData);
+
+  // Store sender email if auto-reply is scheduled (only for first message from sender)
+  if (replySchedule && duplicateRank === 0) {
+    try {
+      await db.storeSenderEmail(messageId, senderHash, data.sender_email);
+    } catch (error) {
+      console.error("Failed to store sender email for auto-reply:", error);
+      // Don't fail the entire message processing if email storage fails
+      // The message is still processed, just auto-reply won't work
+    }
+  }
+
+  if (replySchedule?.send_immediately && immediateReplyHandler) {
+    try {
+      await immediateReplyHandler(messageId);
+    } catch (error) {
+      console.error("Immediate reply send failed:", error);
+    }
+  }
 
   return {
     success: true,
@@ -128,6 +175,9 @@ export async function processMessage(
     campaign_name: classification.campaign_name,
     confidence: classification.confidence,
     duplicate_rank: duplicateRank,
+    reply_status: replySchedule?.reply_status || null,
+    reply_scheduled_at: replySchedule?.reply_scheduled_at || null,
+    send_immediately: replySchedule?.send_immediately || false,
   };
 }
 

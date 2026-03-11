@@ -3,6 +3,7 @@ import { cors } from "hono/cors";
 import { apiKeyAuthMiddleware } from "./auth_middleware";
 import { DatabaseClient } from "./database";
 import type { Ai } from "./message_processor";
+import { processScheduledReplies, type WorkerConfig } from "./reply_worker";
 
 import campaignsApp from "./campaigns";
 import loginApp from "./login";
@@ -17,6 +18,10 @@ interface Env {
   SUPABASE_URL: string;
   SUPABASE_KEY: string;
   API_KEY: string;
+  JMAP_API_URL: string;
+  JMAP_ACCOUNT_ID: string;
+  JMAP_USERNAME: string;
+  JMAP_PASSWORD: string;
 }
 
 interface Variables {
@@ -62,6 +67,98 @@ app.get("/health", (c) => {
     version: "1.0.0",
   });
 });
+
+// =============================================================================
+// WORKER ENDPOINTS
+// =============================================================================
+
+/**
+ * Manual trigger endpoint for reply worker (testing/admin)
+ * POST /api/v1/worker/process-replies
+ */
+app.post("/api/v1/worker/process-replies", async (c) => {
+  try {
+    const db = c.get("db") as DatabaseClient;
+
+    const workerConfig: WorkerConfig = {
+      jmapApiUrl: c.env.JMAP_API_URL,
+      jmapAccountId: c.env.JMAP_ACCOUNT_ID,
+      jmapUsername: c.env.JMAP_USERNAME,
+      jmapPassword: c.env.JMAP_PASSWORD,
+    };
+
+    const result = await processScheduledReplies(db, workerConfig);
+
+    return c.json({
+      success: true,
+      result,
+    });
+  } catch (error) {
+    console.error("Manual worker trigger error:", error);
+    return c.json(
+      {
+        success: false,
+        error: error instanceof Error ? error.message : "Unknown error",
+      },
+      500,
+    );
+  }
+});
+
+/**
+ * Health check for worker
+ * GET /api/v1/worker/health
+ */
+app.get("/api/v1/worker/health", (c) => {
+  return c.json({
+    status: "ok",
+    service: "reply-worker",
+    timestamp: new Date().toISOString(),
+  });
+});
+
+// =============================================================================
+// SCHEDULED EVENT HANDLER (for Cloudflare Cron Triggers)
+// =============================================================================
+
+/**
+ * Handles scheduled events from Cloudflare Cron Triggers
+ * This is exported and used in index.ts
+ */
+export async function handleScheduledEvent(
+  env: Env,
+): Promise<void> {
+  console.log("[Reply Worker] Scheduled event triggered");
+
+  try {
+    const db = new DatabaseClient({
+      url: env.SUPABASE_URL,
+      key: env.SUPABASE_KEY,
+    });
+
+    const workerConfig: WorkerConfig = {
+      jmapApiUrl: env.JMAP_API_URL,
+      jmapAccountId: env.JMAP_ACCOUNT_ID,
+      jmapUsername: env.JMAP_USERNAME,
+      jmapPassword: env.JMAP_PASSWORD,
+    };
+
+    const result = await processScheduledReplies(db, workerConfig);
+
+    console.log("[Reply Worker] Processing complete:", {
+      total: result.total,
+      sent: result.sent,
+      failed: result.failed,
+      errors: result.errors.length,
+    });
+
+    if (result.errors.length > 0) {
+      console.error("[Reply Worker] Errors encountered:", result.errors);
+    }
+  } catch (error) {
+    console.error("[Reply Worker] Fatal error in scheduled event:", error);
+  }
+}
 
 app.openAPIRegistry.registerComponent("securitySchemes", "bearerAuth", {
   type: "http",
