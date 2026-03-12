@@ -19,6 +19,7 @@ For performance reasons, it should be noted that it's quite common that the same
 ### 🔄 Multi-Channel Message Processing
 
 - **REST API**: Integration with NGO campaign tools and citizen engagement platforms
+- **CLI Interface**: Command-line tool for local message ingestion and testing
 - **Email Integration**: Direct email processing via Stalwart mail server with MTA hooks
 - **Unified Processing**: All messages flow through the same classification and routing system
 
@@ -58,7 +59,7 @@ For performance reasons, it should be noted that it's quite common that the same
 
 #### Message Processing Pipeline
 
-1. **Input Channels** → REST API or Email (Stalwart webhook)
+1. **Input Channels** → REST API, CLI, or Email (Stalwart webhook)
 2. **Classification** → BGE-M3 embedding generation and campaign clustering
 3. **Storage** → Dual storage system (analytics + temporary personal data)
 4. **Response Management** → Template-based automated replies
@@ -202,6 +203,64 @@ POST /api/messages
 ### Stalwart Webhook
 
 Integration with mail server MTA hooks for direct email processing with automatic folder organization by campaign.
+
+### CLI Interface
+
+A command-line tool for processing messages locally through the same pipeline as the REST API.
+
+#### Usage
+
+```bash
+npm run cli -- --message-id <id> --recipient-email <email> --sender-name <name> \
+    --sender-email <email> --subject <subject> --message <message> \
+    --timestamp <iso8601> [--campaign-name <name>]
+```
+
+#### Required Arguments
+
+- `--message-id`: Unique identifier for the message
+- `--recipient-email`: Email address of the target politician  
+- `--sender-name`: Full name of the message sender
+- `--sender-email`: Email address of the sender
+- `--subject`: Message subject line
+- `--message`: Message body content (min 10 chars, max 10000 chars)
+- `--timestamp`: When the message was originally sent (ISO 8601 format)
+
+#### Optional Arguments
+
+- `--campaign-name`: Optional campaign name hint for classification
+- `--channel-source`: Source system identifier (default: "cli")
+
+#### Environment Setup
+
+```bash
+export SUPABASE_URL="your-supabase-url"
+export SUPABASE_KEY="your-supabase-key"
+```
+
+#### Example
+
+```bash
+npm run cli -- \
+  --message-id "msg-123" \
+  --recipient-email "politician@example.com" \
+  --sender-name "John Doe" \
+  --sender-email "john@example.com" \
+  --subject "Support for Clean Water Initiative" \
+  --message "I strongly support the clean water initiative and believe it's crucial for our community's health." \
+  --timestamp "2024-03-15T10:30:00Z" \
+  --campaign-name "Clean Water"
+```
+
+#### Testing
+
+```bash
+# Test CLI structure and integration
+npm run cli:test
+
+# Get help
+npm run cli -- --help
+```
 
 ### Analytics API
 

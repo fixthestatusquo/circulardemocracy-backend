@@ -37,6 +37,10 @@ export interface MessageInsert {
   received_at: string;
   duplicate_rank: number;
   processing_status: string;
+  sender_flag?: string;
+  is_reply?: boolean;
+  stalwart_message_id?: string;
+  stalwart_account_id?: string;
 }
 
 export interface ClassificationResult {
@@ -207,6 +211,30 @@ export class DatabaseClient {
   // MESSAGE OPERATIONS
   // =============================================================================
 
+  private validatePrivacy(data: MessageInsert): void {
+    // Verify that PII fields are not present in the payload
+    const payload = data as any;
+    const forbiddenFields = [
+      'sender_email',
+      'sender_name',
+      'message',
+      'body',
+      'subject',
+      'text_content',
+      'html_content'
+    ];
+
+    const violations = forbiddenFields.filter(field =>
+      payload[field] !== undefined && payload[field] !== null
+    );
+
+    if (violations.length > 0) {
+      throw new Error(
+        `Privacy violation: Cannot store PII in database. Found forbidden fields: ${violations.join(', ')}`
+      );
+    }
+  }
+
   async getDuplicateRank(
     senderHash: string,
     politicianId: number,
@@ -231,6 +259,9 @@ export class DatabaseClient {
   }
 
   async insertMessage(data: MessageInsert): Promise<number> {
+    // Privacy validation: ensure no PII is being stored
+    this.validatePrivacy(data);
+
     try {
       const { data: result, error } = await this.supabase
         .from("messages")
