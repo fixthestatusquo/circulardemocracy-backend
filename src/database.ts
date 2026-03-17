@@ -37,6 +37,8 @@ export interface MessageInsert {
   received_at: string;
   duplicate_rank: number;
   processing_status: string;
+  sender_flag?: string;
+  is_reply?: boolean;
 }
 
 export interface ClassificationResult {
