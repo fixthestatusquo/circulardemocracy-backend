@@ -14,6 +14,9 @@ export interface Politician {
   email: string;
   additional_emails: string[];
   active: boolean;
+  stalwart_username?: string | null;
+  stalwart_app_password?: string | null;
+  stalwart_jmap_endpoint?: string | null;
 }
 
 export interface Campaign {
@@ -169,7 +172,7 @@ export class DatabaseClient {
       // First try exact email match
       const { data: exactMatch, error: exactError } = await this.supabase
         .from("politicians")
-        .select("id,name,email,additional_emails,active")
+        .select("id,name,email,additional_emails,active,stalwart_username,stalwart_app_password,stalwart_jmap_endpoint")
         .eq("email", email)
         .eq("active", true);
 
@@ -183,7 +186,7 @@ export class DatabaseClient {
       // Then try additional_emails array search
       const { data: arrayMatch, error: arrayError } = await this.supabase
         .from("politicians")
-        .select("id,name,email,additional_emails,active")
+        .select("id,name,email,additional_emails,active,stalwart_username,stalwart_app_password,stalwart_jmap_endpoint")
         .contains("additional_emails", [email])
         .eq("active", true);
 

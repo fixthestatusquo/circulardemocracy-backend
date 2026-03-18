@@ -55,6 +55,7 @@ interface StalwartFetchOptions {
   since?: string;
   messageId?: string;
   dryRun: boolean;
+  politicianId?: number;
 }
 
 interface JmapSessionResponse {
@@ -147,6 +148,16 @@ function parseStalwartArgs(args: string[]): StalwartFetchOptions {
   const processAll = parsed["process-all"] === true
     || (!parsed.since && !parsed["message-id"]);
 
+  const politicianId = parsed["politician-id"];
+  if (politicianId && typeof politicianId === "string") {
+    const id = Number.parseInt(politicianId, 10);
+    if (Number.isNaN(id)) {
+      console.error(`Invalid --politician-id value: ${politicianId}`);
+      console.error("Must be a valid integer");
+      process.exit(1);
+    }
+  }
+
   return {
     processAll,
     since: typeof parsed.since === "string" ? parsed.since : undefined,
@@ -155,6 +166,7 @@ function parseStalwartArgs(args: string[]): StalwartFetchOptions {
         ? parsed["message-id"]
         : undefined,
     dryRun: parsed["dry-run"] === true,
+    politicianId: typeof parsed["politician-id"] === "string" ? Number.parseInt(parsed["politician-id"], 10) : undefined,
   };
 }
 
@@ -163,11 +175,10 @@ function printUsage() {
 JMAP Fetch - Automated ingestion from Stalwart mail server
 
 USAGE:
-  jmap-fetch [--user <username>] [--password <password>] [options]
+  jmap-fetch [--politician-id <id>] [options]
 
 OPTIONS:
-  --user <username>      JMAP username (default: STALWART_USERNAME env or "dibora")
-  --password <password>  JMAP app password (default: STALWART_APP_PASSWORD env)
+  --politician-id <id>   Fetch messages for specific politician (uses their JMAP credentials from DB)
   --process-all          Fetch all available messages (default when no filter provided)
   --since <date>         Fetch messages received after date (ISO 8601)
   --message-id <id>      Fetch one specific message (JMAP ID or Message-ID header)
@@ -175,18 +186,18 @@ OPTIONS:
   -h, --help             Show this help message
 
 ENVIRONMENT VARIABLES:
-  STALWART_APP_PASSWORD  Required app password for JMAP auth
-  STALWART_USERNAME      Optional, default: "dibora"
-  STALWART_JMAP_ENDPOINT Optional, default: "${STALWART_JMAP_ENDPOINT}"
   SUPABASE_URL           Required Supabase URL
   SUPABASE_KEY           Required Supabase key
 
 EXAMPLES:
-  jmap-fetch --process-all
-  jmap-fetch --since "2024-03-01"
-  jmap-fetch --message-id "specific-id"
-  jmap-fetch --dry-run --since "2024-03-01"
-  jmap-fetch --user dibora --password mypass --process-all
+  jmap-fetch --politician-id 1 --process-all
+  jmap-fetch --politician-id 1 --since "2024-03-01"
+  jmap-fetch --politician-id 1 --message-id "specific-id"
+  jmap-fetch --politician-id 1 --dry-run --since "2024-03-01"
+
+NOTE:
+  Each politician must have their JMAP credentials configured in the database.
+  Use the politicians table columns: stalwart_username, stalwart_app_password, stalwart_jmap_endpoint
 `);
 }
 
@@ -688,14 +699,33 @@ async function runStalwartIngestion(
   db: DatabaseClient,
   ai: Ai,
   options: StalwartFetchOptions,
-  username: string,
-  password: string,
 ): Promise<boolean> {
-  const endpoint = process.env.STALWART_JMAP_ENDPOINT || STALWART_JMAP_ENDPOINT;
+  // Fetch politician and their JMAP credentials from database
+  if (!options.politicianId) {
+    console.error("Error: --politician-id is required");
+    console.error("Use --help for usage information");
+    process.exit(1);
+  }
+
+  const politician = await getPoliticianWithCredentials(db, options.politicianId);
+  if (!politician) {
+    console.error(`Error: Politician with ID ${options.politicianId} not found`);
+    process.exit(1);
+  }
+
+  if (!politician.stalwart_username || !politician.stalwart_app_password) {
+    console.error(`Error: Politician ${options.politicianId} missing JMAP credentials`);
+    console.error("Please configure stalwart_username and stalwart_app_password in the database");
+    process.exit(1);
+  }
+
+  const endpoint = politician.stalwart_jmap_endpoint || STALWART_JMAP_ENDPOINT;
+  const username = politician.stalwart_username;
+  const password = politician.stalwart_app_password;
 
   const authHeader = encodeBasicAuth(username, password);
 
-  console.log(`Connecting to Stalwart JMAP at ${endpoint}...`);
+  console.log(`Connecting to Stalwart JMAP at ${endpoint} for politician ${politician.name} (${politician.email})...`);
   const session = await fetchJmapSession(endpoint, authHeader);
   const accountId = resolveAccountId(session);
 
@@ -796,31 +826,41 @@ async function runStalwartIngestion(
   return summary.failed === 0;
 }
 
+async function getPoliticianWithCredentials(
+  db: DatabaseClient,
+  politicianId: number,
+): Promise<{
+  id: number;
+  name: string;
+  email: string;
+  stalwart_username?: string | null;
+  stalwart_app_password?: string | null;
+  stalwart_jmap_endpoint?: string | null;
+} | null> {
+  try {
+    const { data, error } = await (db as any).supabase
+      .from("politicians")
+      .select("id, name, email, stalwart_username, stalwart_app_password, stalwart_jmap_endpoint")
+      .eq("id", politicianId)
+      .eq("active", true)
+      .limit(1);
+
+    if (error) {
+      throw error;
+    }
+
+    return data && data.length > 0 ? data[0] : null;
+  } catch (error) {
+    console.error("Error fetching politician:", error);
+    return null;
+  }
+}
+
 async function main() {
   const args = process.argv.slice(2);
   if (args.includes("--help") || args.includes("-h")) {
     printUsage();
     return;
-  }
-
-  const parsed: Record<string, string> = {};
-  for (let i = 0; i < args.length; i++) {
-    if (args[i] === "--user" && i + 1 < args.length) {
-      parsed.user = args[i + 1];
-      i++;
-    } else if (args[i] === "--password" && i + 1 < args.length) {
-      parsed.password = args[i + 1];
-      i++;
-    }
-  }
-
-  const username = parsed.user || process.env.STALWART_USERNAME || "dibora";
-  const password = parsed.password || process.env.STALWART_APP_PASSWORD || process.env.STALWART_PASSWORD;
-
-  if (!password) {
-    console.error("Error: STALWART_APP_PASSWORD environment variable or --password must be set");
-    console.error("Create an app password in Stalwart and export it before running CLI.");
-    process.exit(1);
   }
 
   const supabaseUrl = process.env.SUPABASE_URL;
@@ -839,7 +879,7 @@ async function main() {
     const ai: Ai = new CliAi();
 
     const fetchOptions = parseStalwartArgs(args);
-    const success = await runStalwartIngestion(db, ai, fetchOptions, username, password);
+    const success = await runStalwartIngestion(db, ai, fetchOptions);
     process.exit(success ? 0 : 1);
 
   } catch (error) {

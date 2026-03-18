@@ -5,13 +5,6 @@ import type { DatabaseClient } from "./database";
 import { JMAPClient, type EmailMessage } from "./jmap_client";
 import { renderEmailLayout } from "./email_layout";
 
-export interface WorkerConfig {
-  jmapApiUrl: string;
-  jmapAccountId: string;
-  jmapUsername: string;
-  jmapPassword: string;
-}
-
 export interface MessageToProcess {
   id: number;
   external_id: string;
@@ -41,7 +34,6 @@ interface SendContext {
  */
 export async function processScheduledReplies(
   db: DatabaseClient,
-  config: WorkerConfig,
 ): Promise<ProcessingResult> {
   const result: ProcessingResult = {
     total: 0,
@@ -61,18 +53,10 @@ export async function processScheduledReplies(
       return result;
     }
 
-    // 2. Initialize JMAP client
-    const jmapClient = new JMAPClient({
-      apiUrl: config.jmapApiUrl,
-      accountId: config.jmapAccountId,
-      username: config.jmapUsername,
-      password: config.jmapPassword,
-    });
-
-    // 3. Process each message
+    // 2. Process each message (JMAP client created per-politician)
     for (const message of messages) {
       try {
-        await processSingleMessage(db, jmapClient, message);
+        await processSingleMessage(db, message);
         result.sent++;
         console.log(`[Reply Worker] ✓ Sent reply for message ${message.id}`);
       } catch (error) {
@@ -102,7 +86,6 @@ export async function processScheduledReplies(
 
 export async function processReplyImmediately(
   db: DatabaseClient,
-  config: WorkerConfig,
   messageId: number,
 ): Promise<void> {
   const message = await getMessageById(db, messageId);
@@ -110,14 +93,7 @@ export async function processReplyImmediately(
     throw new Error(`Message ${messageId} not eligible for immediate reply`);
   }
 
-  const jmapClient = new JMAPClient({
-    apiUrl: config.jmapApiUrl,
-    accountId: config.jmapAccountId,
-    username: config.jmapUsername,
-    password: config.jmapPassword,
-  });
-
-  await processSingleMessage(db, jmapClient, message);
+  await processSingleMessage(db, message);
 }
 
 // Maximum number of retry attempts before giving up
@@ -201,7 +177,6 @@ async function getMessageById(
  */
 async function processSingleMessage(
   db: DatabaseClient,
-  jmapClient: JMAPClient,
   message: MessageToProcess,
 ): Promise<void> {
   try {
@@ -217,13 +192,28 @@ async function processSingleMessage(
       throw new Error(errorMsg);
     }
 
-    // 2. Get politician details for sender/reply-to
+    // 2. Get politician details and JMAP credentials
     const politician = await getPoliticianById(db, message.politician_id);
     if (!politician) {
       const errorMsg = `Politician ${message.politician_id} not found`;
       await handleSendFailure(db, message, errorMsg);
       throw new Error(errorMsg);
     }
+
+    // Validate politician has JMAP credentials configured
+    if (!politician.stalwart_username || !politician.stalwart_app_password) {
+      const errorMsg = `Politician ${message.politician_id} missing JMAP credentials`;
+      await handleSendFailure(db, message, errorMsg);
+      throw new Error(errorMsg);
+    }
+
+    // Initialize JMAP client with politician's credentials
+    const jmapClient = new JMAPClient({
+      apiUrl: politician.stalwart_jmap_endpoint || 'https://mail.circulardemocracy.org/.well-known/jmap',
+      accountId: politician.stalwart_username,
+      username: politician.stalwart_username,
+      password: politician.stalwart_app_password,
+    });
 
     // 3. Get original sender email from sender_emails table
     const senderEmail = await db.getSenderEmailByMessageId(message.id);
@@ -402,11 +392,11 @@ async function getCampaignById(
 async function getPoliticianById(
   db: DatabaseClient,
   politicianId: number,
-): Promise<{ id: number; email: string; name: string } | null> {
+): Promise<{ id: number; email: string; name: string; stalwart_username?: string | null; stalwart_app_password?: string | null; stalwart_jmap_endpoint?: string | null } | null> {
   try {
     const { data, error } = await db["supabase"]
       .from("politicians")
-      .select("id, email, name")
+      .select("id, email, name, stalwart_username, stalwart_app_password, stalwart_jmap_endpoint")
       .eq("id", politicianId)
       .limit(1);
 
