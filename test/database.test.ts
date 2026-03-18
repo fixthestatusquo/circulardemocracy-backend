@@ -35,6 +35,7 @@ describe("DatabaseClient", () => {
       key: "test-key",
     });
     mockFetch.mockClear();
+    mockFetch.mockReset();
   });
 
   describe("findPoliticianByEmail", () => {
@@ -49,7 +50,7 @@ describe("DatabaseClient", () => {
       mockFetch.mockResolvedValueOnce(createMockResponse([mockPolitician]));
 
       const result = await db.findPoliticianByEmail("john@example.com");
-      
+
       expect(result).toEqual(mockPolitician);
       const url = mockFetch.mock.calls[0][0] as string;
       const options = mockFetch.mock.calls[0][1] as RequestInit;
@@ -58,7 +59,7 @@ describe("DatabaseClient", () => {
       expect(url).toContain("email=eq.john%40example.com");
       expect(url).toContain("active=eq.true");
       expect(url).toContain("select=");
-      
+
       const headers = options.headers as Headers;
       expect(headers.get("apikey")).toBe("test-key");
       expect(headers.get("Authorization")).toBe("Bearer test-key");
@@ -98,12 +99,10 @@ describe("DatabaseClient", () => {
         name: "Climate Action",
         slug: "climate-action",
         status: "active",
+        reference_vector: [0.1, 0.2],
       };
 
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => [mockCampaign],
-      } as Response);
+      mockFetch.mockResolvedValueOnce(createMockResponse([mockCampaign]));
 
       const result = await db.classifyMessage(mockEmbedding, "climate");
 
@@ -124,14 +123,8 @@ describe("DatabaseClient", () => {
       };
 
       mockFetch
-        .mockResolvedValueOnce({
-          ok: true,
-          json: async () => [], // No hint match
-        } as Response)
-        .mockResolvedValueOnce({
-          ok: true,
-          json: async () => [mockSimilarCampaign],
-        } as Response);
+        .mockResolvedValueOnce(createMockResponse([])) // No hint match
+        .mockResolvedValueOnce(createMockResponse([mockSimilarCampaign]));
 
       const result = await db.classifyMessage(mockEmbedding, "nonexistent");
 
@@ -151,18 +144,9 @@ describe("DatabaseClient", () => {
       };
 
       mockFetch
-        .mockResolvedValueOnce({
-          ok: true,
-          json: async () => [], // No hint match
-        } as Response)
-        .mockResolvedValueOnce({
-          ok: true,
-          json: async () => [], // No similar campaigns
-        } as Response)
-        .mockResolvedValueOnce({
-          ok: true,
-          json: async () => [mockUncategorized], // Found uncategorized
-        } as Response);
+        .mockResolvedValueOnce(createMockResponse([])) // No hint match
+        .mockResolvedValueOnce(createMockResponse([])) // No similar campaigns
+        .mockResolvedValueOnce(createMockResponse([mockUncategorized])); // Found uncategorized
 
       const result = await db.classifyMessage(mockEmbedding);
 
@@ -176,10 +160,7 @@ describe("DatabaseClient", () => {
 
   describe("getDuplicateRank", () => {
     it("should return correct duplicate count", async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => [{ count: 3 }],
-      } as Response);
+      mockFetch.mockResolvedValueOnce(createMockResponse(null, 200, { "Content-Range": "0-2/3" }));
 
       const result = await db.getDuplicateRank("hash123", 1, 2);
 
@@ -187,10 +168,7 @@ describe("DatabaseClient", () => {
     });
 
     it("should return 0 when no duplicates found", async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => [{ count: 0 }],
-      } as Response);
+      mockFetch.mockResolvedValueOnce(createMockResponse(null, 200, { "Content-Range": "*/0" }));
 
       const result = await db.getDuplicateRank("hash123", 1, 2);
 
@@ -215,10 +193,7 @@ describe("DatabaseClient", () => {
         processing_status: "processed",
       };
 
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => [{ id: 42 }],
-      } as Response);
+      mockFetch.mockResolvedValueOnce(createMockResponse([{ id: 42 }]));
 
       const result = await db.insertMessage(mockMessage);
 
