@@ -108,7 +108,8 @@ export async function processMessage(
     data.campaign_hint,
   );
 
-  // 5. Storage
+  // 5. Storage (PRIVACY: only metadata, no PII)
+  // Use sender_email ONLY to generate hash, then discard it
   const senderHash = await hashEmail(data.sender_email);
   const duplicateRank = await db.getDuplicateRank(
     senderHash,
@@ -134,6 +135,7 @@ export async function processMessage(
     }
   }
 
+  // PRIVACY: API messages have no Stalwart references (stalwart_message_id = NULL)
   const messageData: MessageInsert = {
     external_id: data.external_id,
     channel: "api",
@@ -151,6 +153,8 @@ export async function processMessage(
     reply_scheduled_at: replySchedule?.reply_scheduled_at || null,
     sender_flag: data.sender_flag,
     is_reply: data.is_reply,
+    stalwart_message_id: undefined,
+    stalwart_account_id: undefined,
   };
 
   const messageId = await db.insertMessage(messageData);

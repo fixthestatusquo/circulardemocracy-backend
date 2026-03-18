@@ -368,7 +368,7 @@ async function processEmailForRecipient(
       );
     }
 
-    // Step 6: Store message metadata
+    // Step 6: Store message metadata (PRIVACY: no PII, only metadata and Stalwart references)
     const messageData: MessageInsert = {
       external_id: hookData.messageId,
       channel: "email",
@@ -384,6 +384,8 @@ async function processEmailForRecipient(
       processing_status: "processed",
       sender_flag: senderFlag,
       is_reply: isReply,
+      stalwart_message_id: hookData.messageId,
+      stalwart_account_id: recipientEmail, // JMAP account is the politician's email
     };
 
     await db.insertMessage(messageData);

@@ -19,6 +19,9 @@ For performance reasons, it should be noted that it's quite common that the same
 ### 🔄 Multi-Channel Message Processing
 
 - **REST API**: Integration with NGO campaign tools and citizen engagement platforms
+- **CLI Tools**: 
+  - `mail` - Manual message import for testing and development
+  - `jmap-fetch` - Automated JMAP ingestion from Stalwart mail server
 - **Email Integration**: Direct email processing via Stalwart mail server with MTA hooks
 - **Unified Processing**: All messages flow through the same classification and routing system
 
@@ -58,7 +61,7 @@ For performance reasons, it should be noted that it's quite common that the same
 
 #### Message Processing Pipeline
 
-1. **Input Channels** → REST API or Email (Stalwart webhook)
+1. **Input Channels** → REST API, CLI, or Email (Stalwart webhook)
 2. **Classification** → BGE-M3 embedding generation and campaign clustering
 3. **Storage** → Dual storage system (analytics + temporary personal data)
 4. **Response Management** → Template-based automated replies
@@ -202,6 +205,110 @@ POST /api/messages
 ### Stalwart Webhook
 
 Integration with mail server MTA hooks for direct email processing with automatic folder organization by campaign.
+
+### CLI Tools
+
+The platform provides two specialized command-line tools for different message ingestion workflows:
+
+#### 1. Manual Message Import (`mail`)
+
+For testing and manual message imports with flag-based arguments.
+
+**Usage:**
+
+```bash
+npm run mail -- --message-id <id> --recipient-email <email> --sender-name <name> \
+    --sender-email <email> --subject <subject> --message <message> \
+    --timestamp <iso8601> [--campaign-name <name>]
+```
+
+**Required Arguments:**
+
+- `--message-id`: Unique identifier for the message
+- `--recipient-email`: Email address of the target politician  
+- `--sender-name`: Full name of the message sender
+- `--sender-email`: Email address of the sender
+- `--subject`: Message subject line
+- `--message`: Message body content (min 10 chars, max 10000 chars)
+- `--timestamp`: When the message was originally sent (ISO 8601 format)
+
+**Optional Arguments:**
+
+- `--campaign-name`: Optional campaign name hint for classification
+- `--channel-source`: Source system identifier (default: "cli")
+
+**Example:**
+
+```bash
+npm run mail -- \
+  --message-id "msg-123" \
+  --recipient-email "politician@example.com" \
+  --sender-name "John Doe" \
+  --sender-email "john@example.com" \
+  --subject "Support for Clean Water Initiative" \
+  --message "I strongly support the clean water initiative and believe it's crucial for our community's health." \
+  --timestamp "2024-03-15T10:30:00Z" \
+  --campaign-name "Clean Water"
+```
+
+#### 2. JMAP Automated Ingestion (`jmap-fetch`)
+
+For automated ingestion from Stalwart mail server using JMAP protocol.
+
+**Usage:**
+
+```bash
+npm run jmap-fetch -- [--user <username>] [--password <password>] [options]
+```
+
+**Options:**
+
+- `--user <username>`: JMAP username (default: `STALWART_USERNAME` env or "dibora")
+- `--password <password>`: JMAP app password (default: `STALWART_APP_PASSWORD` env)
+- `--process-all`: Fetch all available messages (default when no filter provided)
+- `--since <date>`: Fetch messages received after date (ISO 8601)
+- `--message-id <id>`: Fetch one specific message (JMAP ID or Message-ID header)
+- `--dry-run`: Preview converted messages without processing/storage
+- `-h, --help`: Show help message
+
+**Environment Variables:**
+
+```bash
+export SUPABASE_URL="your-supabase-url"
+export SUPABASE_KEY="your-supabase-key"
+export STALWART_APP_PASSWORD="your-stalwart-app-password"
+export STALWART_USERNAME="dibora"  # optional, defaults to "dibora"
+export STALWART_JMAP_ENDPOINT="https://mail.circulardemocracy.org/.well-known/jmap"  # optional
+```
+
+**Examples:**
+
+```bash
+# Fetch all messages
+npm run jmap-fetch -- --process-all
+
+# Fetch messages since a specific date
+npm run jmap-fetch -- --since "2024-03-01"
+
+# Fetch a specific message
+npm run jmap-fetch -- --message-id "specific-id"
+
+# Dry run to preview without processing
+npm run jmap-fetch -- --dry-run --since "2024-03-01"
+
+# Using explicit credentials
+npm run jmap-fetch -- --user dibora --password mypass --process-all
+```
+
+#### Getting Help
+
+```bash
+# Manual import help
+npm run mail -- --help
+
+# JMAP fetch help
+npm run jmap-fetch -- --help
+```
 
 ### Analytics API
 
