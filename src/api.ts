@@ -3,7 +3,7 @@ import { cors } from "hono/cors";
 import { apiKeyAuthMiddleware } from "./auth_middleware";
 import { DatabaseClient } from "./database";
 import type { Ai } from "./message_processor";
-import { processScheduledReplies, type WorkerConfig } from "./reply_worker";
+import { processScheduledReplies } from "./reply_worker";
 
 import campaignsApp from "./campaigns";
 import loginApp from "./login";
@@ -18,10 +18,6 @@ interface Env {
   SUPABASE_URL: string;
   SUPABASE_KEY: string;
   API_KEY: string;
-  JMAP_API_URL: string;
-  JMAP_ACCOUNT_ID: string;
-  JMAP_USERNAME: string;
-  JMAP_PASSWORD: string;
 }
 
 interface Variables {
@@ -80,14 +76,7 @@ app.post("/api/v1/worker/process-replies", async (c) => {
   try {
     const db = c.get("db") as DatabaseClient;
 
-    const workerConfig: WorkerConfig = {
-      jmapApiUrl: c.env.JMAP_API_URL,
-      jmapAccountId: c.env.JMAP_ACCOUNT_ID,
-      jmapUsername: c.env.JMAP_USERNAME,
-      jmapPassword: c.env.JMAP_PASSWORD,
-    };
-
-    const result = await processScheduledReplies(db, workerConfig);
+    const result = await processScheduledReplies(db);
 
     return c.json({
       success: true,
@@ -136,14 +125,7 @@ export async function handleScheduledEvent(
       key: env.SUPABASE_KEY,
     });
 
-    const workerConfig: WorkerConfig = {
-      jmapApiUrl: env.JMAP_API_URL,
-      jmapAccountId: env.JMAP_ACCOUNT_ID,
-      jmapUsername: env.JMAP_USERNAME,
-      jmapPassword: env.JMAP_PASSWORD,
-    };
-
-    const result = await processScheduledReplies(db, workerConfig);
+    const result = await processScheduledReplies(db);
 
     console.log("[Reply Worker] Processing complete:", {
       total: result.total,
