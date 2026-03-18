@@ -118,7 +118,6 @@ export class DatabaseClient {
         }
         return data as T;
       }
-
       if (method === "POST") {
         const { data, error } = await this.supabase.from(table).insert(body).select();
         if (error) {
