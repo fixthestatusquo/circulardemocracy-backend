@@ -1,5 +1,4 @@
 import { OpenAPIHono } from "@hono/zod-openapi";
-import { cors } from "hono/cors";
 import { apiKeyAuthMiddleware } from "./auth_middleware";
 import { DatabaseClient } from "./database";
 import type { Ai } from "./message_processor";
@@ -25,26 +24,16 @@ interface Variables {
 
 const app = new OpenAPIHono<{ Bindings: Env; Variables: Variables }>();
 
-// Shared middleware
-app.use(
-  "/api/*",
-  cors({
-    origin: ["https://*.circulardemocracy.org", "http://localhost:*"],
-    allowHeaders: ["Content-Type", "Authorization"],
-    allowMethods: ["POST", "GET", "OPTIONS"],
-  }),
-);
-
 app.use("/api/*", async (c, next) => {
   c.set(
     "db",
-    new DatabaseClient({ url: c.env.SUPABASE_URL, key: c.env.SUPABASE_KEY }),
+    new DatabaseClient({
+      url: process.env.SUPABASE_URL || c.env.SUPABASE_URL,
+      key: process.env.SUPABASE_KEY || c.env.SUPABASE_KEY
+    }),
   );
   await next();
 });
-
-// Auth middleware for API routes
-app.use("/api/v1/messages", apiKeyAuthMiddleware);
 
 // Mount modular routers
 app.route("/", messagesApp);

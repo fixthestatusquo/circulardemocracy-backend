@@ -1,25 +1,47 @@
 import type { MiddlewareHandler } from "hono";
 import { createMiddleware } from "hono/factory";
-import { jwk } from "hono/jwk";
+import { createClient } from "@supabase/supabase-js";
 
 interface Env {
   SUPABASE_URL: string;
+  SUPABASE_KEY: string;
 }
 
 export const authMiddleware: MiddlewareHandler<any> = createMiddleware(
   async (c, next) => {
-    const env = c.env as Env;
-    if (!env.SUPABASE_URL) {
-      console.error("SUPABASE_URL is not set. Skipping auth.");
+    const supabaseUrl = process.env.SUPABASE_URL || c.env?.SUPABASE_URL;
+    const supabaseKey = process.env.SUPABASE_KEY || c.env?.SUPABASE_KEY;
+
+    if (!supabaseUrl || !supabaseKey) {
+      console.error("Supabase credentials not configured");
       return c.json({ error: "Auth not configured" }, 500);
     }
 
-    const jwks_uri = `${c.env.SUPABASE_URL}/auth/v1/.well-known/jwks.json`;
+    // Get the Authorization header
+    const authHeader = c.req.header("Authorization");
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return c.json({ error: "No authorization header" }, 401);
+    }
 
-    const auth = jwk({
-      jwks_uri: jwks_uri,
-    });
+    const token = authHeader.substring(7); // Remove "Bearer " prefix
 
-    return auth(c, next);
+    // Create Supabase client and verify the token
+    const supabase = createClient(supabaseUrl, supabaseKey);
+
+    try {
+      const { data: { user }, error } = await supabase.auth.getUser(token);
+
+      if (error || !user) {
+        console.error("Token verification failed:", error?.message);
+        return c.json({ error: "Invalid token" }, 401);
+      }
+
+      // Attach user to context for downstream use
+      c.set("user", user);
+      await next();
+    } catch (err) {
+      console.error("Auth error:", err);
+      return c.json({ error: "Token verification failed" }, 401);
+    }
   },
 );

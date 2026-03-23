@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { cors } from "hono/cors";
 import apiApp from "./api";
 import { type AuthEnv, apiKeyAuthMiddleware } from "./auth_middleware";
 import stalwartApp from "./stalwart";
@@ -11,8 +12,34 @@ interface Env extends AuthEnv {
 
 const app = new Hono<{ Bindings: Env }>();
 
-// Global middleware for API key authentication on specific routes
-app.use("/api/*", apiKeyAuthMiddleware);
+// Global CORS middleware - must be applied before any other middleware
+const resolveCorsOrigin = (origin: string | undefined) => {
+  if (!origin) return undefined;
+  try {
+    const url = new URL(origin);
+    if (url.hostname === "localhost" || url.hostname === "127.0.0.1") return origin;
+    if (
+      url.hostname === "circulardemocracy.org" ||
+      url.hostname.endsWith(".circulardemocracy.org")
+    ) {
+      return origin;
+    }
+    return undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+app.use(
+  "*",
+  cors({
+    origin: (origin) => resolveCorsOrigin(origin),
+    allowHeaders: ["Content-Type", "Authorization"],
+    allowMethods: ["POST", "GET", "OPTIONS", "PUT", "DELETE"],
+  }),
+);
+
+// Global middleware for API key authentication on specific routes (excluding those that use Supabase auth)
 app.use("/stalwart/*", apiKeyAuthMiddleware);
 
 // Mount the stalwart app under the /stalwart route

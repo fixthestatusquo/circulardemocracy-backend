@@ -68,9 +68,12 @@ const loginRoute = createRoute({
 app.openapi(loginRoute, async (c) => {
   const { email, password } = c.req.valid("json");
 
-  //const supabase = createClient(c.env.SUPABASE_URL, c.env.SUPABASE_ANON_KEY)
-  const supabase = createClient(c.env.SUPABASE_URL, c.env.SUPABASE_KEY);
-  console.log(c.env.SUPABASE_URL, c.env.SUPABASE_KEY, email);
+  // Use process.env for Node.js development environment
+  const supabase = createClient(
+    process.env.SUPABASE_URL || c.env.SUPABASE_URL,
+    process.env.SUPABASE_KEY || c.env.SUPABASE_KEY
+  );
+  console.log(process.env.SUPABASE_URL, process.env.SUPABASE_KEY ? "present" : "missing", email);
 
   const { data, error } = await supabase.auth.signInWithPassword({
     email,
