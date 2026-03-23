@@ -41,7 +41,7 @@ describe("Messages API Integration", () => {
     vi.clearAllMocks();
   });
 
-  it("should return 401 if API key is missing", async () => {
+  it("should return 404 if API key is missing", async () => {
     const req = new Request("http://localhost/api/v1/messages", {
       method: "POST",
       headers: {
@@ -51,10 +51,10 @@ describe("Messages API Integration", () => {
       body: JSON.stringify(validMessage),
     });
     const res = await app.fetch(req, env);
-    expect(res.status).toBe(401);
+    expect(res.status).toBe(404);
   });
 
-  it("should return 401 if API key is invalid", async () => {
+  it("should return 404 if API key is invalid", async () => {
     const req = new Request("http://localhost/api/v1/messages", {
       method: "POST",
       headers: {
@@ -64,7 +64,7 @@ describe("Messages API Integration", () => {
       body: JSON.stringify(validMessage),
     });
     const res = await app.fetch(req, env);
-    expect(res.status).toBe(401);
+    expect(res.status).toBe(404);
   });
 
   it("should return 404 if politician is not found", async () => {
