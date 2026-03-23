@@ -43,18 +43,11 @@ const CreateReplyTemplateSchema = z.object({
 // ROUTES
 // =============================================================================
 
-const QuerySchema = z.object({
-  campaign_id: z.string().optional(),
-});
-
 // List Reply Templates
 const listReplyTemplatesRoute = createRoute({
   method: "get",
   path: "/api/v1/reply-templates",
   security: [{ Bearer: [] }],
-  request: {
-    query: QuerySchema,
-  },
   responses: {
     200: {
       content: { "application/json": { schema: z.array(ReplyTemplateSchema) } },
@@ -66,15 +59,23 @@ const listReplyTemplatesRoute = createRoute({
 
 app.openapi(listReplyTemplatesRoute, async (c) => {
   const db = c.get("db") as DatabaseClient;
-  const query = c.req.valid("query");
+
+  // Get raw query parameters
+  const rawQuery = c.req.query();
 
   // Use the Supabase client directly for better query support
   const supabase = db.getSupabaseClient();
   let supabaseQuery = supabase.from("reply_templates").select("*");
 
   // Filter by campaign_id if provided
-  if (query?.campaign_id) {
-    supabaseQuery = supabaseQuery.eq("campaign_id", parseInt(query.campaign_id));
+  if (rawQuery?.campaign_id) {
+    const campaignId = parseInt(rawQuery.campaign_id as string);
+    if (!isNaN(campaignId)) {
+      supabaseQuery = supabaseQuery.eq("campaign_id", campaignId);
+    } else {
+      console.error('Invalid campaign_id:', rawQuery.campaign_id);
+      return c.json({ error: `Invalid campaign_id format: ${rawQuery.campaign_id}` }, 400);
+    }
   }
 
   const { data, error } = await supabaseQuery;
@@ -93,7 +94,7 @@ const getReplyTemplateRoute = createRoute({
   path: "/api/v1/reply-templates/{id}",
   security: [{ Bearer: [] }],
   request: {
-    params: z.object({ id: z.string().regex(/^\\d+$/) }),
+    params: z.object({ id: z.string().min(1) }),
   },
   responses: {
     200: {
@@ -108,13 +109,32 @@ const getReplyTemplateRoute = createRoute({
 app.openapi(getReplyTemplateRoute, async (c) => {
   const db = c.get("db") as DatabaseClient;
   const { id } = c.req.valid("param");
-  const data = await db.request<any[]>(
-    `/reply_templates?id=eq.${id}&select=*&limit=1`,
-  );
-  if (!data || data.length === 0) {
+
+  // Parse and validate the id
+  const parsedId = parseInt(id);
+  if (isNaN(parsedId)) {
+    console.error('Invalid ID provided:', id);
+    return c.json({ error: `Invalid ID format: ${id}` }, 400);
+  }
+
+  // Use the Supabase client directly for better query support
+  const supabase = db.getSupabaseClient();
+  const { data, error } = await supabase
+    .from("reply_templates")
+    .select("*")
+    .eq("id", parsedId)
+    .single();
+
+  if (error) {
+    console.error("Database error:", error);
+    return c.json({ error: error.message }, 400);
+  }
+
+  if (!data) {
     return c.json({ error: "Not found" }, 404);
   }
-  return c.json(data[0]);
+
+  return c.json(data);
 });
 
 // Create Reply Template
@@ -166,7 +186,7 @@ const updateReplyTemplateRoute = createRoute({
   path: "/api/v1/reply-templates/{id}",
   security: [{ Bearer: [] }],
   request: {
-    params: z.object({ id: z.string().regex(/^\\d+$/) }),
+    params: z.object({ id: z.string().min(1) }),
     body: {
       content: { "application/json": { schema: CreateReplyTemplateSchema.partial() } },
     },
@@ -186,12 +206,19 @@ app.openapi(updateReplyTemplateRoute, async (c) => {
   const { id } = c.req.valid("param");
   const updateData = c.req.valid("json");
 
+  // Parse and validate the id
+  const parsedId = parseInt(id);
+  if (isNaN(parsedId)) {
+    console.error('Invalid ID provided:', id);
+    return c.json({ error: `Invalid ID format: ${id}` }, 400);
+  }
+
   // Use the Supabase client directly for PUT operations
   const supabase = db.getSupabaseClient();
   const { data, error } = await supabase
     .from("reply_templates")
     .update(updateData)
-    .eq("id", parseInt(id))
+    .eq("id", parsedId)
     .select()
     .single();
 
