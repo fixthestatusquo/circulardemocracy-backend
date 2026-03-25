@@ -15,6 +15,8 @@ const mockDb = {
   classifyMessage: vi.fn(),
   getDuplicateRank: vi.fn(),
   insertMessage: vi.fn(),
+  getActiveTemplateForCampaign: vi.fn(),
+  storeSenderEmail: vi.fn(),
 } as unknown as DatabaseClient;
 
 const mockAi = {
@@ -44,6 +46,8 @@ vi.mock("../src/database", () => ({
     }),
     getDuplicateRank: vi.fn().mockResolvedValue(0),
     insertMessage: vi.fn().mockResolvedValue(100),
+    getActiveTemplateForCampaign: vi.fn().mockResolvedValue(null),
+    storeSenderEmail: vi.fn().mockResolvedValue(undefined),
   })),
   hashEmail: vi.fn().mockResolvedValue("hashed-email"),
 }));

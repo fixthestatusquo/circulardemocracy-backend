@@ -8,7 +8,6 @@ export interface TemplateValidationError {
 }
 
 export interface CreateTemplateInput {
-  politician_id: number;
   campaign_id: number;
   name: string;
   subject: string;
@@ -86,7 +85,7 @@ export async function createReplyTemplate(
   try {
     // If this template is being set as active, deactivate other templates for this campaign
     if (data.active) {
-      await db.deactivateOtherTemplates(data.politician_id, data.campaign_id);
+      await db.deactivateOtherTemplates(data.campaign_id);
     }
 
     // Create the template using Supabase client
@@ -137,7 +136,6 @@ export async function updateReplyTemplate(
     // If activating this template, deactivate others for the same campaign
     if (updates.active === true) {
       await db.deactivateOtherTemplates(
-        existingTemplate.politician_id,
         existingTemplate.campaign_id,
         templateId,
       );
@@ -165,11 +163,10 @@ export async function updateReplyTemplate(
  */
 export async function ensureSingleActiveTemplate(
   db: DatabaseClient,
-  politicianId: number,
   campaignId: number,
   activeTemplateId: number,
 ): Promise<void> {
-  await db.deactivateOtherTemplates(politicianId, campaignId, activeTemplateId);
+  await db.deactivateOtherTemplates(campaignId, activeTemplateId);
 }
 
 /**
@@ -177,10 +174,9 @@ export async function ensureSingleActiveTemplate(
  */
 export async function getActiveTemplate(
   db: DatabaseClient,
-  politicianId: number,
   campaignId: number,
 ): Promise<ReplyTemplate | null> {
-  return await db.getActiveTemplateForCampaign(politicianId, campaignId);
+  return await db.getActiveTemplateForCampaign(campaignId);
 }
 
 /**
@@ -189,7 +185,6 @@ export async function getActiveTemplate(
 export async function validateTemplateOwnership(
   db: DatabaseClient,
   templateId: number,
-  politicianId: number,
 ): Promise<boolean> {
-  return await db.verifyPoliticianOwnsTemplate(templateId, politicianId);
+  return await db.verifyPoliticianOwnsTemplate(templateId);
 }

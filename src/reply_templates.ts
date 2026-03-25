@@ -27,7 +27,6 @@ app.use("/api/v1/reply-templates/*", authMiddleware);
 
 const ReplyTemplateSchema = z.object({
   id: z.number(),
-  politician_id: z.number(),
   campaign_id: z.number(),
   name: z.string(),
   subject: z.string(),
@@ -41,7 +40,6 @@ const ReplyTemplateSchema = z.object({
 });
 
 const CreateReplyTemplateSchema = z.object({
-  politician_id: z.number(),
   campaign_id: z.number(),
   name: z.string().min(3, "Name must be at least 3 characters"),
   subject: z.string().min(1, "Subject is required").max(255),
@@ -318,7 +316,6 @@ app.openapi(toggleTemplateActiveRoute, async (c) => {
     // If activating, deactivate other templates for this campaign
     if (active) {
       await db.deactivateOtherTemplates(
-        existingTemplate.politician_id,
         existingTemplate.campaign_id,
         templateId,
       );

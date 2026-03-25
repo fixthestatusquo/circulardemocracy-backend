@@ -120,9 +120,8 @@ export async function processMessage(
   // 6. Determine reply scheduling (only for first message from sender)
   let replySchedule = null;
   if (duplicateRank === 0) {
-    // Get active template for this politician/campaign to determine send_timing
+    // Get active template for this campaign to determine send_timing
     const activeTemplate = await db.getActiveTemplateForCampaign(
-      politician.id,
       classification.campaign_id,
     );
 

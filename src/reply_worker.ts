@@ -205,14 +205,13 @@ async function processSingleMessage(
   message: MessageToProcess,
 ): Promise<void> {
   try {
-    // 1. Get the active reply template for this politician/campaign
+    // 1. Get the active reply template for this campaign
     const template = await db.getActiveTemplateForCampaign(
-      message.politician_id,
       message.campaign_id,
     );
 
     if (!template) {
-      const errorMsg = `No active template found for politician ${message.politician_id}, campaign ${message.campaign_id}`;
+      const errorMsg = `No active template found for campaign ${message.campaign_id}`;
       await handleSendFailure(db, message, errorMsg);
       throw new Error(errorMsg);
     }

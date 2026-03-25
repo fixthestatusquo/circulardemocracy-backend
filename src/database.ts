@@ -49,7 +49,6 @@ export interface MessageInsert {
 
 export interface ReplyTemplate {
   id: number;
-  politician_id: number;
   campaign_id: number;
   name: string;
   subject: string;
@@ -60,7 +59,6 @@ export interface ReplyTemplate {
   scheduled_for?: string | null;
   created_at: string;
   updated_at: string;
->>>>>>> ef9ea8a (implement store reply models)
 }
 
 export interface ClassificationResult {
@@ -432,14 +430,12 @@ export class DatabaseClient {
   }
 
   async getActiveTemplateForCampaign(
-    politicianId: number,
     campaignId: number,
   ): Promise<ReplyTemplate | null> {
     try {
       const { data, error } = await this.supabase
         .from("reply_templates")
         .select("*")
-        .eq("politician_id", politicianId)
         .eq("campaign_id", campaignId)
         .eq("active", true)
         .limit(1);
@@ -455,7 +451,6 @@ export class DatabaseClient {
   }
 
   async deactivateOtherTemplates(
-    politicianId: number,
     campaignId: number,
     excludeTemplateId?: number,
   ): Promise<void> {
@@ -463,7 +458,6 @@ export class DatabaseClient {
       let query = this.supabase
         .from("reply_templates")
         .update({ active: false })
-        .eq("politician_id", politicianId)
         .eq("campaign_id", campaignId);
 
       if (excludeTemplateId) {
@@ -523,14 +517,12 @@ export class DatabaseClient {
 
   async verifyPoliticianOwnsTemplate(
     templateId: number,
-    politicianId: number,
   ): Promise<boolean> {
     try {
       const { data, error } = await this.supabase
         .from("reply_templates")
         .select("id")
         .eq("id", templateId)
-        .eq("politician_id", politicianId)
         .limit(1);
 
       if (error) {

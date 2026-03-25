@@ -454,7 +454,7 @@ describe("Template Service", () => {
       const result = await updateReplyTemplate(mockDb, 10, { active: true });
 
       expect(result.success).toBe(true);
-      expect(mockDb.deactivateOtherTemplates).toHaveBeenCalledWith(1, 1, 10);
+      expect(mockDb.deactivateOtherTemplates).toHaveBeenCalledWith(1, 10);
     });
   });
 });
