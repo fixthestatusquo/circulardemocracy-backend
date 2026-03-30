@@ -1,5 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
+// Mock the embedding service to avoid ONNX runtime issues
+vi.mock("../src/embedding_service", () => ({
+  generateEmbedding: vi.fn().mockResolvedValue(new Array(1024).fill(0.1)),
+  formatEmailContentForEmbedding: vi.fn().mockReturnValue("# Test Subject\n\nTest message body"),
+}));
+
 // Import modules to test
 import {
   calculateReplySchedule,
@@ -508,7 +514,6 @@ describe("Message Processor Auto-Reply", () => {
     vi.spyOn(mockDb, "getDuplicateRank").mockResolvedValue(0);
     vi.spyOn(mockDb, "getActiveTemplateForCampaign").mockResolvedValue({
       id: 1,
-      politician_id: 1,
       campaign_id: 10,
       name: "Climate Response",
       subject: "Thank you",

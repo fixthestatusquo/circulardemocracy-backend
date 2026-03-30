@@ -20,7 +20,7 @@ async function initializeLocalModel(): Promise<FeatureExtractionPipeline> {
   }
 
   console.log("🔄 Loading BGE-M3 model (first time may take a few minutes to download)...");
-  
+
   embeddingPipeline = await pipeline(
     "feature-extraction",
     "Xenova/bge-m3",
@@ -28,10 +28,36 @@ async function initializeLocalModel(): Promise<FeatureExtractionPipeline> {
       quantized: true, // Use quantized model for faster inference
     }
   );
-  
+
   console.log("✅ BGE-M3 model loaded successfully!");
-  
+
   return embeddingPipeline;
+}
+
+/**
+ * Format email content for embedding generation
+ * Combines subject and body with subject as a markdown header
+ * @param subject - Email subject line
+ * @param body - Email body content
+ * @returns Formatted text with subject as header
+ */
+export function formatEmailContentForEmbedding(subject: string, body: string): string {
+  const cleanSubject = subject.trim();
+  const cleanBody = body.trim();
+
+  if (!cleanSubject && !cleanBody) {
+    return "";
+  }
+
+  if (!cleanSubject) {
+    return cleanBody;
+  }
+
+  if (!cleanBody) {
+    return `# ${cleanSubject}`;
+  }
+
+  return `# ${cleanSubject}\n\n${cleanBody}`;
 }
 
 /**
@@ -57,7 +83,7 @@ export async function generateEmbedding(
 
     // Otherwise, use local Transformers.js model
     const model = await initializeLocalModel();
-    
+
     const output = await model(truncatedText, {
       pooling: "mean",
       normalize: true,
@@ -65,7 +91,7 @@ export async function generateEmbedding(
 
     // Convert tensor to array
     const embedding = Array.from(output.data as Float32Array);
-    
+
     // BGE-M3 produces 1024-dimensional embeddings
     if (embedding.length !== 1024) {
       console.warn(`Warning: Expected 1024 dimensions, got ${embedding.length}`);

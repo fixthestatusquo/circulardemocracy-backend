@@ -1,10 +1,16 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import {
   adaptStalwartHookToMessageInput,
   mapToStalwartResponse,
   type StalwartHookPayload,
   type StalwartProcessingResult,
 } from "../src/stalwart_adapter";
+
+// Mock the embedding service to avoid ONNX runtime issues
+vi.mock("../src/embedding_service", () => ({
+  generateEmbedding: vi.fn().mockResolvedValue(new Array(1024).fill(0.1)),
+  formatEmailContentForEmbedding: vi.fn().mockReturnValue("# Test Subject\n\nTest message body"),
+}));
 
 describe("Stalwart Adapter - Reply Detection", () => {
   describe("detectReply via In-Reply-To header", () => {

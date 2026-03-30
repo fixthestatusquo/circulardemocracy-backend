@@ -292,6 +292,284 @@ export class DatabaseClient {
   }
 
   // =============================================================================
+  // MESSAGE CLUSTERING
+  // =============================================================================
+
+  private static readonly MIN_CLUSTER_SIZE_FOR_CAMPAIGN = 2;
+
+  private async acquireClusteringLock(politicianId: number): Promise<boolean> {
+    try {
+      const { data, error } = await this.supabase.rpc('acquire_clustering_lock', {
+        lock_key: politicianId
+      });
+
+      if (error) {
+        console.error('Error acquiring advisory lock:', error);
+        return false;
+      }
+
+      return data === true;
+    } catch (error) {
+      console.error('Exception acquiring advisory lock:', error);
+      return false;
+    }
+  }
+
+  private async releaseClusteringLock(politicianId: number): Promise<void> {
+    try {
+      await this.supabase.rpc('release_clustering_lock', {
+        lock_key: politicianId
+      });
+    } catch (error) {
+      console.error('Error releasing advisory lock:', error);
+    }
+  }
+
+  async findSimilarMessages(
+    embedding: number[],
+    politicianId: number,
+    limit = 10,
+  ): Promise<Array<{ id: number; distance: number; campaign_id: number | null }>> {
+    try {
+      const { data, error } = await this.supabase.rpc(
+        "find_similar_messages",
+        {
+          query_embedding: embedding,
+          politician_id_filter: politicianId,
+          distance_threshold: 0.2,
+          match_limit: limit,
+        },
+      );
+
+      if (error) {
+        console.error("RPC error:", error);
+        throw error;
+      }
+
+      if (data && data.length > 0) {
+        console.log(`  🔍 RPC returned ${data.length} messages, distances: ${data.slice(0, 3).map((m: any) => m.distance?.toFixed(4)).join(', ')}`);
+      }
+
+      return data || [];
+    } catch (error) {
+      console.error("Error finding similar messages:", error);
+      return [];
+    }
+  }
+
+  async assignMessageToCluster(
+    messageId: number,
+    embedding: number[],
+    politicianId: number,
+  ): Promise<number | null> {
+    const lockAcquired = await this.acquireClusteringLock(politicianId);
+
+    if (!lockAcquired) {
+      console.log(`  ⏳ Could not acquire lock for politician ${politicianId}, retrying...`);
+      await new Promise(resolve => setTimeout(resolve, 100));
+      return this.assignMessageToCluster(messageId, embedding, politicianId);
+    }
+
+    try {
+      const similarMessages = await this.findSimilarMessages(embedding, politicianId, 50);
+      const otherMessages = similarMessages.filter(m => m.id !== messageId);
+
+      console.log(`  🔍 Found ${otherMessages.length} similar messages (excluding self)`);
+      if (otherMessages.length > 0) {
+        console.log(`  🔍 Closest distances: ${otherMessages.slice(0, 3).map(m => m.distance.toFixed(4)).join(', ')}`);
+      }
+
+      const closeMatches = otherMessages.filter(m => m.distance < 0.2);
+
+      if (closeMatches.length > 0) {
+        console.log(`  🔍 ${closeMatches.length} messages within threshold (< 0.2)`);
+
+        const { data: similarMessagesWithClusters } = await this.supabase
+          .from("messages")
+          .select("id, cluster_id")
+          .in("id", closeMatches.map(m => m.id));
+
+        const existingCluster = similarMessagesWithClusters?.find(m => m.cluster_id !== null);
+
+        if (existingCluster?.cluster_id) {
+          console.log(`  ✅ Joining existing cluster ${existingCluster.cluster_id}`);
+          const clusterId = existingCluster.cluster_id;
+
+          await this.supabase
+            .from("messages")
+            .update({ cluster_id: clusterId })
+            .eq("id", messageId);
+
+          const unclusteredSimilarMessages = similarMessagesWithClusters
+            ?.filter(m => m.cluster_id === null && m.id !== messageId)
+            .map(m => m.id) || [];
+
+          if (unclusteredSimilarMessages.length > 0) {
+            console.log(`  🔗 Also assigning ${unclusteredSimilarMessages.length} unclustered similar messages to cluster ${clusterId}`);
+            await this.supabase
+              .from("messages")
+              .update({ cluster_id: clusterId })
+              .in("id", unclusteredSimilarMessages);
+          }
+
+          await this.updateClusterCentroid(clusterId);
+          await this.checkClusterReadiness(clusterId);
+
+          return clusterId;
+        }
+
+        console.log(`  🆕 Creating cluster for ${closeMatches.length + 1} similar messages`);
+        const { data: newCluster, error: createError } = await this.supabase
+          .from("message_clusters")
+          .insert({
+            politician_id: politicianId,
+            centroid_vector: `[${embedding.join(',')}]`,
+            message_count: closeMatches.length + 1,
+            status: "forming",
+          })
+          .select("id")
+          .single();
+
+        if (createError || !newCluster) {
+          console.error("Error creating cluster:", createError);
+          return null;
+        }
+
+        const newClusterId = newCluster.id;
+        const allMessageIds = [messageId, ...closeMatches.map(m => m.id)];
+
+        await this.supabase
+          .from("messages")
+          .update({ cluster_id: newClusterId })
+          .in("id", allMessageIds);
+
+        await this.updateClusterCentroid(newClusterId);
+        await this.checkClusterReadiness(newClusterId);
+
+        return newClusterId;
+      }
+
+      console.log(`  🆕 Creating isolated cluster (no similar messages)`);
+      const { data: newCluster, error: createError } = await this.supabase
+        .from("message_clusters")
+        .insert({
+          politician_id: politicianId,
+          centroid_vector: `[${embedding.join(',')}]`,
+          message_count: 1,
+          status: "forming",
+        })
+        .select("id")
+        .single();
+
+      if (createError || !newCluster) {
+        console.error("Error creating cluster:", createError);
+        return null;
+      }
+
+      await this.supabase
+        .from("messages")
+        .update({ cluster_id: newCluster.id })
+        .eq("id", messageId);
+
+      await this.checkClusterReadiness(newCluster.id);
+
+      return newCluster.id;
+    } catch (error) {
+      console.error("Error in assignMessageToCluster:", error);
+      return null;
+    } finally {
+      await this.releaseClusteringLock(politicianId);
+    }
+  }
+
+  async updateClusterCentroid(clusterId: number): Promise<void> {
+    try {
+      const { data: messages, error } = await this.supabase
+        .from("messages")
+        .select("message_embedding")
+        .eq("cluster_id", clusterId)
+        .not("message_embedding", "is", null);
+
+      if (error || !messages || messages.length === 0) {
+        return;
+      }
+
+      const embeddings = messages
+        .map(m => {
+          const emb = m.message_embedding;
+          // Handle both string and array formats
+          if (typeof emb === 'string') {
+            try {
+              return JSON.parse(emb);
+            } catch {
+              return null;
+            }
+          }
+          return emb;
+        })
+        .filter((emb): emb is number[] => Array.isArray(emb) && emb.length > 0);
+
+      const centroid = this.calculateCentroid(embeddings);
+
+      if (centroid) {
+        await this.supabase
+          .from("message_clusters")
+          .update({
+            centroid_vector: `[${centroid.join(',')}]`,
+            message_count: embeddings.length,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", clusterId);
+      }
+    } catch (error) {
+      console.error(`Error updating cluster ${clusterId} centroid:`, error);
+    }
+  }
+
+  async checkClusterReadiness(clusterId: number): Promise<void> {
+    try {
+      const { data: cluster } = await this.supabase
+        .from("message_clusters")
+        .select("message_count, status")
+        .eq("id", clusterId)
+        .single();
+
+      if (cluster && cluster.message_count >= DatabaseClient.MIN_CLUSTER_SIZE_FOR_CAMPAIGN && cluster.status === "forming") {
+        await this.supabase
+          .from("message_clusters")
+          .update({ status: "ready" })
+          .eq("id", clusterId);
+      }
+    } catch (error) {
+      console.error(`Error checking cluster ${clusterId} readiness:`, error);
+    }
+  }
+
+  calculateCentroid(embeddings: number[][]): number[] | null {
+    if (embeddings.length === 0) return null;
+
+    if (embeddings.some(emb => !Array.isArray(emb) || emb.length !== embeddings[0].length)) {
+      console.error("Embeddings have inconsistent dimensions");
+      return null;
+    }
+
+    const dimensions = embeddings[0].length;
+    const centroid = new Array(dimensions).fill(0);
+
+    for (const embedding of embeddings) {
+      for (let i = 0; i < dimensions; i++) {
+        centroid[i] += embedding[i];
+      }
+    }
+
+    for (let i = 0; i < dimensions; i++) {
+      centroid[i] /= embeddings.length;
+    }
+
+    return centroid;
+  }
+
+  // =============================================================================
   // MESSAGE OPERATIONS
   // =============================================================================
 
@@ -774,6 +1052,7 @@ export class DatabaseClient {
 
   async classifyMessage(
     embedding: number[],
+    politicianId: number,
     campaignHint?: string,
   ): Promise<ClassificationResult> {
     // Step 1: Try campaign hint if provided

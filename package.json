@@ -33,7 +33,7 @@
     "functions:deploy:user-sync": "supabase functions deploy user-sync --no-verify-jwt",
     "model:preload": "tsx scripts/preload-model.ts",
     "campaigns:create-test": "tsx scripts/create-test-campaigns.ts",
-    "test:bge-validation": "tsx test/bge_m3_classification_validation.ts"
+    "test:bge-validation": "tsx test/consolidated_bge_m3_validation.test.ts"
   },
   "dependencies": {
     "@hono/zod-openapi": "^0.8.0",

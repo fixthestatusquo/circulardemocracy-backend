@@ -1,11 +1,12 @@
-
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import app from "../src/api";
+import { DatabaseClient } from "../src/database";
 import { PoliticianNotFoundError } from "../src/message_processor";
 
-// Mock the embedding service to avoid ONNX runtime errors
+// Mock the embedding service to avoid ONNX runtime issues
 vi.mock("../src/embedding_service", () => ({
   generateEmbedding: vi.fn().mockResolvedValue(new Array(1024).fill(0.1)),
+  formatEmailContentForEmbedding: vi.fn().mockReturnValue("# Test Subject\n\nTest message body"),
 }));
 
 // --- Create a singleton mock instance ---
@@ -46,6 +47,7 @@ describe("Messages API Integration", () => {
     subject: "Climate Action Needed",
     message: "We need immediate action on climate change.",
     timestamp: new Date().toISOString(),
+    campaign_hint: undefined,
   };
 
   beforeEach(() => {
@@ -140,6 +142,7 @@ describe("Messages API Integration", () => {
     mockDbInstance.getMessageByExternalId.mockResolvedValue(null);
     mockDbInstance.classifyMessage.mockResolvedValue({
       campaign_id: 10,
+      campaign_name: "Test Campaign",
       confidence: 0.9,
     });
     mockDbInstance.getDuplicateRank.mockResolvedValue(0);
