@@ -166,11 +166,11 @@ export async function processMessage(
 
   const messageId = await db.insertMessage(messageData);
 
-  // Assign message to cluster for grouping similar messages
+  // Assign message to global cluster for grouping similar messages across politicians
   try {
     await db.assignMessageToCluster(messageId, embedding, politician.id);
   } catch (error) {
-    console.error("Failed to assign message to cluster:", error);
+    console.error("Failed to assign message to global cluster:", error);
     // Don't fail the entire message processing if clustering fails
     // The message is still processed, just won't be clustered
   }
