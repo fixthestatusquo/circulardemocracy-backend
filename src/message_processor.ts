@@ -2,8 +2,11 @@ import {
   type Campaign,
   type DatabaseClient,
   type MessageInsert,
+  type ReplyTemplate,
   hashEmail,
 } from "./database";
+import { calculateReplySchedule } from "./scheduling";
+import { generateEmbedding, formatEmailContentForEmbedding } from "./embedding_service";
 
 export class PoliticianNotFoundError extends Error {
   constructor(email: string) {
@@ -42,13 +45,19 @@ export interface MessageProcessingResult {
   campaign_name?: string;
   confidence?: number;
   duplicate_rank?: number;
+  reply_status?: "pending" | "scheduled" | null;
+  reply_scheduled_at?: string | null;
+  send_immediately?: boolean;
   errors?: string[];
 }
+
+export type ImmediateReplyHandler = (messageId: number) => Promise<void>;
 
 export async function processMessage(
   db: DatabaseClient,
   ai: Ai,
   data: MessageInput,
+  immediateReplyHandler?: ImmediateReplyHandler,
 ): Promise<MessageProcessingResult> {
   // 1. Politician Lookup
   const politician = await db.findPoliticianByEmail(data.recipient_email);
@@ -83,31 +92,55 @@ export async function processMessage(
       success: false,
       status: "duplicate",
       message_id: existingMessage.id,
-      campaign_id: campaignId,
-      campaign_name: campaignName,
+      campaign_id: campaignId ?? undefined,
+      campaign_name: campaignName ?? undefined,
       duplicate_rank: existingMessage.duplicate_rank,
       errors: [`Message with external_id ${data.external_id} already exists`],
     };
   }
 
   // 3. Embedding
-  const textForEmbedding = data.text_content || data.message;
+  const body = data.text_content || data.message;
+  const textForEmbedding = formatEmailContentForEmbedding(data.subject, body);
   const embedding = await generateEmbedding(ai, textForEmbedding);
 
-  // 4. Classification
+  // 4. Classification (message-to-message delayed classification)
   const classification = await db.classifyMessage(
     embedding,
+    politician.id,
     data.campaign_hint,
   );
 
   // 5. Storage (PRIVACY: only metadata, no PII)
   // Use sender_email ONLY to generate hash, then discard it
   const senderHash = await hashEmail(data.sender_email);
-  const duplicateRank = await db.getDuplicateRank(
-    senderHash,
-    politician.id,
-    classification.campaign_id,
-  );
+
+  // Only check duplicate rank if message has a campaign assigned
+  let duplicateRank = 0;
+  if (classification.campaign_id !== null) {
+    duplicateRank = await db.getDuplicateRank(
+      senderHash,
+      politician.id,
+      classification.campaign_id,
+    );
+  }
+
+  // 6. Determine reply scheduling (only for first message from sender with campaign)
+  let replySchedule = null;
+  if (duplicateRank === 0 && classification.campaign_id !== null) {
+    // Get active template for this campaign to determine send_timing
+    const activeTemplate = await db.getActiveTemplateForCampaign(
+      classification.campaign_id,
+    );
+
+    if (activeTemplate) {
+      replySchedule = calculateReplySchedule(
+        activeTemplate.send_timing as "immediate" | "office_hours" | "scheduled",
+        activeTemplate.scheduled_for,
+        data.timestamp,
+      );
+    }
+  }
 
   // PRIVACY: API messages have no Stalwart references (stalwart_message_id = NULL)
   const messageData: MessageInsert = {
@@ -123,6 +156,8 @@ export async function processMessage(
     received_at: data.timestamp,
     duplicate_rank: duplicateRank,
     processing_status: "processed",
+    reply_status: replySchedule?.reply_status || null,
+    reply_scheduled_at: replySchedule?.reply_scheduled_at || null,
     sender_flag: data.sender_flag,
     is_reply: data.is_reply,
     stalwart_message_id: undefined,
@@ -131,26 +166,44 @@ export async function processMessage(
 
   const messageId = await db.insertMessage(messageData);
 
+  // Assign message to global cluster for grouping similar messages across politicians
+  try {
+    await db.assignMessageToCluster(messageId, embedding, politician.id);
+  } catch (error) {
+    console.error("Failed to assign message to global cluster:", error);
+    // Don't fail the entire message processing if clustering fails
+    // The message is still processed, just won't be clustered
+  }
+
+  // Store sender email if auto-reply is scheduled (only for first message from sender)
+  if (replySchedule && duplicateRank === 0) {
+    try {
+      await db.storeSenderEmail(messageId, senderHash, data.sender_email);
+    } catch (error) {
+      console.error("Failed to store sender email for auto-reply:", error);
+      // Don't fail the entire message processing if email storage fails
+      // The message is still processed, just auto-reply won't work
+    }
+  }
+
+  if (replySchedule?.send_immediately && immediateReplyHandler) {
+    try {
+      await immediateReplyHandler(messageId);
+    } catch (error) {
+      console.error("Immediate reply send failed:", error);
+    }
+  }
+
   return {
     success: true,
     message_id: messageId,
     status: "processed",
-    campaign_id: classification.campaign_id,
-    campaign_name: classification.campaign_name,
+    campaign_id: classification.campaign_id ?? undefined,
+    campaign_name: classification.campaign_name ?? undefined,
     confidence: classification.confidence,
     duplicate_rank: duplicateRank,
+    reply_status: replySchedule?.reply_status || null,
+    reply_scheduled_at: replySchedule?.reply_scheduled_at || null,
+    send_immediately: replySchedule?.send_immediately || false,
   };
-}
-
-async function generateEmbedding(ai: Ai, text: string): Promise<number[]> {
-  try {
-    const response = await ai.run("@cf/baai/bge-m3", {
-      text: text.substring(0, 8000), // Limit to avoid token limits
-    });
-
-    return response.data[0] as number[];
-  } catch (error) {
-    console.error("Embedding generation error:", error);
-    throw new Error("Failed to generate message embedding");
-  }
 }

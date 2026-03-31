@@ -1,7 +1,13 @@
-
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import app from "../src/api";
+import { DatabaseClient } from "../src/database";
 import { PoliticianNotFoundError } from "../src/message_processor";
+
+// Mock the embedding service to avoid ONNX runtime issues
+vi.mock("../src/embedding_service", () => ({
+  generateEmbedding: vi.fn().mockResolvedValue(new Array(1024).fill(0.1)),
+  formatEmailContentForEmbedding: vi.fn().mockReturnValue("# Test Subject\n\nTest message body"),
+}));
 
 // --- Create a singleton mock instance ---
 const mockDbInstance = {
@@ -11,6 +17,8 @@ const mockDbInstance = {
   classifyMessage: vi.fn(),
   getDuplicateRank: vi.fn(),
   insertMessage: vi.fn(),
+  getActiveTemplateForCampaign: vi.fn(),
+  storeSenderEmail: vi.fn(),
 };
 
 // --- Mock the entire database module ---
@@ -25,6 +33,10 @@ describe("Messages API Integration", () => {
     SUPABASE_URL: "https://test.supabase.co",
     SUPABASE_KEY: "test-key",
     API_KEY: "test-api-key",
+    JMAP_API_URL: "https://jmap.example.com",
+    JMAP_ACCOUNT_ID: "account-1",
+    JMAP_USERNAME: "user",
+    JMAP_PASSWORD: "pass",
   };
 
   const validMessage = {
@@ -35,6 +47,7 @@ describe("Messages API Integration", () => {
     subject: "Climate Action Needed",
     message: "We need immediate action on climate change.",
     timestamp: new Date().toISOString(),
+    campaign_hint: undefined,
   };
 
   beforeEach(() => {
@@ -129,10 +142,13 @@ describe("Messages API Integration", () => {
     mockDbInstance.getMessageByExternalId.mockResolvedValue(null);
     mockDbInstance.classifyMessage.mockResolvedValue({
       campaign_id: 10,
+      campaign_name: "Test Campaign",
       confidence: 0.9,
     });
     mockDbInstance.getDuplicateRank.mockResolvedValue(0);
+    mockDbInstance.getActiveTemplateForCampaign.mockResolvedValue(null);
     mockDbInstance.insertMessage.mockResolvedValue(100);
+    mockDbInstance.storeSenderEmail.mockResolvedValue(undefined);
     // @ts-ignore
     env.AI.run.mockResolvedValue({ data: [[0.1, 0.2]] });
 

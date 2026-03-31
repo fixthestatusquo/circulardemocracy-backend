@@ -1,4 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+
+// Mock the embedding service to avoid ONNX runtime issues
+vi.mock("../src/embedding_service", () => ({
+  generateEmbedding: vi.fn().mockResolvedValue(new Array(1024).fill(0.1)),
+  formatEmailContentForEmbedding: vi.fn().mockReturnValue("# Test Subject\n\nTest message body"),
+}));
+
 import {
   adaptStalwartHookToMessageInput,
   mapToStalwartResponse,
@@ -15,6 +22,8 @@ const mockDb = {
   classifyMessage: vi.fn(),
   getDuplicateRank: vi.fn(),
   insertMessage: vi.fn(),
+  getActiveTemplateForCampaign: vi.fn(),
+  storeSenderEmail: vi.fn(),
 } as unknown as DatabaseClient;
 
 const mockAi = {
@@ -44,6 +53,8 @@ vi.mock("../src/database", () => ({
     }),
     getDuplicateRank: vi.fn().mockResolvedValue(0),
     insertMessage: vi.fn().mockResolvedValue(100),
+    getActiveTemplateForCampaign: vi.fn().mockResolvedValue(null),
+    storeSenderEmail: vi.fn().mockResolvedValue(undefined),
   })),
   hashEmail: vi.fn().mockResolvedValue("hashed-email"),
 }));
@@ -816,6 +827,7 @@ describe("Stalwart Webhook", () => {
 
       expect(mockDb.classifyMessage).toHaveBeenCalledWith(
         expect.any(Array),
+        1,
         "healthcare",
       );
     });

@@ -2,6 +2,11 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import app from "../src/index"; // We test the main app
 import { Hono } from "hono";
 
+// Mock the embedding service to avoid ONNX runtime errors
+vi.mock("../src/embedding_service", () => ({
+  generateEmbedding: vi.fn().mockResolvedValue(new Array(1024).fill(0.1)),
+}));
+
 // Mock the supabase client
 const mockSignInWithPassword = vi.fn();
 const mockSupabaseClient = {

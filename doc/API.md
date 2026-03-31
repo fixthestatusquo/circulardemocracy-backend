@@ -173,6 +173,10 @@ Content-Type: `application/json`
 
 #### GET
 
+**Summary:** /api/v1/reply-templates
+
+Retrieve a list of all campaign auto-reply templates. Templates define automated email responses sent to supporters.
+
 **Responses:**
 
 - **200**: A list of reply templates
@@ -187,6 +191,10 @@ Content-Type: `application/json`
 
 #### POST
 
+**Summary:** /api/v1/reply-templates
+
+Create a new auto-reply template for a campaign. The template defines the email content, layout, and scheduling for automated responses to supporters. If active=true, this will deactivate other templates for the same campaign.
+
 **Request Body:**
 
 Content-Type: `application/json`
@@ -197,11 +205,16 @@ Content-Type: `application/json`
 | campaign_id | number | ✓ |  |
 | name | string | ✓ |  |
 | subject | string | ✓ |  |
-| body | string | ✓ |  |
+| message_body | string | ✓ |  |
+| layout_type | string | ✓ |  |
+| send_timing | string | ✓ |  |
+| scheduled_for | string |  |  |
+| active | boolean | ✓ |  |
 
 **Responses:**
 
 - **201**: The created reply template
+- **400**: Validation failed - check request body
 
 **CLI Example:**
 
@@ -214,6 +227,10 @@ Content-Type: `application/json`
 ### /api/v1/reply-templates/{id}
 
 #### GET
+
+**Summary:** /api/v1/reply-templates/{id}
+
+Retrieve detailed information about a specific campaign auto-reply template.
 
 **Parameters:**
 
@@ -230,6 +247,108 @@ Content-Type: `application/json`
 
 ```bash
 ./cli /api/v1/reply-templates/--id=123
+```
+
+---
+
+#### PATCH
+
+**Summary:** /api/v1/reply-templates/{id}
+
+Update an existing auto-reply template. You can modify the subject, message body, layout type, send timing, and active status. Setting active=true will deactivate other templates for the same campaign.
+
+**Parameters:**
+
+| Name | Type | In | Required | Description |
+|------|------|----|---------|--------------|
+| id | string | path | ✓ |  |
+
+**Request Body:**
+
+Content-Type: `application/json`
+
+| Property | Type | Required | Description |
+|----------|------|----------|--------------|
+| name | string |  |  |
+| subject | string |  |  |
+| message_body | string |  |  |
+| layout_type | string |  |  |
+| send_timing | string |  |  |
+| scheduled_for | string |  |  |
+| active | boolean |  |  |
+
+**Responses:**
+
+- **200**: The updated reply template
+- **400**: Validation failed - check request body
+- **403**: Forbidden - not authorized to update this template
+- **404**: Reply template not found
+
+**CLI Example:**
+
+```bash
+./cli /api/v1/reply-templates/--id=123 --method=PATCH --name=example --param=value
+```
+
+---
+
+#### DELETE
+
+**Summary:** /api/v1/reply-templates/{id}
+
+Permanently delete an auto-reply template. This action cannot be undone.
+
+**Parameters:**
+
+| Name | Type | In | Required | Description |
+|------|------|----|---------|--------------|
+| id | string | path | ✓ |  |
+
+**Responses:**
+
+- **204**: Reply template deleted successfully
+- **403**: Forbidden - not authorized to delete this template
+- **404**: Reply template not found
+
+**CLI Example:**
+
+```bash
+./cli /api/v1/reply-templates/--id=123 --method=DELETE
+```
+
+---
+
+### /api/v1/reply-templates/{id}/toggle-active
+
+#### POST
+
+**Summary:** /api/v1/reply-templates/{id}/toggle-active
+
+Activate or deactivate an auto-reply template. Only one template can be active per campaign. Setting active=true will automatically deactivate other templates for the same campaign.
+
+**Parameters:**
+
+| Name | Type | In | Required | Description |
+|------|------|----|---------|--------------|
+| id | string | path | ✓ |  |
+
+**Request Body:**
+
+Content-Type: `application/json`
+
+| Property | Type | Required | Description |
+|----------|------|----------|--------------|
+| active | boolean | ✓ | Set to true to activate, false to deactivate |
+
+**Responses:**
+
+- **200**: Template activation status updated
+- **404**: Reply template not found
+
+**CLI Example:**
+
+```bash
+./cli /api/v1/reply-templates/--id=123/toggle-active --method=POST --name=example --param=value
 ```
 
 ---
