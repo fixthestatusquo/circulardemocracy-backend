@@ -104,7 +104,7 @@ describe("DatabaseClient", () => {
 
       mockFetch.mockResolvedValueOnce(createMockResponse([mockCampaign]));
 
-      const result = await db.classifyMessage(mockEmbedding, "climate");
+      const result = await db.classifyMessage(mockEmbedding, 1, "climate");
 
       expect(result).toEqual({
         campaign_id: 1,
@@ -119,19 +119,19 @@ describe("DatabaseClient", () => {
         name: "Environmental Policy",
         slug: "environmental-policy",
         status: "active",
-        similarity: 0.8,
+        distance: 0.05, // Distance <= 0.1 threshold
       };
 
       mockFetch
         .mockResolvedValueOnce(createMockResponse([])) // No hint match
         .mockResolvedValueOnce(createMockResponse([mockSimilarCampaign]));
 
-      const result = await db.classifyMessage(mockEmbedding, "nonexistent");
+      const result = await db.classifyMessage(mockEmbedding, 1, "nonexistent");
 
       expect(result).toEqual({
         campaign_id: 2,
         campaign_name: "Environmental Policy",
-        confidence: 0.8,
+        confidence: 0.95, // 1 - distance = 1 - 0.05 = 0.95
       });
     });
 
@@ -148,7 +148,7 @@ describe("DatabaseClient", () => {
         .mockResolvedValueOnce(createMockResponse([])) // No similar campaigns
         .mockResolvedValueOnce(createMockResponse([mockUncategorized])); // Found uncategorized
 
-      const result = await db.classifyMessage(mockEmbedding);
+      const result = await db.classifyMessage(mockEmbedding, 1);
 
       expect(result).toEqual({
         campaign_id: 999,

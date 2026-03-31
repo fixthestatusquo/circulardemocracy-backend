@@ -10,6 +10,12 @@ import { DatabaseClient } from "../src/database";
 import { processMessage, type Ai, type MessageInput } from "../src/message_processor";
 import { restoreConsole } from "./setup";
 
+// Mock the embedding service to avoid ONNX runtime issues
+vi.mock("../src/embedding_service", () => ({
+  generateEmbedding: vi.fn().mockResolvedValue(new Array(1024).fill(0.1)),
+  formatEmailContentForEmbedding: vi.fn().mockReturnValue("# Test Subject\n\nTest message body"),
+}));
+
 global.fetch = vi.fn();
 restoreConsole();
 
@@ -313,12 +319,12 @@ describe("Privacy-First Integration Tests", () => {
             name: "Education Reform",
             slug: "education-reform",
             status: "active",
-            similarity: 0.95,
+            distance: 0.05,
           },
         ])
       );
 
-      const result = await db.classifyMessage(embedding);
+      const result = await db.classifyMessage(embedding, 1);
 
       expect(result.campaign_id).toBe(20);
       expect(result.campaign_name).toBe("Education Reform");

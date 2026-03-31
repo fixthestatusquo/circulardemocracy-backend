@@ -6,6 +6,12 @@ import {
 } from "../src/message_processor";
 import { DatabaseClient } from "../src/database";
 
+// Mock the embedding service to avoid ONNX runtime errors
+vi.mock("../src/embedding_service", () => ({
+  generateEmbedding: vi.fn().mockResolvedValue(new Array(1024).fill(0.1)),
+  formatEmailContentForEmbedding: vi.fn().mockReturnValue("# Test Subject\n\nTest message body"),
+}));
+
 // Mock DatabaseClient
 const mockDb = {
   getMessageByExternalId: vi.fn(),
@@ -75,7 +81,6 @@ describe("message_processor", () => {
     vi.spyOn(mockDb, "findPoliticianByEmail").mockResolvedValue({
       id: 1,
     } as any);
-    vi.spyOn(mockAi, "run").mockResolvedValue({ data: [[0.1, 0.2]] });
     vi.spyOn(mockDb, "classifyMessage").mockResolvedValue({
       campaign_id: 10,
       campaign_name: "Test Campaign",
@@ -92,7 +97,6 @@ describe("message_processor", () => {
     expect(result.status).toBe("processed");
     expect(result.message_id).toBe(100);
     expect(result.campaign_id).toBe(10);
-    expect(mockAi.run).toHaveBeenCalled();
     expect(mockDb.insertMessage).toHaveBeenCalled();
   });
 });

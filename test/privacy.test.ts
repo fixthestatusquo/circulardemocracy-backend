@@ -410,16 +410,16 @@ describe("Privacy-First Message Storage", () => {
             name: "Climate Action",
             slug: "climate-action",
             status: "active",
-            similarity: 0.85,
+            distance: 0.05, // Within 0.1 threshold, confidence = 1 - 0.05 = 0.95
           },
         ])
       );
 
-      const result = await db.classifyMessage(embedding);
+      const result = await db.classifyMessage(embedding, 1);
 
       expect(result.campaign_id).toBe(15);
       expect(result.campaign_name).toBe("Climate Action");
-      expect(result.confidence).toBe(0.85);
+      expect(result.confidence).toBe(0.95);
 
       // Verify RPC was called with embedding, not raw text
       const fetchCall = mockFetch.mock.calls[0];
