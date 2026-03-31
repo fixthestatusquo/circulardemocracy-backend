@@ -4,6 +4,7 @@ import { DatabaseClient } from "./database";
 import type { Ai } from "./message_processor";
 import { processScheduledReplies, type WorkerConfig } from "./reply_worker";
 
+import analyticsApp from "./analytics";
 import campaignsApp from "./campaigns";
 import loginApp from "./login";
 // Import modular route handlers
@@ -41,6 +42,7 @@ app.use("/api/*", async (c, next) => {
 });
 
 // Mount modular routers
+app.route("/", analyticsApp);
 app.route("/", messagesApp);
 app.route("/", campaignsApp);
 app.route("/", politiciansApp);
