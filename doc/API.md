@@ -6,6 +6,33 @@ API for processing citizen messages to politicians
 
 ## Endpoints
 
+### /api/v1/messages/analytics
+
+#### GET
+
+**Summary:** /api/v1/messages/analytics
+
+Retrieve message analytics showing hourly message counts grouped by campaign for the last N days (default: 7 days)
+
+**Parameters:**
+
+| Name | Type | In | Required | Description |
+|------|------|----|---------|--------------|
+| days | string | query |  |  |
+
+**Responses:**
+
+- **200**: Message analytics grouped by hour and campaign
+- **500**: Internal server error
+
+**CLI Example:**
+
+```bash
+./cli /api/v1/messages/analytics --days=example
+```
+
+---
+
 ### /api/v1/messages
 
 #### POST
@@ -201,7 +228,6 @@ Content-Type: `application/json`
 
 | Property | Type | Required | Description |
 |----------|------|----------|--------------|
-| politician_id | number | ✓ |  |
 | campaign_id | number | ✓ |  |
 | name | string | ✓ |  |
 | subject | string | ✓ |  |
