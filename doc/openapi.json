@@ -26,6 +26,100 @@
     "parameters": {}
   },
   "paths": {
+    "/api/v1/messages/analytics": {
+      "get": {
+        "security": [
+          {
+            "Bearer": []
+          }
+        ],
+        "tags": [
+          "Analytics"
+        ],
+        "summary": "/api/v1/messages/analytics",
+        "description": "Retrieve message analytics showing hourly message counts grouped by campaign for the last N days (default: 7 days)",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d+$",
+              "default": "7",
+              "description": "Number of days to look back (default: 7)"
+            },
+            "required": false,
+            "name": "days",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Message analytics grouped by hour and campaign",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "analytics": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "hour": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "campaign_id": {
+                            "type": "number"
+                          },
+                          "campaign_name": {
+                            "type": "string"
+                          },
+                          "message_count": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "hour",
+                          "campaign_id",
+                          "campaign_name",
+                          "message_count"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "analytics"
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "default": false
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/messages": {
       "post": {
         "security": [
@@ -786,9 +880,6 @@
                       "id": {
                         "type": "number"
                       },
-                      "politician_id": {
-                        "type": "number"
-                      },
                       "campaign_id": {
                         "type": "number"
                       },
@@ -836,7 +927,6 @@
                     },
                     "required": [
                       "id",
-                      "politician_id",
                       "campaign_id",
                       "name",
                       "subject",
@@ -872,9 +962,6 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "politician_id": {
-                    "type": "number"
-                  },
                   "campaign_id": {
                     "type": "number"
                   },
@@ -918,7 +1005,6 @@
                   }
                 },
                 "required": [
-                  "politician_id",
                   "campaign_id",
                   "name",
                   "subject",
@@ -940,9 +1026,6 @@
                   "type": "object",
                   "properties": {
                     "id": {
-                      "type": "number"
-                    },
-                    "politician_id": {
                       "type": "number"
                     },
                     "campaign_id": {
@@ -992,7 +1075,6 @@
                   },
                   "required": [
                     "id",
-                    "politician_id",
                     "campaign_id",
                     "name",
                     "subject",
@@ -1048,9 +1130,6 @@
                     "id": {
                       "type": "number"
                     },
-                    "politician_id": {
-                      "type": "number"
-                    },
                     "campaign_id": {
                       "type": "number"
                     },
@@ -1098,7 +1177,6 @@
                   },
                   "required": [
                     "id",
-                    "politician_id",
                     "campaign_id",
                     "name",
                     "subject",
@@ -1199,9 +1277,6 @@
                     "id": {
                       "type": "number"
                     },
-                    "politician_id": {
-                      "type": "number"
-                    },
                     "campaign_id": {
                       "type": "number"
                     },
@@ -1249,7 +1324,6 @@
                   },
                   "required": [
                     "id",
-                    "politician_id",
                     "campaign_id",
                     "name",
                     "subject",
@@ -1365,9 +1439,6 @@
                     "id": {
                       "type": "number"
                     },
-                    "politician_id": {
-                      "type": "number"
-                    },
                     "campaign_id": {
                       "type": "number"
                     },
@@ -1415,7 +1486,6 @@
                   },
                   "required": [
                     "id",
-                    "politician_id",
                     "campaign_id",
                     "name",
                     "subject",
