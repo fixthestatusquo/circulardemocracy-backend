@@ -1,6 +1,13 @@
 -- Migration: Add daily analytics materialized view
 -- Optimizes analytics by pre-aggregating data at daily level
 
+-- Drop existing objects if they exist
+DROP TRIGGER IF EXISTS trigger_refresh_analytics_on_insert ON messages;
+DROP FUNCTION IF EXISTS refresh_analytics_on_message_insert() CASCADE;
+DROP FUNCTION IF EXISTS refresh_daily_analytics() CASCADE;
+DROP FUNCTION IF EXISTS get_message_analytics_daily(integer) CASCADE;
+DROP MATERIALIZED VIEW IF EXISTS daily_message_analytics CASCADE;
+
 -- Create materialized view for daily message analytics
 CREATE MATERIALIZED VIEW daily_message_analytics AS
 SELECT 
@@ -51,8 +58,12 @@ RETURNS TABLE (
   message_count bigint
 )
 LANGUAGE sql
+SECURITY DEFINER
 AS $$
   SELECT * FROM daily_message_analytics
   WHERE date >= NOW() - (days_back || ' days')::interval
   ORDER BY date ASC;
 $$;
+
+-- Grant execute permission to authenticated users
+GRANT EXECUTE ON FUNCTION get_message_analytics_daily(integer) TO authenticated;
