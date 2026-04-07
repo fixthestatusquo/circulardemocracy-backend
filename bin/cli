@@ -7,6 +7,7 @@ import { createClient } from '@supabase/supabase-js';
 import * as readline from 'readline';
 import * as path from 'path';
 import * as os from 'os';
+import { generateEmbedding } from '../src/embedding_service.js';
 
 const CACHE_DIR = path.join(os.homedir(), '.cache', 'circulardemocracy-cli');
 const CONFIG_PATH = path.join(CACHE_DIR, 'session.json');
@@ -101,6 +102,153 @@ async function logout() {
     fs.unlinkSync(CONFIG_PATH);
   }
   console.log('Logged out.');
+}
+
+async function addCampaign() {
+  const { name, text } = argv;
+  const description = argv.description || argv.desc;
+
+  if (!name || !text) {
+    console.error('Error: --name and --text are required');
+    console.log('\nUsage: ./cli add-campaign --name "Campaign Name" --text "Representative text" [--description "Description"]');
+    process.exit(1);
+  }
+
+  // Auto-generate slug from name
+  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+
+  console.log('🔄 Generating embedding for campaign...');
+
+  const embedding = await generateEmbedding(null, text);
+
+  console.log(`✅ Generated ${embedding.length}-dimensional embedding`);
+
+  const API_BASE_URL = getApiBaseUrl(argv.server);
+  const token = await getAuthToken();
+
+  if (!token) {
+    console.error('Error: Not logged in. Please run: ./cli login');
+    process.exit(1);
+  }
+
+  const client = hc(API_BASE_URL, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  console.log('💾 Creating campaign via API...');
+
+  try {
+    console.log(`📝 Using slug: ${slug}`);
+
+    const response = await client.api.v1.campaigns.$post({
+      json: {
+        name,
+        slug,
+        description: description || undefined,
+      },
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`❌ Error creating campaign: ${response.status} ${response.statusText}`);
+      console.error(errorText);
+      process.exit(1);
+    }
+
+    const campaign = await response.json();
+    console.log('✅ Campaign created successfully!');
+
+    const supabase = getSupabase();
+    console.log('🔄 Updating campaign with embedding...');
+
+    const { data: updatedCampaign, error: updateError } = await supabase
+      .from('campaigns')
+      .update({ reference_vector: embedding })
+      .eq('id', campaign.id)
+      .select()
+      .single();
+
+    if (updateError) {
+      console.error('⚠️  Campaign created but embedding update failed:', updateError.message);
+      console.log('Campaign data:', JSON.stringify(campaign, null, 2));
+      process.exit(1);
+    }
+
+    console.log('✅ Campaign embedding set successfully!');
+    console.log(JSON.stringify(updatedCampaign, null, 2));
+  } catch (error) {
+    console.error('❌ Failed to create campaign:', error.message);
+    process.exit(1);
+  }
+}
+
+async function updateCampaign() {
+  const { id, text, name } = argv;
+
+  if (!id) {
+    console.error('Error: --id is required');
+    console.log('\nUsage: ./cli update-campaign --id <campaign-id> [--text "Representative text"] [--name "Campaign Name"]');
+    console.log('\nAt least one of --text or --name must be provided');
+    process.exit(1);
+  }
+
+  if (!text && !name) {
+    console.error('Error: At least one of --text or --name must be provided');
+    console.log('\nUsage: ./cli update-campaign --id <campaign-id> [--text "Representative text"] [--name "Campaign Name"]');
+    process.exit(1);
+  }
+
+  const supabase = getSupabase();
+
+  console.log(`� Fetching campaign ${id}...`);
+
+  const { data: existingCampaign, error: fetchError } = await supabase
+    .from('campaigns')
+    .select('id, name, slug')
+    .eq('id', id)
+    .single();
+
+  if (fetchError || !existingCampaign) {
+    console.error(`❌ Campaign with id ${id} not found`);
+    process.exit(1);
+  }
+
+  console.log(`✅ Found campaign: ${existingCampaign.name} (${existingCampaign.slug})`);
+
+  const updateData = {
+    updated_at: new Date().toISOString(),
+  };
+
+  if (text) {
+    console.log(`� Generating new embedding for campaign ${id}...`);
+    const embedding = await generateEmbedding(null, text);
+    console.log(`✅ Generated ${embedding.length}-dimensional embedding`);
+    updateData.reference_vector = embedding;
+  }
+
+  if (name) {
+    console.log(`🔄 Updating name to: ${name}`);
+    updateData.name = name;
+  }
+
+  console.log('💾 Updating campaign...');
+
+  const { data, error } = await supabase
+    .from('campaigns')
+    .update(updateData)
+    .eq('id', id)
+    .select()
+    .single();
+
+  if (error) {
+    console.error('❌ Error updating campaign:', error.message);
+    process.exit(1);
+  }
+
+  console.log('✅ Campaign updated successfully!');
+  console.log(JSON.stringify(data, null, 2));
 }
 
 function loadSession() {
@@ -373,12 +521,23 @@ async function showHelp(filter = '') {
 
   if (!endpoints) {
     console.log(`
-Usage: ./cli <endpoint> [options]
+Usage: ./cli <command> [options]
 
-Arguments:
-  <endpoint>    API endpoint path (e.g., campaigns, users/:id)
+Commands:
+  login                 Authenticate with the API
+  logout                Clear authentication session
+  add-campaign          Create a new campaign with embedding
+  update-campaign       Update campaign embedding
+  <endpoint>            API endpoint path (e.g., campaigns, users/:id)
 
-Options:
+Campaign Management:
+  add-campaign --name <name> --text <text> [--description <desc>]
+    Create a new campaign with vector embedding (slug auto-generated from name)
+    
+  update-campaign --id <id> [--text <text>] [--name <name>]
+    Update campaign embedding and/or name (at least one required)
+
+API Options:
   -m, --method     HTTP method (GET, POST, PUT, DELETE) [default: GET]
   -s, --server     Server to use (index or description) [default: 0]
   -l, --list-servers  List available servers from OpenAPI spec
@@ -387,9 +546,12 @@ Options:
   --param=val      Any parameter for the API call
 
 Examples:
+  ./cli login
+  ./cli add-campaign --name "Climate Action" --text "I urge action on climate change"
+  ./cli update-campaign --id 5 --text "Updated representative text"
+  ./cli update-campaign --id 5 --name "Updated Campaign Name"
+  ./cli update-campaign --id 5 --text "New text" --name "New Campaign Name"
   ./cli campaigns --name=example --status=active
-  ./cli campaigns --server=1 --name=example
-  ./cli campaigns --server=prod --name=example
   ./cli campaigns/:id --id=123 --name=updated --method=PUT
   ./cli --list-servers
 
@@ -451,6 +613,16 @@ if (command === 'login') {
 
 if (command === 'logout') {
   await logout();
+  process.exit(0);
+}
+
+if (command === 'add-campaign') {
+  await addCampaign();
+  process.exit(0);
+}
+
+if (command === 'update-campaign') {
+  await updateCampaign();
   process.exit(0);
 }
 
