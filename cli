@@ -1,0 +1,3 @@
+#!/bin/bash
+# Wrapper script to run CLI with TypeScript support
+npx tsx bin/cli "$@"

@@ -6,10 +6,8 @@
   "type": "module",
   "scripts": {
     "dev": "tsx src/serve.ts",
-    "cli": "tsx bin/cli",
     "jmap-fetch": "tsx bin/jmap-fetch.ts",
     "mail": "tsx bin/mail.ts",
-    "reprocess-messages": "tsx bin/reprocess-messages.ts",
     "build": "tsc",
     "wrangler:dev": "wrangler dev src/index.ts --local",
     "deploy": "wrangler deploy --minify src/index.ts --env ",
