@@ -78,6 +78,7 @@ class MockDatabaseClient extends DatabaseClient {
       campaign_id: 10,
       campaign_name: "Test Campaign",
       confidence: 0.95,
+      shouldCluster: false,
     };
   }
 
