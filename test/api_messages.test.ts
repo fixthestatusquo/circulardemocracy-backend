@@ -19,6 +19,7 @@ const mockDbInstance = {
   insertMessage: vi.fn(),
   getActiveTemplateForCampaign: vi.fn(),
   storeSenderEmail: vi.fn(),
+  assignMessageToCluster: vi.fn(),
 };
 
 // --- Mock the entire database module ---
@@ -148,6 +149,7 @@ describe("Messages API Integration", () => {
     mockDbInstance.getDuplicateRank.mockResolvedValue(0);
     mockDbInstance.getActiveTemplateForCampaign.mockResolvedValue(null);
     mockDbInstance.insertMessage.mockResolvedValue(100);
+    mockDbInstance.assignMessageToCluster.mockResolvedValue(1);
     mockDbInstance.storeSenderEmail.mockResolvedValue(undefined);
     // @ts-ignore
     env.AI.run.mockResolvedValue({ data: [[0.1, 0.2]] });
