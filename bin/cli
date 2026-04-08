@@ -641,16 +641,25 @@ if (command === 'update-campaign') {
 }
 
 if (command === 'reprocess-messages') {
-  const { execSync } = await import('child_process');
-  const args = process.argv.slice(3).join(' ');
-  try {
-    execSync(`npx tsx bin/reprocess-messages.ts ${args}`, { stdio: 'inherit' });
-  } catch (error) {
-    process.exit(1);
-  }
+  const { spawn } = await import('child_process');
+  const args = process.argv.slice(3);
+
+  const child = spawn('npx', ['tsx', 'bin/reprocess-messages.ts', ...args], {
+    stdio: 'inherit',
+    env: process.env
+  });
+
+  child.on('exit', (code) => {
+    process.exit(code || 0);
+  });
+
+  // Wait for child process to complete
+  await new Promise((resolve) => {
+    child.on('close', resolve);
+  });
+
   process.exit(0);
 }
-
 
 // Get API base URL with server selection
 const API_BASE_URL = getApiBaseUrl(argv.server);

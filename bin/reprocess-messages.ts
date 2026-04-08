@@ -365,7 +365,7 @@ function parseArgs(args: string[]): ReprocessOptions {
 
   const processAll = parsed["process-all"] === true || (!parsed.since && !parsed["campaign-id"] && !parsed.limit);
 
-  return {
+  const options = {
     campaignId: typeof parsed["campaign-id"] === "number" ? parsed["campaign-id"] : undefined,
     since: typeof parsed.since === "string" ? parsed.since : undefined,
     limit: typeof parsed.limit === "number" ? parsed.limit : undefined,
@@ -375,6 +375,8 @@ function parseArgs(args: string[]): ReprocessOptions {
     username: typeof parsed.user === "string" ? parsed.user : undefined,
     password: typeof parsed.password === "string" ? parsed.password : undefined,
   };
+
+  return options;
 }
 
 function printUsage() {
@@ -566,11 +568,8 @@ async function reprocessMessages(
         throw updateError;
       }
 
-      // Get uncategorized campaign to check if we should cluster
-      const uncategorizedCampaign = await db.getUncategorizedCampaign();
-
-      // Only re-assign to cluster if message is assigned to uncategorized campaign
-      if (classification.campaign_id === uncategorizedCampaign.id) {
+      // Only re-assign to cluster if no campaign was found during classification
+      if (classification.shouldCluster) {
         try {
           await db.assignMessageToCluster(message.id, embedding, message.politician_id);
         } catch (clusterError) {
