@@ -24,6 +24,7 @@ const mockDb = {
   insertMessage: vi.fn(),
   getActiveTemplateForCampaign: vi.fn(),
   storeSenderEmail: vi.fn(),
+  assignMessageToCluster: vi.fn(),
 } as unknown as DatabaseClient;
 
 const mockAi = {
@@ -53,6 +54,7 @@ vi.mock("../src/database", () => ({
     }),
     getDuplicateRank: vi.fn().mockResolvedValue(0),
     insertMessage: vi.fn().mockResolvedValue(100),
+    assignMessageToCluster: vi.fn().mockResolvedValue(1),
     getActiveTemplateForCampaign: vi.fn().mockResolvedValue(null),
     storeSenderEmail: vi.fn().mockResolvedValue(undefined),
   })),
@@ -770,6 +772,7 @@ describe("Stalwart Webhook", () => {
       });
       vi.spyOn(mockDb, "getDuplicateRank").mockResolvedValue(0);
       vi.spyOn(mockDb, "insertMessage").mockResolvedValue(100);
+      vi.spyOn(mockDb, "assignMessageToCluster").mockResolvedValue(1);
 
       const result = await processStalwartHook(mockDb, mockAi as any, payload);
 
@@ -822,6 +825,7 @@ describe("Stalwart Webhook", () => {
       });
       vi.spyOn(mockDb, "getDuplicateRank").mockResolvedValue(0);
       vi.spyOn(mockDb, "insertMessage").mockResolvedValue(50);
+      vi.spyOn(mockDb, "assignMessageToCluster").mockResolvedValue(1);
 
       await processStalwartHook(mockDb, mockAi as any, payload);
 
@@ -927,6 +931,7 @@ describe("Stalwart Webhook", () => {
       });
       vi.spyOn(mockDb, "getDuplicateRank").mockResolvedValue(0);
       vi.spyOn(mockDb, "insertMessage").mockResolvedValue(100);
+      vi.spyOn(mockDb, "assignMessageToCluster").mockResolvedValue(1);
 
       const result = await processStalwartHook(mockDb, mockAi as any, payload);
 

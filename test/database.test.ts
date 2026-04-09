@@ -110,6 +110,7 @@ describe("DatabaseClient", () => {
         campaign_id: 1,
         campaign_name: "Climate Action",
         confidence: 0.95,
+        shouldCluster: false,
       });
     });
 
@@ -132,6 +133,7 @@ describe("DatabaseClient", () => {
         campaign_id: 2,
         campaign_name: "Environmental Policy",
         confidence: 0.95, // 1 - distance = 1 - 0.05 = 0.95
+        shouldCluster: false,
       });
     });
 
@@ -154,6 +156,7 @@ describe("DatabaseClient", () => {
         campaign_id: 999,
         campaign_name: "Uncategorized",
         confidence: 0.1,
+        shouldCluster: true,
       });
     });
   });

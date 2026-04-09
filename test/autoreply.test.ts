@@ -478,6 +478,7 @@ describe("Message Processor Auto-Reply", () => {
     insertMessage: vi.fn(),
     getActiveTemplateForCampaign: vi.fn(),
     storeSenderEmail: vi.fn(),
+    assignMessageToCluster: vi.fn(),
   } as unknown as DatabaseClient;
 
   const mockAi = {
@@ -526,6 +527,7 @@ describe("Message Processor Auto-Reply", () => {
       updated_at: "2024-01-01T00:00:00Z",
     });
     vi.spyOn(mockDb, "insertMessage").mockResolvedValue(100);
+    vi.spyOn(mockDb, "assignMessageToCluster").mockResolvedValue(1);
     vi.spyOn(mockDb, "storeSenderEmail").mockResolvedValue(undefined);
 
     const result = await processMessage(
@@ -560,6 +562,7 @@ describe("Message Processor Auto-Reply", () => {
     });
     vi.spyOn(mockDb, "getDuplicateRank").mockResolvedValue(1);
     vi.spyOn(mockDb, "insertMessage").mockResolvedValue(100);
+    vi.spyOn(mockDb, "assignMessageToCluster").mockResolvedValue(1);
     vi.spyOn(mockDb, "storeSenderEmail").mockResolvedValue(undefined);
 
     const result = await processMessage(mockDb, mockAi as any, validInput);
@@ -586,6 +589,7 @@ describe("Message Processor Auto-Reply", () => {
     vi.spyOn(mockDb, "getDuplicateRank").mockResolvedValue(0);
     vi.spyOn(mockDb, "getActiveTemplateForCampaign").mockResolvedValue(null);
     vi.spyOn(mockDb, "insertMessage").mockResolvedValue(100);
+    vi.spyOn(mockDb, "assignMessageToCluster").mockResolvedValue(1);
     vi.spyOn(mockDb, "storeSenderEmail").mockResolvedValue(undefined);
 
     const result = await processMessage(

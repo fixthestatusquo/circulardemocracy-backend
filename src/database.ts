@@ -65,6 +65,7 @@ export interface ClassificationResult {
   campaign_id: number;
   campaign_name: string;
   confidence: number;
+  shouldCluster: boolean;
 }
 
 export class DatabaseClient {
@@ -1145,6 +1146,7 @@ export class DatabaseClient {
           campaign_id: hintCampaign.id,
           campaign_name: hintCampaign.name,
           confidence: 0.95,
+          shouldCluster: false,
         };
       }
     }
@@ -1161,6 +1163,7 @@ export class DatabaseClient {
           campaign_id: best.id,
           campaign_name: best.name,
           confidence: 1 - best.distance,
+          shouldCluster: false,
         };
       }
     }
@@ -1172,6 +1175,7 @@ export class DatabaseClient {
       campaign_id: uncategorized.id,
       campaign_name: uncategorized.name,
       confidence: 0.1,
+      shouldCluster: true,
     };
   }
 }
