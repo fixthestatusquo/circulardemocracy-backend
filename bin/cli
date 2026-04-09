@@ -8,12 +8,149 @@ import * as readline from 'readline';
 import * as path from 'path';
 import * as os from 'os';
 import { generateEmbedding } from '../src/embedding_service.js';
+import https from 'https';
+import http from 'http';
 
 const CACHE_DIR = path.join(os.homedir(), '.cache', 'circulardemocracy-cli');
 const CONFIG_PATH = path.join(CACHE_DIR, 'session.json');
 
 // Ensure cache directory exists
 fs.mkdirSync(CACHE_DIR, { recursive: true });
+
+// =============================================================================
+// URL UTILITIES
+// =============================================================================
+
+/**
+ * Extract subdomain from URL
+ * Example: https://example.subdomain.com/page -> subdomain
+ */
+function extractSubdomain(url) {
+  try {
+    const urlObj = new URL(url);
+    const hostname = urlObj.hostname;
+    const parts = hostname.split('.');
+
+    // Handle cases like subdomain.example.com
+    if (parts.length >= 3) {
+      // Return the first part as subdomain
+      return parts[0];
+    }
+
+    // No subdomain found
+    throw new Error(`No subdomain found in URL: ${url}`);
+  } catch (error) {
+    throw new Error(`Invalid URL: ${error.message}`);
+  }
+}
+
+/**
+ * Fetch content from URL
+ */
+function fetchUrl(url) {
+  return new Promise((resolve, reject) => {
+    try {
+      const urlObj = new URL(url);
+      const protocol = urlObj.protocol === 'https:' ? https : http;
+
+      const options = {
+        method: 'GET',
+        headers: {
+          'User-Agent': 'CircularDemocracy-CLI/1.0',
+        },
+      };
+
+      const req = protocol.request(url, options, (res) => {
+        let data = '';
+
+        // Handle redirects
+        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+          fetchUrl(res.headers.location).then(resolve).catch(reject);
+          return;
+        }
+
+        if (res.statusCode !== 200) {
+          reject(new Error(`HTTP ${res.statusCode}: ${res.statusMessage}`));
+          return;
+        }
+
+        res.on('data', (chunk) => {
+          data += chunk;
+        });
+
+        res.on('end', () => {
+          resolve(data);
+        });
+      });
+
+      req.on('error', (error) => {
+        reject(new Error(`Network error: ${error.message}`));
+      });
+
+      req.setTimeout(30000, () => {
+        req.destroy();
+        reject(new Error('Request timeout'));
+      });
+
+      req.end();
+    } catch (error) {
+      reject(new Error(`Failed to fetch URL: ${error.message}`));
+    }
+  });
+}
+
+/**
+ * Extract text content from HTML
+ * Simple extraction - removes HTML tags and scripts
+ */
+function extractTextFromHtml(html) {
+  // Remove script and style tags with their content
+  let text = html.replace(/<script[^>]*>.*?<\/script>/gis, '');
+  text = text.replace(/<style[^>]*>.*?<\/style>/gis, '');
+
+  // Remove HTML tags
+  text = text.replace(/<[^>]+>/g, ' ');
+
+  // Decode HTML entities
+  text = text.replace(/&nbsp;/g, ' ');
+  text = text.replace(/&amp;/g, '&');
+  text = text.replace(/&lt;/g, '<');
+  text = text.replace(/&gt;/g, '>');
+  text = text.replace(/&quot;/g, '"');
+  text = text.replace(/&#39;/g, "'");
+
+  // Clean up whitespace
+  text = text.replace(/\s+/g, ' ');
+  text = text.trim();
+
+  if (!text || text.length < 10) {
+    throw new Error('No meaningful text content found in URL');
+  }
+
+  return text;
+}
+
+/**
+ * Process URL to extract campaign name and content
+ */
+async function processUrl(url) {
+  console.log(`🔄 Processing URL: ${url}`);
+
+  // Extract subdomain as campaign name
+  const campaignName = extractSubdomain(url);
+  console.log(`📝 Extracted campaign name from subdomain: ${campaignName}`);
+
+  // Fetch content
+  console.log('🌐 Fetching content from URL...');
+  const html = await fetchUrl(url);
+
+  // Extract text
+  console.log('📄 Extracting text content...');
+  const text = extractTextFromHtml(html);
+  console.log(`✅ Extracted ${text.length} characters of text`);
+
+  return { campaignName, text };
+}
 
 
 // =============================================================================
@@ -105,12 +242,29 @@ async function logout() {
 }
 
 async function addCampaign() {
-  const { name, text } = argv;
+  let { name, text, url } = argv;
   const description = argv.description || argv.desc;
 
+  // If URL is provided, extract name and text from it
+  if (url) {
+    try {
+      const urlData = await processUrl(url);
+
+      // Override name and text with URL-extracted data
+      name = name || urlData.campaignName;
+      text = text || urlData.text;
+
+      console.log(`✅ Using campaign name: ${name}`);
+    } catch (error) {
+      console.error(`❌ Failed to process URL: ${error.message}`);
+      process.exit(1);
+    }
+  }
+
   if (!name || !text) {
-    console.error('Error: --name and --text are required');
+    console.error('Error: --name and --text are required (or provide --url)');
     console.log('\nUsage: ./cli add-campaign --name "Campaign Name" --text "Representative text" [--description "Description"]');
+    console.log('   Or: ./cli add-campaign --url "https://subdomain.example.com/page" [--name "Override Name"]');
     process.exit(1);
   }
 
@@ -185,18 +339,36 @@ async function addCampaign() {
 }
 
 async function updateCampaign() {
-  const { id, text, name } = argv;
+  let { id, text, name, url } = argv;
 
   if (!id) {
     console.error('Error: --id is required');
     console.log('\nUsage: ./cli update-campaign --id <campaign-id> [--text "Representative text"] [--name "Campaign Name"]');
-    console.log('\nAt least one of --text or --name must be provided');
+    console.log('   Or: ./cli update-campaign --id <campaign-id> --url "https://subdomain.example.com/page"');
+    console.log('\nAt least one of --text, --name, or --url must be provided');
     process.exit(1);
   }
 
+  // If URL is provided, extract name and text from it
+  if (url) {
+    try {
+      const urlData = await processUrl(url);
+
+      // Override name and text with URL-extracted data if not explicitly provided
+      name = name || urlData.campaignName;
+      text = text || urlData.text;
+
+      console.log(`✅ Using campaign name: ${name}`);
+    } catch (error) {
+      console.error(`❌ Failed to process URL: ${error.message}`);
+      process.exit(1);
+    }
+  }
+
   if (!text && !name) {
-    console.error('Error: At least one of --text or --name must be provided');
+    console.error('Error: At least one of --text, --name, or --url must be provided');
     console.log('\nUsage: ./cli update-campaign --id <campaign-id> [--text "Representative text"] [--name "Campaign Name"]');
+    console.log('   Or: ./cli update-campaign --id <campaign-id> --url "https://subdomain.example.com/page"');
     process.exit(1);
   }
 
@@ -535,8 +707,14 @@ Campaign Management:
   add-campaign --name <name> --text <text> [--description <desc>]
     Create a new campaign with vector embedding (slug auto-generated from name)
     
+  add-campaign --url <url> [--name <override-name>] [--description <desc>]
+    Create campaign from URL (extracts subdomain as name and content as text)
+    
   update-campaign --id <id> [--text <text>] [--name <name>]
     Update campaign embedding and/or name (at least one required)
+    
+  update-campaign --id <id> --url <url> [--name <override-name>]
+    Update campaign from URL (extracts subdomain as name and content as text)
 
 Message Reprocessing:
   reprocess-messages [options]
@@ -562,7 +740,9 @@ API Options:
 Examples:
   ./cli login
   ./cli add-campaign --name "Climate Action" --text "I urge action on climate change"
+  ./cli add-campaign --url "https://climate.example.com/action"
   ./cli update-campaign --id 5 --text "Updated representative text"
+  ./cli update-campaign --id 5 --url "https://climate.example.com/new-page"
   ./cli reprocess-messages --process-all
   ./cli reprocess-messages --campaign-id 5 --limit 100
   ./cli campaigns --name=example --status=active
