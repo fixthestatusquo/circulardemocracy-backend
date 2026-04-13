@@ -22,7 +22,7 @@ app.use("/api/v1/messages/analytics", authMiddleware);
 // =============================================================================
 
 const MessageAnalyticsItemSchema = z.object({
-  hour: z.string().datetime(),
+  date: z.string().datetime(),
   campaign_id: z.number(),
   campaign_name: z.string(),
   message_count: z.number(),
@@ -58,7 +58,7 @@ const getMessageAnalyticsRoute = createRoute({
           schema: MessageAnalyticsResponseSchema,
         },
       },
-      description: "Message analytics grouped by hour and campaign",
+      description: "Message analytics grouped by day and campaign",
     },
     500: {
       content: {

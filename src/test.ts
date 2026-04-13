@@ -72,11 +72,12 @@ class MockDatabaseClient extends DatabaseClient {
     return null;
   }
 
-  async classifyMessage(_embedding: number[], _politicianId: number, _campaignHint?: string) {
-    console.log("[Mock DB] Classifying message");
+  async classifyAndAssignToCluster(_messageId: number, _embedding: number[], _politicianId: number, _campaignHint?: string) {
+    console.log("[Mock DB] Classifying and assigning to cluster");
     return {
       campaign_id: 10,
       campaign_name: "Test Campaign",
+      cluster_id: null,
       confidence: 0.95,
     };
   }

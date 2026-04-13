@@ -8,12 +8,149 @@ import * as readline from 'readline';
 import * as path from 'path';
 import * as os from 'os';
 import { generateEmbedding } from '../src/embedding_service.js';
+import https from 'https';
+import http from 'http';
 
 const CACHE_DIR = path.join(os.homedir(), '.cache', 'circulardemocracy-cli');
 const CONFIG_PATH = path.join(CACHE_DIR, 'session.json');
 
 // Ensure cache directory exists
 fs.mkdirSync(CACHE_DIR, { recursive: true });
+
+// =============================================================================
+// URL UTILITIES
+// =============================================================================
+
+/**
+ * Extract subdomain from URL
+ * Example: https://example.subdomain.com/page -> subdomain
+ */
+function extractSubdomain(url) {
+  try {
+    const urlObj = new URL(url);
+    const hostname = urlObj.hostname;
+    const parts = hostname.split('.');
+
+    // Handle cases like subdomain.example.com
+    if (parts.length >= 3) {
+      // Return the first part as subdomain
+      return parts[0];
+    }
+
+    // No subdomain found
+    throw new Error(`No subdomain found in URL: ${url}`);
+  } catch (error) {
+    throw new Error(`Invalid URL: ${error.message}`);
+  }
+}
+
+/**
+ * Fetch content from URL
+ */
+function fetchUrl(url) {
+  return new Promise((resolve, reject) => {
+    try {
+      const urlObj = new URL(url);
+      const protocol = urlObj.protocol === 'https:' ? https : http;
+
+      const options = {
+        method: 'GET',
+        headers: {
+          'User-Agent': 'CircularDemocracy-CLI/1.0',
+        },
+      };
+
+      const req = protocol.request(url, options, (res) => {
+        let data = '';
+
+        // Handle redirects
+        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+          fetchUrl(res.headers.location).then(resolve).catch(reject);
+          return;
+        }
+
+        if (res.statusCode !== 200) {
+          reject(new Error(`HTTP ${res.statusCode}: ${res.statusMessage}`));
+          return;
+        }
+
+        res.on('data', (chunk) => {
+          data += chunk;
+        });
+
+        res.on('end', () => {
+          resolve(data);
+        });
+      });
+
+      req.on('error', (error) => {
+        reject(new Error(`Network error: ${error.message}`));
+      });
+
+      req.setTimeout(30000, () => {
+        req.destroy();
+        reject(new Error('Request timeout'));
+      });
+
+      req.end();
+    } catch (error) {
+      reject(new Error(`Failed to fetch URL: ${error.message}`));
+    }
+  });
+}
+
+/**
+ * Extract text content from HTML
+ * Simple extraction - removes HTML tags and scripts
+ */
+function extractTextFromHtml(html) {
+  // Remove script and style tags with their content
+  let text = html.replace(/<script[^>]*>.*?<\/script>/gis, '');
+  text = text.replace(/<style[^>]*>.*?<\/style>/gis, '');
+
+  // Remove HTML tags
+  text = text.replace(/<[^>]+>/g, ' ');
+
+  // Decode HTML entities
+  text = text.replace(/&nbsp;/g, ' ');
+  text = text.replace(/&amp;/g, '&');
+  text = text.replace(/&lt;/g, '<');
+  text = text.replace(/&gt;/g, '>');
+  text = text.replace(/&quot;/g, '"');
+  text = text.replace(/&#39;/g, "'");
+
+  // Clean up whitespace
+  text = text.replace(/\s+/g, ' ');
+  text = text.trim();
+
+  if (!text || text.length < 10) {
+    throw new Error('No meaningful text content found in URL');
+  }
+
+  return text;
+}
+
+/**
+ * Process URL to extract campaign name and content
+ */
+async function processUrl(url) {
+  console.log(`🔄 Processing URL: ${url}`);
+
+  // Extract subdomain as campaign name
+  const campaignName = extractSubdomain(url);
+  console.log(`📝 Extracted campaign name from subdomain: ${campaignName}`);
+
+  // Fetch content
+  console.log('🌐 Fetching content from URL...');
+  const html = await fetchUrl(url);
+
+  // Extract text
+  console.log('📄 Extracting text content...');
+  const text = extractTextFromHtml(html);
+  console.log(`✅ Extracted ${text.length} characters of text`);
+
+  return { campaignName, text };
+}
 
 
 // =============================================================================
@@ -105,12 +242,29 @@ async function logout() {
 }
 
 async function addCampaign() {
-  const { name, text } = argv;
+  let { name, text, url } = argv;
   const description = argv.description || argv.desc;
 
+  // If URL is provided, extract name and text from it
+  if (url) {
+    try {
+      const urlData = await processUrl(url);
+
+      // Override name and text with URL-extracted data
+      name = name || urlData.campaignName;
+      text = text || urlData.text;
+
+      console.log(`✅ Using campaign name: ${name}`);
+    } catch (error) {
+      console.error(`❌ Failed to process URL: ${error.message}`);
+      process.exit(1);
+    }
+  }
+
   if (!name || !text) {
-    console.error('Error: --name and --text are required');
+    console.error('Error: --name and --text are required (or provide --url)');
     console.log('\nUsage: ./cli add-campaign --name "Campaign Name" --text "Representative text" [--description "Description"]');
+    console.log('   Or: ./cli add-campaign --url "https://subdomain.example.com/page" [--name "Override Name"]');
     process.exit(1);
   }
 
@@ -185,24 +339,42 @@ async function addCampaign() {
 }
 
 async function updateCampaign() {
-  const { id, text, name } = argv;
+  let { id, text, name, url } = argv;
 
   if (!id) {
     console.error('Error: --id is required');
     console.log('\nUsage: ./cli update-campaign --id <campaign-id> [--text "Representative text"] [--name "Campaign Name"]');
-    console.log('\nAt least one of --text or --name must be provided');
+    console.log('   Or: ./cli update-campaign --id <campaign-id> --url "https://subdomain.example.com/page"');
+    console.log('\nAt least one of --text, --name, or --url must be provided');
     process.exit(1);
   }
 
+  // If URL is provided, extract name and text from it
+  if (url) {
+    try {
+      const urlData = await processUrl(url);
+
+      // Override name and text with URL-extracted data if not explicitly provided
+      name = name || urlData.campaignName;
+      text = text || urlData.text;
+
+      console.log(`✅ Using campaign name: ${name}`);
+    } catch (error) {
+      console.error(`❌ Failed to process URL: ${error.message}`);
+      process.exit(1);
+    }
+  }
+
   if (!text && !name) {
-    console.error('Error: At least one of --text or --name must be provided');
+    console.error('Error: At least one of --text, --name, or --url must be provided');
     console.log('\nUsage: ./cli update-campaign --id <campaign-id> [--text "Representative text"] [--name "Campaign Name"]');
+    console.log('   Or: ./cli update-campaign --id <campaign-id> --url "https://subdomain.example.com/page"');
     process.exit(1);
   }
 
   const supabase = getSupabase();
 
-  console.log(`� Fetching campaign ${id}...`);
+  console.log(`Fetching campaign ${id}...`);
 
   const { data: existingCampaign, error: fetchError } = await supabase
     .from('campaigns')
@@ -211,29 +383,29 @@ async function updateCampaign() {
     .single();
 
   if (fetchError || !existingCampaign) {
-    console.error(`❌ Campaign with id ${id} not found`);
+    console.error(`Campaign with id ${id} not found`);
     process.exit(1);
   }
 
-  console.log(`✅ Found campaign: ${existingCampaign.name} (${existingCampaign.slug})`);
+  console.log(`Found campaign: ${existingCampaign.name} (${existingCampaign.slug})`);
 
   const updateData = {
     updated_at: new Date().toISOString(),
   };
 
   if (text) {
-    console.log(`� Generating new embedding for campaign ${id}...`);
+    console.log(`Generating new embedding for campaign ${id}...`);
     const embedding = await generateEmbedding(null, text);
-    console.log(`✅ Generated ${embedding.length}-dimensional embedding`);
+    console.log(`Generated ${embedding.length}-dimensional embedding`);
     updateData.reference_vector = embedding;
   }
 
   if (name) {
-    console.log(`🔄 Updating name to: ${name}`);
+    console.log(`Updating name to: ${name}`);
     updateData.name = name;
   }
 
-  console.log('💾 Updating campaign...');
+  console.log('Updating campaign...');
 
   const { data, error } = await supabase
     .from('campaigns')
@@ -243,12 +415,89 @@ async function updateCampaign() {
     .single();
 
   if (error) {
-    console.error('❌ Error updating campaign:', error.message);
+    console.error('Error updating campaign:', error.message);
     process.exit(1);
   }
 
-  console.log('✅ Campaign updated successfully!');
+  console.log('Campaign updated successfully!');
   console.log(JSON.stringify(data, null, 2));
+}
+
+async function assignCluster() {
+  const { 'cluster-id': clusterId, 'campaign-name': campaignName } = argv;
+
+  if (!clusterId) {
+    console.error('Error: --cluster-id is required');
+    console.log('\nUsage: ./cli assign-cluster --cluster-id <id> --campaign-name <name>');
+    process.exit(1);
+  }
+
+  if (!campaignName) {
+    console.error('Error: --campaign-name is required');
+    console.log('\nUsage: ./cli assign-cluster --cluster-id <id> --campaign-name <name>');
+    process.exit(1);
+  }
+
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const supabaseKey = process.env.SUPABASE_KEY;
+
+  if (!supabaseUrl || !supabaseKey) {
+    console.error('Error: SUPABASE_URL and SUPABASE_KEY environment variables must be set');
+    process.exit(1);
+  }
+
+  // Import DatabaseClient
+  const { DatabaseClient } = await import('../src/database.js');
+
+  const db = new DatabaseClient({ url: supabaseUrl, key: supabaseKey });
+
+  try {
+    console.log(`Finding campaign: ${campaignName}`);
+    const campaign = await db.findCampaignByHint(campaignName);
+
+    if (!campaign) {
+      console.error(`Campaign "${campaignName}" not found`);
+      process.exit(1);
+    }
+
+    console.log(`Found campaign: ${campaign.name} (ID: ${campaign.id})`);
+
+    console.log(`Assigning campaign to cluster ${clusterId}...`);
+    await db.assignCampaignToCluster(Number(clusterId), campaign.id);
+
+    console.log('Successfully assigned campaign to cluster!');
+    console.log(`All messages in cluster ${clusterId} will be automatically updated with campaign ID ${campaign.id} via database triggers`);
+
+  } catch (error) {
+    console.error('Error assigning campaign to cluster:', error instanceof Error ? error.message : 'Unknown error');
+    process.exit(1);
+  }
+}
+
+async function syncClusters() {
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const supabaseKey = process.env.SUPABASE_KEY;
+
+  if (!supabaseUrl || !supabaseKey) {
+    console.error('Error: SUPABASE_URL and SUPABASE_KEY environment variables must be set');
+    process.exit(1);
+  }
+
+  // Import DatabaseClient
+  const { DatabaseClient } = await import('../src/database.js');
+
+  const db = new DatabaseClient({ url: supabaseUrl, key: supabaseKey });
+
+  try {
+    console.log('Syncing campaign IDs from clusters to messages...');
+    const updatedCount = await db.syncCampaignFromClusters();
+
+    console.log(`Successfully synced ${updatedCount} messages with campaign IDs from their clusters`);
+
+  } catch (error) {
+    console.error('Error syncing clusters:', error instanceof Error ? error.message : 'Unknown error');
+    process.exit(1);
+  }
 }
 
 function loadSession() {
@@ -528,14 +777,43 @@ Commands:
   logout                Clear authentication session
   add-campaign          Create a new campaign with embedding
   update-campaign       Update campaign embedding
+  assign-cluster        Assign campaign to cluster
+  sync-clusters         Sync campaign IDs from clusters to messages
+  reprocess-messages    Reprocess and reclassify existing messages
   <endpoint>            API endpoint path (e.g., campaigns, users/:id)
 
 Campaign Management:
   add-campaign --name <name> --text <text> [--description <desc>]
     Create a new campaign with vector embedding (slug auto-generated from name)
     
+  add-campaign --url <url> [--name <override-name>] [--description <desc>]
+    Create campaign from URL (extracts subdomain as name and content as text)
+    
   update-campaign --id <id> [--text <text>] [--name <name>]
     Update campaign embedding and/or name (at least one required)
+    
+  update-campaign --id <id> --url <url> [--name <override-name>]
+    Update campaign from URL (extracts subdomain as name and content as text)
+
+Cluster Management:
+  assign-cluster --cluster-id <id> --campaign-name <name>
+    Assign a campaign to a cluster (updates all messages in cluster)
+    
+  sync-clusters
+    Sync campaign IDs from clusters to all messages (bulk update)
+
+Message Reprocessing:
+  reprocess-messages [options]
+    Reprocess and reclassify existing messages with updated embeddings
+    Options:
+      --campaign-id <id>    Only reprocess messages for specific campaign
+      --since <date>        Only reprocess messages since date (ISO 8601)
+      --limit <n>           Limit number of messages to process
+      --process-all         Process all messages (default if no filter)
+      --dry-run             Preview without making changes
+      --move-to-folders     Move messages to campaign folders in Stalwart (campaign name only, no subfolders)
+      --username <user>     JMAP username (default: STALWART_USERNAME env)
+      --password <pass>     JMAP password (default: STALWART_APP_PASSWORD env)
 
 API Options:
   -m, --method     HTTP method (GET, POST, PUT, DELETE) [default: GET]
@@ -548,9 +826,11 @@ API Options:
 Examples:
   ./cli login
   ./cli add-campaign --name "Climate Action" --text "I urge action on climate change"
+  ./cli add-campaign --url "https://climate.example.com/action"
   ./cli update-campaign --id 5 --text "Updated representative text"
-  ./cli update-campaign --id 5 --name "Updated Campaign Name"
-  ./cli update-campaign --id 5 --text "New text" --name "New Campaign Name"
+  ./cli update-campaign --id 5 --url "https://climate.example.com/new-page"
+  ./cli reprocess-messages --process-all
+  ./cli reprocess-messages --campaign-id 5 --limit 100
   ./cli campaigns --name=example --status=active
   ./cli campaigns/:id --id=123 --name=updated --method=PUT
   ./cli --list-servers
@@ -626,6 +906,36 @@ if (command === 'update-campaign') {
   process.exit(0);
 }
 
+if (command === 'assign-cluster') {
+  await assignCluster();
+  process.exit(0);
+}
+
+if (command === 'sync-clusters') {
+  await syncClusters();
+  process.exit(0);
+}
+
+if (command === 'reprocess-messages') {
+  const { spawn } = await import('child_process');
+  const args = process.argv.slice(3);
+
+  const child = spawn('npx', ['tsx', 'bin/reprocess-messages.ts', ...args], {
+    stdio: 'inherit',
+    env: process.env
+  });
+
+  child.on('exit', (code) => {
+    process.exit(code || 0);
+  });
+
+  // Wait for child process to complete
+  await new Promise((resolve) => {
+    child.on('close', resolve);
+  });
+
+  process.exit(0);
+}
 
 // Get API base URL with server selection
 const API_BASE_URL = getApiBaseUrl(argv.server);

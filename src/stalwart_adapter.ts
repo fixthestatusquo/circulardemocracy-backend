@@ -262,11 +262,15 @@ export function mapToStalwartResponse(
   }
 
   if (result.campaign_name) {
-    const folderSuffix = result.isReply ? "replied" : "inbox";
+    const campaignFolder = result.campaign_name
+      .replace(/[^a-zA-Z0-9\-_\s]/g, "")
+      .replace(/\s+/g, "-")
+      .substring(0, 50);
+
     return {
       action: "accept",
       modifications: {
-        folder: `${result.campaign_name}/${folderSuffix}`,
+        folder: campaignFolder,
       },
     };
   }

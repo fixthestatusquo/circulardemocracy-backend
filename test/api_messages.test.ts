@@ -14,11 +14,13 @@ const mockDbInstance = {
   request: vi.fn(),
   getMessageByExternalId: vi.fn(),
   findPoliticianByEmail: vi.fn(),
-  classifyMessage: vi.fn(),
+  classifyAndAssignToCluster: vi.fn(),
   getDuplicateRank: vi.fn(),
   insertMessage: vi.fn(),
+  updateMessageFields: vi.fn(),
   getActiveTemplateForCampaign: vi.fn(),
   storeSenderEmail: vi.fn(),
+  assignMessageToCluster: vi.fn(),
 };
 
 // --- Mock the entire database module ---
@@ -140,7 +142,7 @@ describe("Messages API Integration", () => {
   it("should return 200 and process valid message", async () => {
     mockDbInstance.findPoliticianByEmail.mockResolvedValue({ id: 1 });
     mockDbInstance.getMessageByExternalId.mockResolvedValue(null);
-    mockDbInstance.classifyMessage.mockResolvedValue({
+    mockDbInstance.classifyAndAssignToCluster.mockResolvedValue({
       campaign_id: 10,
       campaign_name: "Test Campaign",
       confidence: 0.9,
@@ -148,6 +150,7 @@ describe("Messages API Integration", () => {
     mockDbInstance.getDuplicateRank.mockResolvedValue(0);
     mockDbInstance.getActiveTemplateForCampaign.mockResolvedValue(null);
     mockDbInstance.insertMessage.mockResolvedValue(100);
+    mockDbInstance.assignMessageToCluster.mockResolvedValue(1);
     mockDbInstance.storeSenderEmail.mockResolvedValue(undefined);
     // @ts-ignore
     env.AI.run.mockResolvedValue({ data: [[0.1, 0.2]] });

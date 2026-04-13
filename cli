@@ -1,0 +1,3 @@
+#!/bin/bash
+# Wrapper script to run CLI with TypeScript support and environment variables
+npx dotenv-cli -- npx tsx bin/cli "$@"

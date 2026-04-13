@@ -36,6 +36,18 @@ describe("DatabaseClient", () => {
     });
     mockFetch.mockClear();
     mockFetch.mockReset();
+
+    // Mock all database methods that could cause timeouts
+    vi.spyOn(db, "getUncategorizedCampaign").mockResolvedValue({
+      id: 999,
+      name: "Uncategorized",
+      slug: "uncategorized",
+      status: "active",
+      reference_vector: new Array(1024).fill(0),
+    });
+
+    vi.spyOn(db, "assignMessageToCluster").mockResolvedValue(1);
+    vi.spyOn(db, "updateMessageFields").mockResolvedValue(undefined);
   });
 
   describe("findPoliticianByEmail", () => {
@@ -90,8 +102,9 @@ describe("DatabaseClient", () => {
     });
   });
 
-  describe("classifyMessage", () => {
+  describe("classifyAndAssignToCluster", () => {
     const mockEmbedding = new Array(1024).fill(0.1);
+    const mockMessageId = 123;
 
     it("should use campaign hint when provided and found", async () => {
       const mockCampaign = {
@@ -102,9 +115,16 @@ describe("DatabaseClient", () => {
         reference_vector: [0.1, 0.2],
       };
 
-      mockFetch.mockResolvedValueOnce(createMockResponse([mockCampaign]));
+      // Mock updateMessageFields to avoid Supabase issues
+      vi.spyOn(db, "updateMessageFields").mockResolvedValue(undefined);
 
-      const result = await db.classifyMessage(mockEmbedding, 1, "climate");
+      mockFetch
+        .mockResolvedValueOnce(createMockResponse([mockCampaign])) // findCampaignByHint
+        .mockResolvedValueOnce(createMockResponse(null)) // assignMessageToCampaign
+        .mockResolvedValueOnce(createMockResponse([])) // updateCampaignCentroid - get messages
+        .mockResolvedValueOnce(createMockResponse(null)); // updateCampaignCentroid - update
+
+      const result = await db.classifyAndAssignToCluster(mockMessageId, mockEmbedding, 1, "climate");
 
       expect(result).toEqual({
         campaign_id: 1,
@@ -124,9 +144,12 @@ describe("DatabaseClient", () => {
 
       mockFetch
         .mockResolvedValueOnce(createMockResponse([])) // No hint match
-        .mockResolvedValueOnce(createMockResponse([mockSimilarCampaign]));
+        .mockResolvedValueOnce(createMockResponse([mockSimilarCampaign])) // findSimilarCampaigns
+        .mockResolvedValueOnce(createMockResponse(null)) // assignMessageToCampaign
+        .mockResolvedValueOnce(createMockResponse([])) // updateCampaignCentroid - get messages
+        .mockResolvedValueOnce(createMockResponse(null)); // updateCampaignCentroid - update
 
-      const result = await db.classifyMessage(mockEmbedding, 1, "nonexistent");
+      const result = await db.classifyAndAssignToCluster(mockMessageId, mockEmbedding, 1, "nonexistent");
 
       expect(result).toEqual({
         campaign_id: 2,
@@ -135,26 +158,74 @@ describe("DatabaseClient", () => {
       });
     });
 
-    it("should use uncategorized when no good matches found", async () => {
-      const mockUncategorized = {
-        id: 999,
-        name: "Uncategorized",
-        slug: "uncategorized",
-        status: "active",
-      };
+    it("should attempt cluster assignment when no campaign matches found", async () => {
+      // Mock the cluster assignment flow - simplified to test the flow without complex RPC calls
+      const assignToClusterSpy = vi.spyOn(db, "assignMessageToCluster" as any).mockResolvedValue(456);
+      // Mock updateMessageFields to avoid Supabase issues
+      vi.spyOn(db, "updateMessageFields").mockResolvedValue(undefined);
 
       mockFetch
-        .mockResolvedValueOnce(createMockResponse([])) // No hint match
-        .mockResolvedValueOnce(createMockResponse([])) // No similar campaigns
-        .mockResolvedValueOnce(createMockResponse([mockUncategorized])); // Found uncategorized
+        .mockResolvedValueOnce(createMockResponse([])) // findSimilarCampaigns - no matches
 
-      const result = await db.classifyMessage(mockEmbedding, 1);
+      const result = await db.classifyAndAssignToCluster(mockMessageId, mockEmbedding, 1);
 
       expect(result).toEqual({
-        campaign_id: 999,
+        campaign_id: 999, // Uncategorized campaign ID
         campaign_name: "Uncategorized",
         confidence: 0.1,
       });
+
+      // Verify cluster assignment was called
+      expect(assignToClusterSpy).toHaveBeenCalledWith(mockMessageId, mockEmbedding, 1);
+    });
+
+    it("should classify correctly when campaign match is found", async () => {
+      const mockSimilarCampaign = {
+        id: 3,
+        name: "Education Reform",
+        slug: "education-reform",
+        status: "active",
+        distance: 0.05, // Distance <= 0.1 threshold
+      };
+
+      mockFetch
+        .mockResolvedValueOnce(createMockResponse([mockSimilarCampaign])) // findSimilarCampaigns - found match
+        .mockResolvedValueOnce(createMockResponse(null)) // assignMessageToCampaign
+        .mockResolvedValueOnce(createMockResponse([])) // updateCampaignCentroid - get messages
+        .mockResolvedValueOnce(createMockResponse(null)); // updateCampaignCentroid - update
+
+      const result = await db.classifyAndAssignToCluster(mockMessageId, mockEmbedding, 1);
+
+      expect(result).toEqual({
+        campaign_id: 3,
+        campaign_name: "Education Reform",
+        confidence: 0.95, // 1 - distance = 1 - 0.05 = 0.95
+      });
+    });
+
+    it("should classify correctly when campaign found", async () => {
+      const mockCampaign = {
+        id: 4,
+        name: "Healthcare Reform",
+        slug: "healthcare-reform",
+        status: "active",
+        distance: 0.05,
+      };
+
+      // Mock updateMessageFields to avoid Supabase issues
+      vi.spyOn(db, "updateMessageFields").mockResolvedValue(undefined);
+
+      mockFetch
+        .mockResolvedValueOnce(createMockResponse([mockCampaign])) // findSimilarCampaigns
+        .mockResolvedValueOnce(createMockResponse(null)) // assignMessageToCampaign
+        .mockResolvedValueOnce(createMockResponse([])) // updateCampaignCentroid - get messages
+        .mockResolvedValueOnce(createMockResponse(null)); // updateCampaignCentroid - update
+
+      const result = await db.classifyAndAssignToCluster(mockMessageId, mockEmbedding, 1);
+
+      expect(result.campaign_id).toBe(4);
+      expect(result.campaign_name).toBe("Healthcare Reform");
+      expect(result.confidence).toBe(0.95); // 1 - distance = 1 - 0.05 = 0.95
     });
   });
 

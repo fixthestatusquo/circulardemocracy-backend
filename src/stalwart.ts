@@ -311,10 +311,52 @@ async function processEmailForRecipient(
       };
     }
 
-    // Step 4: Generate embedding and classify using message-to-message matching
+    // Step 4: Generate embedding and classify for routing (read-only, no storage yet)
     let embedding: number[];
     embedding = await generateEmbedding(ai, messageContent);
-    const classification = await db.classifyMessage(embedding, politician.id);
+
+    // Check campaign hint from subject/body (extract from recipient email or subject)
+    const subjectHeader = getHeader(hookData.headers, "subject") || "";
+    const campaignHint = recipientEmail.match(/\+([^@]+)@/) ? recipientEmail.match(/\+([^@]+)@/)?.[1] :
+      subjectHeader.match(/\[([^\]]+)\]/) ? subjectHeader.match(/\[([^\]]+)\]/)?.[1] : undefined;
+
+    let classification: { campaign_id: number | null; campaign_name?: string | null; confidence: number };
+
+    // Try campaign hint first
+    if (campaignHint) {
+      const hintCampaign = await db.findCampaignByHint(campaignHint);
+      if (hintCampaign) {
+        classification = {
+          campaign_id: hintCampaign.id,
+          campaign_name: hintCampaign.name,
+          confidence: 0.95,
+        };
+      } else {
+        // Fallback to vector similarity
+        const similarCampaigns = await db.findSimilarCampaigns(embedding, 3);
+        if (similarCampaigns.length > 0 && similarCampaigns[0].distance <= 0.1) {
+          classification = {
+            campaign_id: similarCampaigns[0].id,
+            campaign_name: similarCampaigns[0].name,
+            confidence: 1 - similarCampaigns[0].distance,
+          };
+        } else {
+          classification = { campaign_id: null, campaign_name: null, confidence: 0.1 };
+        }
+      }
+    } else {
+      // No hint, try vector similarity
+      const similarCampaigns = await db.findSimilarCampaigns(embedding, 3);
+      if (similarCampaigns.length > 0 && similarCampaigns[0].distance <= 0.1) {
+        classification = {
+          campaign_id: similarCampaigns[0].id,
+          campaign_name: similarCampaigns[0].name,
+          confidence: 1 - similarCampaigns[0].distance,
+        };
+      } else {
+        classification = { campaign_id: null, campaign_name: null, confidence: 0.1 };
+      }
+    }
 
     // Step 4a: Check for external ID duplicates
     const isDuplicate = await db.checkExternalIdExists(
@@ -371,7 +413,7 @@ async function processEmailForRecipient(
       channel_source: "stalwart",
       politician_id: politician.id,
       sender_hash: senderHash,
-      campaign_id: classification.campaign_id,
+      campaign_id: classification.campaign_id ?? null as any,
       classification_confidence: classification.confidence,
       message_embedding: embedding,
       language: "auto", // TODO: detect language
@@ -550,13 +592,13 @@ function isValidEmail(email: string): boolean {
 }
 
 function generateFolderName(
-  classification: { campaign_name: string | null; confidence: number },
+  classification: { campaign_name?: string | null; confidence: number },
   duplicateRank: number,
   isReply = false,
 ): string {
   // If no campaign assigned, use unclassified folder
   if (!classification.campaign_name) {
-    return "Unclassified/pending";
+    return "Unclassified";
   }
 
   const campaignFolder = classification.campaign_name
@@ -564,19 +606,8 @@ function generateFolderName(
     .replace(/\s+/g, "-")
     .substring(0, 50); // Limit folder name length
 
-  if (duplicateRank > 0) {
-    return `${campaignFolder}/Duplicates`;
-  }
-
-  if (classification.confidence < 0.3) {
-    return `${campaignFolder}/unchecked`;
-  }
-
-  if (isReply) {
-    return `${campaignFolder}/replied`;
-  }
-
-  return `${campaignFolder}/inbox`;
+  // Use campaign name only, no subfolders
+  return campaignFolder;
 }
 
 // OpenAPI documentation

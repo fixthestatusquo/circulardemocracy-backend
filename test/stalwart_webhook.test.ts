@@ -19,11 +19,16 @@ import type { DatabaseClient } from "../src/database";
 const mockDb = {
   getMessageByExternalId: vi.fn(),
   findPoliticianByEmail: vi.fn(),
-  classifyMessage: vi.fn(),
+  findCampaignByHint: vi.fn(),
+  findSimilarCampaigns: vi.fn(),
+  classifyAndAssignToCluster: vi.fn(),
   getDuplicateRank: vi.fn(),
   insertMessage: vi.fn(),
+  updateMessageFields: vi.fn(),
+  checkExternalIdExists: vi.fn(),
   getActiveTemplateForCampaign: vi.fn(),
   storeSenderEmail: vi.fn(),
+  assignMessageToCluster: vi.fn(),
 } as unknown as DatabaseClient;
 
 const mockAi = {
@@ -46,13 +51,15 @@ vi.mock("../src/database", () => ({
       id: 1,
       name: "Test Politician",
     }),
-    classifyMessage: vi.fn().mockResolvedValue({
-      campaign_id: 5,
-      campaign_name: "Climate Action",
-      confidence: 0.85,
-    }),
+    findCampaignByHint: vi.fn().mockResolvedValue(null),
+    findSimilarCampaigns: vi.fn().mockResolvedValue([{
+      id: 5,
+      name: "Climate Action",
+      distance: 0.05,
+    }]),
     getDuplicateRank: vi.fn().mockResolvedValue(0),
     insertMessage: vi.fn().mockResolvedValue(100),
+    assignMessageToCluster: vi.fn().mockResolvedValue(1),
     getActiveTemplateForCampaign: vi.fn().mockResolvedValue(null),
     storeSenderEmail: vi.fn().mockResolvedValue(undefined),
   })),
@@ -629,7 +636,7 @@ describe("Stalwart Webhook", () => {
       const response = mapToStalwartResponse(result);
 
       expect(response.action).toBe("accept");
-      expect(response.modifications?.folder).toBe("Climate Action/inbox");
+      expect(response.modifications?.folder).toBe("Climate-Action");
     });
 
     it("should fail-open to campaign_hint/unprocessed when processing fails with hint", () => {
@@ -732,7 +739,7 @@ describe("Stalwart Webhook", () => {
       const response = mapToStalwartResponse(result);
 
       expect(response.action).toBe("accept");
-      expect(response.modifications?.folder).toBe("Test Campaign/inbox");
+      expect(response.modifications?.folder).toBe("Test-Campaign");
       expect(response).not.toHaveProperty("senderFlag");
     });
   });
@@ -763,13 +770,24 @@ describe("Stalwart Webhook", () => {
         name: "Jane Politician",
       } as any);
       vi.spyOn(mockAi, "run").mockResolvedValue({ data: [[0.1, 0.2, 0.3]] });
-      vi.spyOn(mockDb, "classifyMessage").mockResolvedValue({
+      vi.spyOn(mockDb, "findCampaignByHint").mockResolvedValue(null);
+      vi.spyOn(mockDb, "findSimilarCampaigns").mockResolvedValue([{
+        id: 5,
+        name: "Climate Action",
+        slug: "climate-action",
+        status: "active",
+        distance: 0.05,
+      }]);
+      vi.spyOn(mockDb, "classifyAndAssignToCluster").mockResolvedValue({
         campaign_id: 5,
         campaign_name: "Climate Action",
-        confidence: 0.85,
+        confidence: 0.95,
       });
       vi.spyOn(mockDb, "getDuplicateRank").mockResolvedValue(0);
+      vi.spyOn(mockDb, "getActiveTemplateForCampaign").mockResolvedValue(null);
       vi.spyOn(mockDb, "insertMessage").mockResolvedValue(100);
+      vi.spyOn(mockDb, "updateMessageFields").mockResolvedValue(undefined);
+      vi.spyOn(mockDb, "assignMessageToCluster").mockResolvedValue(1);
 
       const result = await processStalwartHook(mockDb, mockAi as any, payload);
 
@@ -815,21 +833,28 @@ describe("Stalwart Webhook", () => {
         name: "Politician",
       } as any);
       vi.spyOn(mockAi, "run").mockResolvedValue({ data: [[0.1, 0.2]] });
-      vi.spyOn(mockDb, "classifyMessage").mockResolvedValue({
+      vi.spyOn(mockDb, "findCampaignByHint").mockResolvedValue({
+        id: 3,
+        name: "Healthcare Reform",
+        slug: "healthcare-reform",
+        status: "active",
+      });
+      vi.spyOn(mockDb, "findSimilarCampaigns").mockResolvedValue([]);
+      vi.spyOn(mockDb, "classifyAndAssignToCluster").mockResolvedValue({
         campaign_id: 3,
         campaign_name: "Healthcare Reform",
-        confidence: 0.9,
+        confidence: 0.95,
       });
       vi.spyOn(mockDb, "getDuplicateRank").mockResolvedValue(0);
       vi.spyOn(mockDb, "insertMessage").mockResolvedValue(50);
+      vi.spyOn(mockDb, "updateMessageFields").mockResolvedValue(undefined);
+      vi.spyOn(mockDb, "assignMessageToCluster").mockResolvedValue(1);
 
-      await processStalwartHook(mockDb, mockAi as any, payload);
+      const result = await processStalwartHook(mockDb, mockAi as any, payload);
 
-      expect(mockDb.classifyMessage).toHaveBeenCalledWith(
-        expect.any(Array),
-        1,
-        "healthcare",
-      );
+      // The campaign hint is extracted and passed to the message processor
+      expect(result.campaign_hint).toBe("healthcare");
+      expect(result.campaign_id).toBe(3);
     });
 
     it("should throw PoliticianNotFoundError when recipient not found", async () => {
@@ -920,19 +945,48 @@ describe("Stalwart Webhook", () => {
         name: "Politician",
       } as any);
       vi.spyOn(mockAi, "run").mockResolvedValue({ data: [[0.1, 0.2]] });
-      vi.spyOn(mockDb, "classifyMessage").mockResolvedValue({
+      vi.spyOn(mockDb, "findCampaignByHint").mockResolvedValue(null);
+      vi.spyOn(mockDb, "findSimilarCampaigns").mockResolvedValue([{
+        id: 5,
+        name: "Climate Action",
+        slug: "climate-action",
+        status: "active",
+        distance: 0.05,
+      }]);
+      vi.spyOn(mockDb, "classifyAndAssignToCluster").mockResolvedValue({
         campaign_id: 5,
         campaign_name: "Climate Action",
-        confidence: 0.8,
+        confidence: 0.95,
       });
       vi.spyOn(mockDb, "getDuplicateRank").mockResolvedValue(0);
+      vi.spyOn(mockDb, "getActiveTemplateForCampaign").mockResolvedValue(null);
       vi.spyOn(mockDb, "insertMessage").mockResolvedValue(100);
+      vi.spyOn(mockDb, "updateMessageFields").mockResolvedValue(undefined);
+      vi.spyOn(mockDb, "assignMessageToCluster").mockResolvedValue(1);
 
       const result = await processStalwartHook(mockDb, mockAi as any, payload);
 
       expect(result.campaign_hint).toBe("climate");
       expect(result.success).toBe(true);
+      expect(result.status).toBe("processed");
+      expect(result.message_id).toBe(100);
+      expect(result.campaign_id).toBe(5);
+      expect(result.campaign_name).toBe("Climate Action");
+      expect(result.senderFlag).toBe("normal");
+
+      expect(mockDb.insertMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          external_id: "msg-with-hint",
+          channel: "api",
+          channel_source: "stalwart",
+          politician_id: 1,
+        }),
+      );
     });
+
+    // Note: HTTP Endpoint tests have been removed as they depended on the deprecated
+    // stalwart_hook.ts implementation. HTTP endpoint testing is now covered in
+    // stalwart.test.ts which tests the active stalwart.ts implementation.
   });
 
   // Note: HTTP Endpoint tests have been removed as they depended on the deprecated
