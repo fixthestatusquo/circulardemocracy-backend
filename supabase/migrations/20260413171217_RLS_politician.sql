@@ -3,10 +3,10 @@
 -- =========================
 
 -- Drop the old policies (these have incorrect logic)
-DROP POLICY IF EXISTS "PolicyStaff: staff can select same politician" ON public.politician_staff;
-DROP POLICY IF EXISTS "PolicyStaff: staff can insert" ON public.politician_staff;
-DROP POLICY IF EXISTS "PolicyStaff: staff can update" ON public.politician_staff;
-DROP POLICY IF EXISTS "PolicyStaff: staff can delete" ON public.politician_staff;
+DROP POLICY IF EXISTS "Staff: staff can select (same politician)" ON public.politician_staff;
+DROP POLICY IF EXISTS "Staff: staff can insert (same politician)" ON public.politician_staff;
+DROP POLICY IF EXISTS "Staff: staff can update (same politician)" ON public.politician_staff;
+DROP POLICY IF EXISTS "Staff: staff can delete (same politician)" ON public.politician_staff;
 
 -- Create the correct function-based policies
 CREATE POLICY "Staff: staff can select (same politician)"
