@@ -10,6 +10,8 @@ import * as os from 'os';
 import { generateEmbedding } from '../src/embedding_service.js';
 import https from 'https';
 import http from 'http';
+import {config as dotenv} from "dotenv";
+dotenv();
 
 const CACHE_DIR = path.join(os.homedir(), '.cache', 'circulardemocracy-cli');
 const CONFIG_PATH = path.join(CACHE_DIR, 'session.json');
