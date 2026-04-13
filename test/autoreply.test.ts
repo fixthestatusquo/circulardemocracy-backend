@@ -473,9 +473,10 @@ describe("Message Processor Auto-Reply", () => {
   const mockDb = {
     getMessageByExternalId: vi.fn(),
     findPoliticianByEmail: vi.fn(),
-    classifyMessage: vi.fn(),
+    classifyAndAssignToCluster: vi.fn(),
     getDuplicateRank: vi.fn(),
     insertMessage: vi.fn(),
+    updateMessageFields: vi.fn(),
     getActiveTemplateForCampaign: vi.fn(),
     storeSenderEmail: vi.fn(),
     assignMessageToCluster: vi.fn(),
@@ -507,7 +508,7 @@ describe("Message Processor Auto-Reply", () => {
       name: "Jane Politician",
     } as any);
     vi.spyOn(mockAi, "run").mockResolvedValue({ data: [[0.1, 0.2]] });
-    vi.spyOn(mockDb, "classifyMessage").mockResolvedValue({
+    vi.spyOn(mockDb, "classifyAndAssignToCluster").mockResolvedValue({
       campaign_id: 10,
       campaign_name: "Climate Action",
       confidence: 0.9,
@@ -555,7 +556,7 @@ describe("Message Processor Auto-Reply", () => {
       id: 1,
     } as any);
     vi.spyOn(mockAi, "run").mockResolvedValue({ data: [[0.1, 0.2]] });
-    vi.spyOn(mockDb, "classifyMessage").mockResolvedValue({
+    vi.spyOn(mockDb, "classifyAndAssignToCluster").mockResolvedValue({
       campaign_id: 10,
       campaign_name: "Climate Action",
       confidence: 0.9,
@@ -581,7 +582,7 @@ describe("Message Processor Auto-Reply", () => {
       id: 1,
     } as any);
     vi.spyOn(mockAi, "run").mockResolvedValue({ data: [[0.1, 0.2]] });
-    vi.spyOn(mockDb, "classifyMessage").mockResolvedValue({
+    vi.spyOn(mockDb, "classifyAndAssignToCluster").mockResolvedValue({
       campaign_id: 10,
       campaign_name: "Climate Action",
       confidence: 0.9,

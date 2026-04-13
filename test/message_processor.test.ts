@@ -16,9 +16,10 @@ vi.mock("../src/embedding_service", () => ({
 const mockDb = {
   getMessageByExternalId: vi.fn(),
   findPoliticianByEmail: vi.fn(),
-  classifyMessage: vi.fn(),
+  classifyAndAssignToCluster: vi.fn(),
   getDuplicateRank: vi.fn(),
   insertMessage: vi.fn(),
+  updateMessageFields: vi.fn(),
   getActiveTemplateForCampaign: vi.fn(),
   storeSenderEmail: vi.fn(),
   assignMessageToCluster: vi.fn(),
@@ -82,7 +83,7 @@ describe("message_processor", () => {
     vi.spyOn(mockDb, "findPoliticianByEmail").mockResolvedValue({
       id: 1,
     } as any);
-    vi.spyOn(mockDb, "classifyMessage").mockResolvedValue({
+    vi.spyOn(mockDb, "classifyAndAssignToCluster").mockResolvedValue({
       campaign_id: 10,
       campaign_name: "Test Campaign",
       confidence: 0.9,

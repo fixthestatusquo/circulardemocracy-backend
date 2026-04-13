@@ -201,7 +201,7 @@ function extractBodyFromParts(
 
 function generateFolderPath(campaignName: string | null): string {
   if (!campaignName || campaignName === "Uncategorized") {
-    return "Uncategorized/inbox";
+    return "Uncategorized";
   }
 
   const campaignFolder = campaignName
@@ -209,82 +209,69 @@ function generateFolderPath(campaignName: string | null): string {
     .replace(/\s+/g, "-")
     .substring(0, 50);
 
-  return `${campaignFolder}/inbox`;
+  return campaignFolder;
 }
 
 async function ensureMailboxExists(
   apiUrl: string,
   authHeader: string,
   accountId: string,
-  folderPath: string,
+  folderName: string,
 ): Promise<string> {
-  const parts = folderPath.split('/');
-  let parentId: string | null = null;
+  // Check if mailbox already exists
+  const queryResponses = await jmapCall(apiUrl, authHeader, [
+    [
+      "Mailbox/query",
+      {
+        accountId,
+        filter: {
+          name: folderName,
+        },
+      },
+      "queryMailbox",
+    ],
+    [
+      "Mailbox/get",
+      {
+        accountId,
+        "#ids": {
+          resultOf: "queryMailbox",
+          name: "Mailbox/query",
+          path: "/ids",
+        },
+      },
+      "getMailbox",
+    ],
+  ]);
 
-  for (const folderName of parts) {
-    if (!folderName) continue;
+  const getData = getMethodResponse(queryResponses, "Mailbox/get", "getMailbox");
 
-    const queryResponses = await jmapCall(apiUrl, authHeader, [
-      [
-        "Mailbox/query",
-        {
-          accountId,
-          filter: {
+  if (Array.isArray(getData.list) && getData.list.length > 0) {
+    return getData.list[0].id;
+  }
+
+  // Create new mailbox if it doesn't exist
+  const createResponses = await jmapCall(apiUrl, authHeader, [
+    [
+      "Mailbox/set",
+      {
+        accountId,
+        create: {
+          newMailbox: {
             name: folderName,
-            ...(parentId && { parentId }),
           },
         },
-        "queryMailbox",
-      ],
-      [
-        "Mailbox/get",
-        {
-          accountId,
-          "#ids": {
-            resultOf: "queryMailbox",
-            name: "Mailbox/query",
-            path: "/ids",
-          },
-        },
-        "getMailbox",
-      ],
-    ]);
+      },
+      "createMailbox",
+    ],
+  ]);
 
-    const getData = getMethodResponse(queryResponses, "Mailbox/get", "getMailbox");
-
-    if (Array.isArray(getData.list) && getData.list.length > 0) {
-      parentId = getData.list[0].id;
-    } else {
-      const createResponses = await jmapCall(apiUrl, authHeader, [
-        [
-          "Mailbox/set",
-          {
-            accountId,
-            create: {
-              newMailbox: {
-                name: folderName,
-                ...(parentId && { parentId }),
-              },
-            },
-          },
-          "createMailbox",
-        ],
-      ]);
-
-      const setData = getMethodResponse(createResponses, "Mailbox/set", "createMailbox");
-      if (setData.created?.newMailbox?.id) {
-        parentId = setData.created.newMailbox.id;
-      } else {
-        throw new Error(`Failed to create mailbox: ${folderName}`);
-      }
-    }
+  const setData = getMethodResponse(createResponses, "Mailbox/set", "createMailbox");
+  if (setData.created?.newMailbox?.id) {
+    return setData.created.newMailbox.id;
+  } else {
+    throw new Error(`Failed to create mailbox: ${folderName}`);
   }
-
-  if (!parentId) {
-    throw new Error(`Failed to resolve mailbox path: ${folderPath}`);
-  }
-
-  return parentId;
 }
 
 async function moveEmailToMailbox(
@@ -389,11 +376,11 @@ USAGE:
 OPTIONS:
   --user <username>      JMAP username (default: STALWART_USERNAME env or "dibora")
   --password <password>  JMAP app password (default: STALWART_APP_PASSWORD env)
-  --process-all          Reprocess all messages from Stalwart inbox (default when no filter provided)
+  --process-all          Reprocess uncategorized messages from Stalwart inbox (no campaign_id or campaign_id 472)
   --campaign-id <id>     Only reprocess messages for a specific campaign
   --since <date>         Only reprocess messages received after date (ISO 8601)
   --limit <number>       Maximum number of messages to reprocess
-  --move-to-folders      Move messages to campaign folders in Stalwart using JMAP
+  --move-to-folders      Move messages to campaign folders in Stalwart (campaign name only, no subfolders)
   --dry-run              Preview messages without reprocessing
   -h, --help             Show this help message
 
@@ -444,6 +431,11 @@ async function reprocessMessages(
 
   if (options.campaignId) {
     query = query.eq("campaign_id", options.campaignId);
+  }
+
+  // When using --process-all, only process uncategorized messages (no campaign_id or campaign_id 472)
+  if (options.processAll) {
+    query = query.or("campaign_id.is.null,campaign_id.eq.472");
   }
 
   if (options.since) {
@@ -568,8 +560,8 @@ async function reprocessMessages(
         throw updateError;
       }
 
-      // Only re-assign to cluster if no campaign was found during classification
-      if (classification.shouldCluster) {
+      // Only re-assign to cluster if confidence is low (uncategorized or poorly classified)
+      if (classification.confidence < 0.5) {
         try {
           await db.assignMessageToCluster(message.id, embedding, message.politician_id);
         } catch (clusterError) {

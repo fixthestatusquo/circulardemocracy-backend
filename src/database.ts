@@ -65,7 +65,6 @@ export interface ClassificationResult {
   campaign_id: number;
   campaign_name: string;
   confidence: number;
-  shouldCluster: boolean;
 }
 
 export class DatabaseClient {
@@ -241,7 +240,7 @@ export class DatabaseClient {
     } catch (error) {
       console.error("Error finding similar campaigns:", error);
 
-      // Fallback: get all active campaigns without similarity
+      // Fallback: get all active campaigns without distance calculation
       const { data: fallback, error: fallbackError } = await this.supabase
         .from("campaigns")
         .select("id,name,slug,status")
@@ -398,12 +397,10 @@ export class DatabaseClient {
       if (similarClusters.length > 0) {
         const selectedCluster = [...similarClusters]
           .sort((a, b) => {
-            // Primary: Closest distance first
-            if (Math.abs(a.distance - b.distance) > 0.001) {
-              return a.distance - b.distance;
+            if (b.messageCount !== a.messageCount) {
+              return b.messageCount - a.messageCount;
             }
-            // Secondary: Larger clusters first (only when distances are very similar)
-            return b.messageCount - a.messageCount;
+            return a.distance - b.distance;
           })[0];
 
         console.log(`  ✅ Joining existing cluster ${selectedCluster.clusterId} by centroid (distance: ${selectedCluster.distance.toFixed(4)}, size: ${selectedCluster.messageCount})`);
@@ -586,6 +583,61 @@ export class DatabaseClient {
     }
   }
 
+  async assignCampaignToCluster(clusterId: number, campaignId: number): Promise<void> {
+    try {
+      console.log(`Assigning campaign ${campaignId} to cluster ${clusterId}`);
+
+      // Update all messages in the cluster with the campaign ID
+      const { data: updatedMessages, error: updateError } = await this.supabase
+        .from("messages")
+        .update({ campaign_id: campaignId })
+        .eq("cluster_id", clusterId)
+        .select("id");
+
+      if (updateError) {
+        throw updateError;
+      }
+
+      console.log(`Updated ${updatedMessages?.length || 0} messages in cluster ${clusterId} with campaign ${campaignId}`);
+    } catch (error) {
+      console.error("Error assigning campaign to cluster:", error);
+      throw error;
+    }
+  }
+
+  async syncCampaignFromClusters(): Promise<number> {
+    try {
+      console.log('Syncing campaign IDs from clusters to messages...');
+
+      // First, get all messages that have clusters but no campaign_id
+      const { data: messagesToSync, error: fetchError } = await this.supabase
+        .from("messages")
+        .select("id, cluster_id")
+        .not("cluster_id", "is", null)
+        .is("campaign_id", null);
+
+      if (fetchError) {
+        throw fetchError;
+      }
+
+      if (!messagesToSync || messagesToSync.length === 0) {
+        console.log('No messages need syncing');
+        return 0;
+      }
+
+      // For now, this is a simple implementation that just returns the count
+      // In a full implementation, you would need to have a way to determine which campaign
+      // should be assigned to each cluster (e.g., via a cluster_campaigns table)
+      console.log(`Found ${messagesToSync.length} messages that could be synced`);
+      console.log('Note: Full sync implementation requires cluster-campaign mapping table');
+
+      return messagesToSync.length;
+    } catch (error) {
+      console.error("Error syncing campaign IDs from clusters:", error);
+      throw error;
+    }
+  }
+
   calculateCentroid(embeddings: number[][]): number[] | null {
     if (embeddings.length === 0) return null;
 
@@ -725,6 +777,7 @@ export class DatabaseClient {
       return null;
     }
   }
+
 
   // =============================================================================
   // REPLY TEMPLATE OPERATIONS
@@ -1030,6 +1083,31 @@ export class DatabaseClient {
     }
   }
 
+  async updateMessageFields(
+    messageId: number,
+    fields: Partial<{
+      campaign_id: number;
+      classification_confidence: number;
+      duplicate_rank: number;
+      reply_status: "pending" | "scheduled" | null;
+      reply_scheduled_at: string | null;
+    }>,
+  ): Promise<void> {
+    try {
+      const { error } = await this.supabase
+        .from("messages")
+        .update(fields)
+        .eq("id", messageId);
+
+      if (error) {
+        throw error;
+      }
+    } catch (error) {
+      console.error("Error updating message fields:", error);
+      throw error;
+    }
+  }
+
   async updateMessageRetryCount(
     messageId: number,
     retryCount: number,
@@ -1088,50 +1166,29 @@ export class DatabaseClient {
   }
 
   // =============================================================================
-  // ANALYTICS OPERATIONS
-  // =============================================================================
-
-  async getMessageAnalytics(
-    daysBack = 7,
-  ): Promise<Array<{ hour: string; campaign_id: number; campaign_name: string; message_count: number }>> {
-    try {
-      const { data, error } = await this.supabase.rpc("get_message_analytics", {
-        days_back: daysBack,
-      });
-
-      if (error) {
-        throw error;
-      }
-
-      return data || [];
-    } catch (error) {
-      console.error("Error fetching message analytics:", error);
-      throw new Error("Failed to fetch message analytics");
-    }
-  }
-
-  async getMessageAnalyticsDaily(
-    daysBack = 7,
-  ): Promise<Array<{ date: string; campaign_id: number; campaign_name: string; message_count: number }>> {
-    try {
-      const { data, error } = await this.supabase.rpc("get_message_analytics_daily", {
-        days_back: daysBack,
-      });
-
-      if (error) {
-        throw error;
-      }
-
-      return data || [];
-    } catch (error) {
-      console.error("Error fetching daily message analytics:", error);
-      throw new Error("Failed to fetch daily message analytics");
-    }
-  }
-
-  // =============================================================================
   // CLASSIFICATION LOGIC
   // =============================================================================
+
+  async classifyAndAssignToCluster(
+    messageId: number,
+    embedding: number[],
+    politicianId: number,
+    campaignHint?: string,
+  ): Promise<ClassificationResult> {
+    // Step 1: Classify the message
+    const classification = await this.classifyMessage(embedding, politicianId, campaignHint);
+
+    // Step 2: Update message with campaign classification
+    await this.updateMessageFields(messageId, {
+      campaign_id: classification.campaign_id,
+      classification_confidence: classification.confidence,
+    });
+
+    // Step 3: Assign to cluster for grouping similar messages
+    await this.assignMessageToCluster(messageId, embedding, politicianId);
+
+    return classification;
+  }
 
   async classifyMessage(
     embedding: number[],
@@ -1146,24 +1203,22 @@ export class DatabaseClient {
           campaign_id: hintCampaign.id,
           campaign_name: hintCampaign.name,
           confidence: 0.95,
-          shouldCluster: false,
         };
       }
     }
 
-    // Step 2: Try vector similarity
+    // Step 2: Try vector distance
     const similarCampaigns = await this.findSimilarCampaigns(embedding, 3);
 
     if (similarCampaigns.length > 0) {
       const best = similarCampaigns[0];
 
       // If distance is low enough, use existing campaign
-      if (best.distance <= 0.1) {
+      if (best.distance < 0.1) {
         return {
           campaign_id: best.id,
           campaign_name: best.name,
-          confidence: 1 - best.distance,
-          shouldCluster: false,
+          confidence: 1 - best.distance, // Convert distance to confidence
         };
       }
     }
@@ -1175,8 +1230,36 @@ export class DatabaseClient {
       campaign_id: uncategorized.id,
       campaign_name: uncategorized.name,
       confidence: 0.1,
-      shouldCluster: true,
     };
+  }
+
+  // =============================================================================
+  // ANALYTICS OPERATIONS
+  // =============================================================================
+
+  async getMessageAnalyticsDaily(daysBack: number): Promise<Array<{
+    date: string;
+    campaign_id: number;
+    campaign_name: string;
+    message_count: number;
+  }>> {
+    try {
+      const { data, error } = await this.supabase.rpc(
+        "get_message_analytics_daily",
+        {
+          days_back: daysBack,
+        },
+      );
+
+      if (error) {
+        throw error;
+      }
+
+      return data || [];
+    } catch (error) {
+      console.error("Error fetching message analytics:", error);
+      return [];
+    }
   }
 }
 
@@ -1197,11 +1280,11 @@ export async function hashEmail(email: string): Promise<string> {
 // =============================================================================
 
 /*
-You'll need to create this PostgreSQL function in Supabase for vector similarity:
+You'll need to create this PostgreSQL function in Supabase for vector distance:
 
 CREATE OR REPLACE FUNCTION find_similar_campaigns(
   query_embedding vector(1024),
-  similarity_threshold float DEFAULT 0.1,
+  distance_threshold float DEFAULT 0.1,
   match_limit int DEFAULT 3
 )
 RETURNS TABLE (
@@ -1210,7 +1293,7 @@ RETURNS TABLE (
   slug text,
   status text,
   reference_vector vector(1024),
-  similarity float
+  distance float
 )
 LANGUAGE plpgsql
 AS $$
@@ -1222,12 +1305,12 @@ BEGIN
     c.slug,
     c.status,
     c.reference_vector,
-    (1 - (c.reference_vector <-> query_embedding)) as similarity
+    (c.reference_vector <=> query_embedding) as distance
   FROM campaigns c
   WHERE c.reference_vector IS NOT NULL 
     AND c.status IN ('active', 'unconfirmed')
-    AND (1 - (c.reference_vector <-> query_embedding)) > similarity_threshold
-  ORDER BY c.reference_vector <-> query_embedding
+    AND (c.reference_vector <=> query_embedding) <= distance_threshold
+  ORDER BY c.reference_vector <=> query_embedding
   LIMIT match_limit;
 END;
 $$;

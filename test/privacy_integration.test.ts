@@ -324,7 +324,13 @@ describe("Privacy-First Integration Tests", () => {
         ])
       );
 
-      const result = await db.classifyMessage(embedding, 1);
+      // Mock clustering-related methods to avoid Supabase issues
+      vi.spyOn(db, "updateMessageFields").mockResolvedValue(undefined);
+
+      // Mock assignMessageToCluster to bypass clustering logic entirely
+      vi.spyOn(db, "assignMessageToCluster" as any).mockResolvedValue(1);
+
+      const result = await db.classifyAndAssignToCluster(123, embedding, 1);
 
       expect(result.campaign_id).toBe(20);
       expect(result.campaign_name).toBe("Education Reform");

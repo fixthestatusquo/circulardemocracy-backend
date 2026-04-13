@@ -14,9 +14,10 @@ const mockDbInstance = {
   request: vi.fn(),
   getMessageByExternalId: vi.fn(),
   findPoliticianByEmail: vi.fn(),
-  classifyMessage: vi.fn(),
+  classifyAndAssignToCluster: vi.fn(),
   getDuplicateRank: vi.fn(),
   insertMessage: vi.fn(),
+  updateMessageFields: vi.fn(),
   getActiveTemplateForCampaign: vi.fn(),
   storeSenderEmail: vi.fn(),
   assignMessageToCluster: vi.fn(),
@@ -141,7 +142,7 @@ describe("Messages API Integration", () => {
   it("should return 200 and process valid message", async () => {
     mockDbInstance.findPoliticianByEmail.mockResolvedValue({ id: 1 });
     mockDbInstance.getMessageByExternalId.mockResolvedValue(null);
-    mockDbInstance.classifyMessage.mockResolvedValue({
+    mockDbInstance.classifyAndAssignToCluster.mockResolvedValue({
       campaign_id: 10,
       campaign_name: "Test Campaign",
       confidence: 0.9,

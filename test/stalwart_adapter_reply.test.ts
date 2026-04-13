@@ -190,7 +190,7 @@ describe("Stalwart Adapter - Reply Detection", () => {
       const response = mapToStalwartResponse(result);
 
       expect(response.action).toBe("accept");
-      expect(response.modifications?.folder).toBe("Climate Action/replied");
+      expect(response.modifications?.folder).toBe("Climate-Action");
     });
 
     it("should route new messages to [campaign]/inbox folder", () => {
@@ -209,7 +209,7 @@ describe("Stalwart Adapter - Reply Detection", () => {
       const response = mapToStalwartResponse(result);
 
       expect(response.action).toBe("accept");
-      expect(response.modifications?.folder).toBe("Climate Action/inbox");
+      expect(response.modifications?.folder).toBe("Climate-Action");
     });
 
     it("should route replies without isReply flag to inbox (default)", () => {
@@ -227,7 +227,7 @@ describe("Stalwart Adapter - Reply Detection", () => {
       const response = mapToStalwartResponse(result);
 
       expect(response.action).toBe("accept");
-      expect(response.modifications?.folder).toBe("Healthcare Reform/inbox");
+      expect(response.modifications?.folder).toBe("Healthcare-Reform");
     });
   });
 

@@ -415,7 +415,13 @@ describe("Privacy-First Message Storage", () => {
         ])
       );
 
-      const result = await db.classifyMessage(embedding, 1);
+      // Mock the updateMessageFields method to avoid Supabase issues
+      vi.spyOn(db, "updateMessageFields").mockResolvedValue(undefined);
+
+      // Mock the assignMessageToCluster method
+      vi.spyOn(db, "assignMessageToCluster").mockResolvedValue(1);
+
+      const result = await db.classifyAndAssignToCluster(123, embedding, 1);
 
       expect(result.campaign_id).toBe(15);
       expect(result.campaign_name).toBe("Climate Action");

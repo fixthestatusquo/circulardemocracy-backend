@@ -374,7 +374,7 @@ async function updateCampaign() {
 
   const supabase = getSupabase();
 
-  console.log(`� Fetching campaign ${id}...`);
+  console.log(`Fetching campaign ${id}...`);
 
   const { data: existingCampaign, error: fetchError } = await supabase
     .from('campaigns')
@@ -383,29 +383,29 @@ async function updateCampaign() {
     .single();
 
   if (fetchError || !existingCampaign) {
-    console.error(`❌ Campaign with id ${id} not found`);
+    console.error(`Campaign with id ${id} not found`);
     process.exit(1);
   }
 
-  console.log(`✅ Found campaign: ${existingCampaign.name} (${existingCampaign.slug})`);
+  console.log(`Found campaign: ${existingCampaign.name} (${existingCampaign.slug})`);
 
   const updateData = {
     updated_at: new Date().toISOString(),
   };
 
   if (text) {
-    console.log(`� Generating new embedding for campaign ${id}...`);
+    console.log(`Generating new embedding for campaign ${id}...`);
     const embedding = await generateEmbedding(null, text);
-    console.log(`✅ Generated ${embedding.length}-dimensional embedding`);
+    console.log(`Generated ${embedding.length}-dimensional embedding`);
     updateData.reference_vector = embedding;
   }
 
   if (name) {
-    console.log(`🔄 Updating name to: ${name}`);
+    console.log(`Updating name to: ${name}`);
     updateData.name = name;
   }
 
-  console.log('💾 Updating campaign...');
+  console.log('Updating campaign...');
 
   const { data, error } = await supabase
     .from('campaigns')
@@ -415,12 +415,89 @@ async function updateCampaign() {
     .single();
 
   if (error) {
-    console.error('❌ Error updating campaign:', error.message);
+    console.error('Error updating campaign:', error.message);
     process.exit(1);
   }
 
-  console.log('✅ Campaign updated successfully!');
+  console.log('Campaign updated successfully!');
   console.log(JSON.stringify(data, null, 2));
+}
+
+async function assignCluster() {
+  const { 'cluster-id': clusterId, 'campaign-name': campaignName } = argv;
+
+  if (!clusterId) {
+    console.error('Error: --cluster-id is required');
+    console.log('\nUsage: ./cli assign-cluster --cluster-id <id> --campaign-name <name>');
+    process.exit(1);
+  }
+
+  if (!campaignName) {
+    console.error('Error: --campaign-name is required');
+    console.log('\nUsage: ./cli assign-cluster --cluster-id <id> --campaign-name <name>');
+    process.exit(1);
+  }
+
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const supabaseKey = process.env.SUPABASE_KEY;
+
+  if (!supabaseUrl || !supabaseKey) {
+    console.error('Error: SUPABASE_URL and SUPABASE_KEY environment variables must be set');
+    process.exit(1);
+  }
+
+  // Import DatabaseClient
+  const { DatabaseClient } = await import('../src/database.js');
+
+  const db = new DatabaseClient({ url: supabaseUrl, key: supabaseKey });
+
+  try {
+    console.log(`Finding campaign: ${campaignName}`);
+    const campaign = await db.findCampaignByHint(campaignName);
+
+    if (!campaign) {
+      console.error(`Campaign "${campaignName}" not found`);
+      process.exit(1);
+    }
+
+    console.log(`Found campaign: ${campaign.name} (ID: ${campaign.id})`);
+
+    console.log(`Assigning campaign to cluster ${clusterId}...`);
+    await db.assignCampaignToCluster(Number(clusterId), campaign.id);
+
+    console.log('Successfully assigned campaign to cluster!');
+    console.log(`All messages in cluster ${clusterId} will be automatically updated with campaign ID ${campaign.id} via database triggers`);
+
+  } catch (error) {
+    console.error('Error assigning campaign to cluster:', error instanceof Error ? error.message : 'Unknown error');
+    process.exit(1);
+  }
+}
+
+async function syncClusters() {
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const supabaseKey = process.env.SUPABASE_KEY;
+
+  if (!supabaseUrl || !supabaseKey) {
+    console.error('Error: SUPABASE_URL and SUPABASE_KEY environment variables must be set');
+    process.exit(1);
+  }
+
+  // Import DatabaseClient
+  const { DatabaseClient } = await import('../src/database.js');
+
+  const db = new DatabaseClient({ url: supabaseUrl, key: supabaseKey });
+
+  try {
+    console.log('Syncing campaign IDs from clusters to messages...');
+    const updatedCount = await db.syncCampaignFromClusters();
+
+    console.log(`Successfully synced ${updatedCount} messages with campaign IDs from their clusters`);
+
+  } catch (error) {
+    console.error('Error syncing clusters:', error instanceof Error ? error.message : 'Unknown error');
+    process.exit(1);
+  }
 }
 
 function loadSession() {
@@ -700,6 +777,8 @@ Commands:
   logout                Clear authentication session
   add-campaign          Create a new campaign with embedding
   update-campaign       Update campaign embedding
+  assign-cluster        Assign campaign to cluster
+  sync-clusters         Sync campaign IDs from clusters to messages
   reprocess-messages    Reprocess and reclassify existing messages
   <endpoint>            API endpoint path (e.g., campaigns, users/:id)
 
@@ -716,6 +795,13 @@ Campaign Management:
   update-campaign --id <id> --url <url> [--name <override-name>]
     Update campaign from URL (extracts subdomain as name and content as text)
 
+Cluster Management:
+  assign-cluster --cluster-id <id> --campaign-name <name>
+    Assign a campaign to a cluster (updates all messages in cluster)
+    
+  sync-clusters
+    Sync campaign IDs from clusters to all messages (bulk update)
+
 Message Reprocessing:
   reprocess-messages [options]
     Reprocess and reclassify existing messages with updated embeddings
@@ -725,7 +811,7 @@ Message Reprocessing:
       --limit <n>           Limit number of messages to process
       --process-all         Process all messages (default if no filter)
       --dry-run             Preview without making changes
-      --move-to-folders     Move messages to classified folders in Stalwart
+      --move-to-folders     Move messages to campaign folders in Stalwart (campaign name only, no subfolders)
       --username <user>     JMAP username (default: STALWART_USERNAME env)
       --password <pass>     JMAP password (default: STALWART_APP_PASSWORD env)
 
@@ -817,6 +903,16 @@ if (command === 'add-campaign') {
 
 if (command === 'update-campaign') {
   await updateCampaign();
+  process.exit(0);
+}
+
+if (command === 'assign-cluster') {
+  await assignCluster();
+  process.exit(0);
+}
+
+if (command === 'sync-clusters') {
+  await syncClusters();
   process.exit(0);
 }
 

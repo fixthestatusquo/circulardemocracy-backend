@@ -104,18 +104,43 @@ export async function processMessage(
   const textForEmbedding = formatEmailContentForEmbedding(data.subject, body);
   const embedding = await generateEmbedding(ai, textForEmbedding);
 
-  // 4. Classification (message-to-message delayed classification)
-  const classification = await db.classifyMessage(
+  // 4. Storage (PRIVACY: only metadata, no PII)
+  // Use sender_email ONLY to generate hash, then discard it
+  const senderHash = await hashEmail(data.sender_email);
+
+  // Insert message first without campaign/cluster assignment
+  const messageData: MessageInsert = {
+    external_id: data.external_id,
+    channel: "api",
+    channel_source: data.channel_source || "unknown",
+    politician_id: politician.id,
+    sender_hash: senderHash,
+    campaign_id: null as any, // Will be set by classification
+    classification_confidence: 0, // Will be updated by classification
+    message_embedding: embedding,
+    language: "auto",
+    received_at: data.timestamp,
+    duplicate_rank: 0, // Will be updated after classification
+    processing_status: "processed",
+    reply_status: null,
+    reply_scheduled_at: null,
+    sender_flag: data.sender_flag,
+    is_reply: data.is_reply,
+    stalwart_message_id: undefined,
+    stalwart_account_id: undefined,
+  };
+
+  const messageId = await db.insertMessage(messageData);
+
+  // 5. Unified classification and cluster assignment
+  const classification = await db.classifyAndAssignToCluster(
+    messageId,
     embedding,
     politician.id,
     data.campaign_hint,
   );
 
-  // 5. Storage (PRIVACY: only metadata, no PII)
-  // Use sender_email ONLY to generate hash, then discard it
-  const senderHash = await hashEmail(data.sender_email);
-
-  // Only check duplicate rank if message has a campaign assigned
+  // 6. Update duplicate rank if message has a campaign assigned
   let duplicateRank = 0;
   if (classification.campaign_id !== null) {
     duplicateRank = await db.getDuplicateRank(
@@ -123,9 +148,14 @@ export async function processMessage(
       politician.id,
       classification.campaign_id,
     );
+    // Update the message with the duplicate rank
+    await db.updateMessageFields(messageId, {
+      duplicate_rank: duplicateRank,
+      classification_confidence: classification.confidence,
+    });
   }
 
-  // 6. Determine reply scheduling (only for first message from sender with campaign)
+  // 7. Determine reply scheduling (only for first message from sender with campaign)
   let replySchedule = null;
   if (duplicateRank === 0 && classification.campaign_id !== null) {
     // Get active template for this campaign to determine send_timing
@@ -139,39 +169,12 @@ export async function processMessage(
         activeTemplate.scheduled_for,
         data.timestamp,
       );
+      // Update reply status
+      await db.updateMessageFields(messageId, {
+        reply_status: replySchedule.reply_status,
+        reply_scheduled_at: replySchedule.reply_scheduled_at,
+      });
     }
-  }
-
-  // PRIVACY: API messages have no Stalwart references (stalwart_message_id = NULL)
-  const messageData: MessageInsert = {
-    external_id: data.external_id,
-    channel: "api",
-    channel_source: data.channel_source || "unknown",
-    politician_id: politician.id,
-    sender_hash: senderHash,
-    campaign_id: classification.campaign_id,
-    classification_confidence: classification.confidence,
-    message_embedding: embedding,
-    language: "auto",
-    received_at: data.timestamp,
-    duplicate_rank: duplicateRank,
-    processing_status: "processed",
-    reply_status: replySchedule?.reply_status || null,
-    reply_scheduled_at: replySchedule?.reply_scheduled_at || null,
-    sender_flag: data.sender_flag,
-    is_reply: data.is_reply,
-    stalwart_message_id: undefined,
-    stalwart_account_id: undefined,
-  };
-
-  const messageId = await db.insertMessage(messageData);
-
-  // Assign message to global cluster for grouping similar messages across politicians
-  // This must succeed - every message needs a cluster_id
-  const clusterId = await db.assignMessageToCluster(messageId, embedding, politician.id);
-  if (!clusterId) {
-    console.error("Failed to assign message to cluster - this should not happen");
-    throw new Error("Failed to assign message to cluster");
   }
 
   // Store sender email if auto-reply is scheduled (only for first message from sender)
