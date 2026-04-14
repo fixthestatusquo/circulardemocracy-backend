@@ -9,7 +9,6 @@ DROP VIEW IF EXISTS public.reply_templates_with_campaign CASCADE;
 CREATE VIEW public.reply_templates_with_campaign AS
 SELECT
   rt.id,
-  rt.politician_id,
   rt.campaign_id,
   c.name AS campaign_name,
   rt.name,
