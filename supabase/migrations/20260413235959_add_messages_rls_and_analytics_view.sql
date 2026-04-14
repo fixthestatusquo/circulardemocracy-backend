@@ -1,11 +1,10 @@
 -- Migration: Add RLS policies for messages table and create RLS-protected analytics view
--- Ensures staff can only see analytics for their assigned politicians
--- This migration completely replaces the existing analytics implementation
+-- Ensures staff can only see analytics for their assigned politicians.
+-- Uses a normal view over messages (no materialized view).
 
 BEGIN;
 
--- First, completely remove the old implementation to ensure clean replacement
--- Drop old trigger and functions
+-- Remove legacy analytics functions
 DROP TRIGGER IF EXISTS trigger_refresh_analytics_on_insert ON public.messages;
 DROP FUNCTION IF EXISTS refresh_analytics_on_message_insert() CASCADE;
 DROP FUNCTION IF EXISTS refresh_daily_analytics() CASCADE;
@@ -14,7 +13,6 @@ DROP FUNCTION IF EXISTS get_message_analytics_daily(integer) CASCADE;
 -- Drop old analytics objects safely (view vs materialized view)
 DO $$
 BEGIN
-  -- daily_message_analytics has existed as either a VIEW or a MATERIALIZED VIEW in this repo.
   IF EXISTS (
     SELECT 1
     FROM pg_class c
@@ -74,10 +72,12 @@ CREATE POLICY "Messages: staff can insert" ON public.messages
     )
   );
 
--- 2) Create RLS-protected analytics view that respects politician filtering
--- Drop existing view if it exists
-DROP VIEW IF EXISTS public.message_analytics_view CASCADE;
+-- 2) Add indexes aligned with analytics access patterns.
+CREATE INDEX IF NOT EXISTS idx_messages_campaign_id ON public.messages(campaign_id);
+CREATE INDEX IF NOT EXISTS idx_messages_politician_campaign_received
+  ON public.messages(politician_id, campaign_id, received_at DESC);
 
+-- 3) Create analytics view from base table (RLS applies through messages).
 CREATE VIEW public.message_analytics_view AS
 SELECT 
   date_trunc('day', m.received_at) AS date,
@@ -90,79 +90,10 @@ INNER JOIN campaigns c ON m.campaign_id = c.id
 GROUP BY date_trunc('day', m.received_at), m.campaign_id, c.name, m.politician_id
 ORDER BY date ASC;
 
--- 3) Views do not support RLS; rely on underlying table RLS (messages).
--- 4) Grant access to authenticated users for the view
+-- Views do not support RLS; rely on underlying table RLS (messages).
 GRANT SELECT ON public.message_analytics_view TO authenticated;
 
--- 5) Update the materialized view to include politician_id for better filtering
--- Drop existing materialized view
-DO $$
-BEGIN
-  IF EXISTS (
-    SELECT 1
-    FROM pg_class c
-    JOIN pg_namespace n ON n.oid = c.relnamespace
-    WHERE n.nspname = 'public'
-      AND c.relname = 'daily_message_analytics'
-      AND c.relkind = 'm'
-  ) THEN
-    EXECUTE 'DROP MATERIALIZED VIEW IF EXISTS public.daily_message_analytics CASCADE';
-  END IF;
-  EXECUTE 'DROP VIEW IF EXISTS public.daily_message_analytics CASCADE';
-END $$;
-
--- Recreate materialized view with politician_id
-CREATE MATERIALIZED VIEW public.daily_message_analytics AS
-SELECT 
-  date_trunc('day', m.received_at) AS date,
-  m.campaign_id,
-  c.name AS campaign_name,
-  m.politician_id,
-  COUNT(*) AS message_count
-FROM messages m
-INNER JOIN campaigns c ON m.campaign_id = c.id
-GROUP BY date_trunc('day', m.received_at), m.campaign_id, c.name, m.politician_id
-ORDER BY date ASC;
-
--- Create indexes for performance
-CREATE INDEX idx_daily_message_analytics_date ON public.daily_message_analytics(date);
-CREATE INDEX idx_daily_message_analytics_campaign ON public.daily_message_analytics(campaign_id);
-CREATE INDEX idx_daily_message_analytics_politician ON public.daily_message_analytics(politician_id);
-
--- 6) Postgres does not support RLS on materialized views.
--- Restrict access via SECURITY DEFINER RPC (below) and grants.
--- Grant access to authenticated users for the materialized view
-GRANT SELECT ON public.daily_message_analytics TO authenticated;
-
--- 7) Update the trigger function to work with the new materialized view
-DROP TRIGGER IF EXISTS trigger_refresh_analytics_on_insert ON public.messages;
-DROP FUNCTION IF EXISTS refresh_analytics_on_message_insert() CASCADE;
-DROP FUNCTION IF EXISTS refresh_daily_analytics() CASCADE;
-
--- Function to refresh the materialized view
-CREATE OR REPLACE FUNCTION refresh_daily_analytics()
-RETURNS void AS $$
-BEGIN
-  REFRESH MATERIALIZED VIEW CONCURRENTLY public.daily_message_analytics;
-END;
-$$ LANGUAGE plpgsql;
-
--- Trigger function to refresh view when messages are inserted
-CREATE OR REPLACE FUNCTION refresh_analytics_on_message_insert()
-RETURNS trigger AS $$
-BEGIN
-  REFRESH MATERIALIZED VIEW CONCURRENTLY public.daily_message_analytics;
-  RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
--- Create trigger on messages table
-CREATE TRIGGER trigger_refresh_analytics_on_insert
-AFTER INSERT ON public.messages
-FOR EACH STATEMENT
-EXECUTE FUNCTION refresh_analytics_on_message_insert();
-
--- 8) Recreate analytics RPC and enforce staff filtering
+-- 4) Recreate analytics RPC and enforce staff filtering
 CREATE OR REPLACE FUNCTION public.get_message_analytics_daily(
   days_back integer DEFAULT 7
 )
@@ -180,7 +111,7 @@ AS $$
     a.campaign_id,
     a.campaign_name,
     a.message_count
-  FROM public.daily_message_analytics a
+  FROM public.message_analytics_view a
   WHERE a.date >= NOW() - (days_back || ' days')::interval
     AND EXISTS (
       SELECT 1

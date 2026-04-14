@@ -1,4 +1,5 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
+import { createClient } from "@supabase/supabase-js";
 import { authMiddleware } from "./auth";
 import type { DatabaseClient } from "./database";
 
@@ -75,15 +76,35 @@ const getMessageAnalyticsRoute = createRoute({
 });
 
 app.openapi(getMessageAnalyticsRoute, async (c) => {
-  const db = c.get("db") as DatabaseClient;
-
   try {
     const { days } = c.req.valid("query");
     const daysBack = parseInt(days, 10);
+    const authHeader = c.req.header("Authorization");
+    const supabaseUrl = process.env.SUPABASE_URL || c.env.SUPABASE_URL;
+    const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || c.env.SUPABASE_KEY;
+    const fromDate = new Date();
+    fromDate.setDate(fromDate.getDate() - daysBack);
 
-    const analytics = await db.getMessageAnalyticsDaily(daysBack);
+    const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+      global: {
+        headers: authHeader ? { Authorization: authHeader } : {},
+      },
+      auth: {
+        persistSession: false,
+      },
+    });
 
-    return c.json({ analytics });
+    const { data: analytics, error } = await supabase
+      .from("message_analytics_view")
+      .select("date, campaign_id, campaign_name, message_count")
+      .gte("date", fromDate.toISOString())
+      .order("date", { ascending: true });
+
+    if (error) {
+      throw error;
+    }
+
+    return c.json({ analytics: analytics ?? [] });
   } catch (error) {
     console.error("Error fetching message analytics:", error);
     return c.json(
