@@ -210,23 +210,20 @@ Integration with mail server MTA hooks for direct email processing with automati
 
 The platform provides several command-line tools for message ingestion, campaign management, and system administration.
 
-**Environment Variables Required:**
+**Environment Variables (set once):**
 
-All CLI commands require environment variables to be set. Choose one of these methods:
+All CLI entrypoints load `.env` via `dotenv`, so set these once and reuse across commands:
 
 ```bash
-# Method 1: Export directly (recommended for development)
+# Required for all CLI commands
 export SUPABASE_URL="your-supabase-url"
 export SUPABASE_KEY="your-supabase-key"
+# Required for JMAP commands (`jmap-fetch`, `reprocess-messages`)
 export STALWART_APP_PASSWORD="your-stalwart-app-password"
-export STALWART_USERNAME="dibora"  # optional, defaults to "dibora"
+export STALWART_USERNAME="your-stalwart-username"
 
-# Method 2: Use dotenv-cli (works with npm scripts and direct execution)
-npm install -g dotenv-cli
-dotenv -e .env -- [command]
-
-# Method 3: Create .env file and source it
-# Add variables to .env file, then: source .env
+# Optional
+export STALWART_JMAP_ENDPOINT="https://mail.circulardemocracy.org/.well-known/jmap"
 ```
 
 #### 1. Main CLI Interface (`./bin/cli`)
@@ -248,63 +245,44 @@ npx tsx bin/cli <command> [options]
 
 - `add-campaign`: Create a new campaign with embedding
 - `update-campaign`: Update campaign embedding and/or name
-- `assign-cluster`: Assign a campaign to a cluster
-- `sync-clusters`: Sync campaign IDs from clusters to all messages
+- `assign-cluster`: Assign a campaign to one inferred message cluster
+- `sync-clusters`: Bulk sync all already-assigned clusters into messages (useful after backfills/imports)
+
+Use `assign-cluster` for one manual decision. Use `sync-clusters` after many assignments or data backfills to propagate cluster campaign IDs to matching messages in bulk.
 
 **Message Processing:**
 
-- `reprocess-messages`: Reprocess and reclassify existing messages
+- `jmap-fetch`: Fetch new mail from Stalwart and process/store/classify it
+- `reprocess-messages`: Recompute embeddings/classification for already stored messages
 - `<endpoint>`: Direct API endpoint access (e.g., campaigns, users/:id)
 
 **Campaign Management Examples:**
 
 ```bash
-# Create campaign with manual text
+# Create campaign with representative text used to compute the campaign embedding vector
 npx tsx bin/cli add-campaign --name "Climate Action" --text "I urge action on climate change" --description "Environmental campaign"
 
 # Create campaign from URL (extracts subdomain as name and content as text)
 npx tsx bin/cli add-campaign --url "https://climate.example.com/action" --name "Override Name"
 
-# Update campaign text or name
-npx tsx bin/cli update-campaign --id 5 --text "Updated representative text"
+# Update campaign representative text (regenerates the campaign embedding vector) or update only name
+npx tsx bin/cli update-campaign --id 5 --text "Updated representative text used for campaign embeddings"
 npx tsx bin/cli update-campaign --id 5 --name "New Campaign Name"
 npx tsx bin/cli update-campaign --id 5 --url "https://climate.example.com/new-page"
 
-# Assign campaign to cluster
+# Assign one cluster, then run bulk sync if needed
 npx tsx bin/cli assign-cluster --cluster-id 123 --campaign-name "Climate Action"
-
-# Sync campaign IDs from clusters to messages
-npx tsx bin/cli sync-clusters
-```
-
-**Cluster Management Examples:**
-
-```bash
-# Assign campaign to cluster (updates all messages in cluster)
-npx tsx bin/cli assign-cluster --cluster-id 123 --campaign-name "Climate Action"
-
-# Sync campaign IDs from clusters to all messages (bulk update)
 npx tsx bin/cli sync-clusters
 ```
 
 **Message Reprocessing Examples:**
 
 ```bash
-# Method 1: Export variables first (works with both methods)
-export SUPABASE_URL="your-supabase-url"
-export SUPABASE_KEY="your-supabase-key"
-export STALWART_APP_PASSWORD="your-stalwart-app-password"
-
-# Then use main CLI:
 npx tsx bin/cli reprocess-messages --process-all
 npx tsx bin/cli reprocess-messages --campaign-id 5 --limit 100
 npx tsx bin/cli reprocess-messages --since "2024-03-01"
 npx tsx bin/cli reprocess-messages --process-all --dry-run
-npx tsx bin/cli reprocess-messages --process-all --move-to-folders
-
-# Method 2: Use dotenv-cli with direct execution only
-dotenv -e .env -- npx tsx bin/reprocess-messages.ts --process-all
-dotenv -e .env -- npx tsx bin/reprocess-messages.ts --campaign-id 5 --limit 100
+npx tsx bin/cli reprocess-messages --process-all --no-move-to-folders
 ```
 
 **API Access Examples:**
@@ -331,7 +309,7 @@ npx tsx bin/cli campaigns --server=production
 - `-m, --method`: HTTP method (GET, POST, PUT, DELETE) [default: GET]
 - `-s, --server`: Server to use (index or description) [default: 0]
 - `-l, --list-servers`: List available servers from OpenAPI spec
-- `-h, --help`: Show help
+- `-h, --help`: Show help message
 - `-v, --version`: Show version
 
 #### 2. Manual Message Import (`mail`)
@@ -387,41 +365,17 @@ npm run jmap-fetch -- [--user <username>] [--password <password>] [options]
 
 **Options:**
 
-- `--user <username>`: JMAP username (default: `STALWART_USERNAME` env or "dibora")
+- `--user <username>`: JMAP username (default: `STALWART_USERNAME` env)
 - `--password <password>`: JMAP app password (default: `STALWART_APP_PASSWORD` env)
 - `--process-all`: Fetch all available messages (default when no filter provided)
-- `--since <date>`: Fetch messages received after date (ISO 8601)
+- `--since <date>`: Fetch messages received after a date (ISO 8601)
 - `--message-id <id>`: Fetch one specific message (JMAP ID or Message-ID header)
 - `--dry-run`: Preview converted messages without processing/storage
 - `-h, --help`: Show help message
 
-**Environment Variables (Required for all CLI commands):**
-
-```bash
-# Required for all CLI commands
-export SUPABASE_URL="your-supabase-url"
-export SUPABASE_KEY="your-supabase-key"
-
-# Required for JMAP and reprocess-messages commands
-export STALWART_APP_PASSWORD="your-stalwart-app-password"
-
-# Optional
-export STALWART_USERNAME="dibora"  # optional, defaults to "dibora"
-export STALWART_JMAP_ENDPOINT="https://mail.circulardemocracy.org/.well-known/jmap"  # optional
-
-# Alternative: Use dotenv-cli
-# npm install -g dotenv-cli
-# dotenv -e .env -- [command]
-```
-
 **Examples:**
 
 ```bash
-# Set environment variables first
-export SUPABASE_URL="your-supabase-url"
-export SUPABASE_KEY="your-supabase-key"
-export STALWART_APP_PASSWORD="your-stalwart-app-password"
-
 # Fetch all messages
 npm run jmap-fetch -- --process-all
 
@@ -434,16 +388,14 @@ npm run jmap-fetch -- --message-id "specific-id"
 # Dry run to preview without processing
 npm run jmap-fetch -- --dry-run --since "2024-03-01"
 
-# Using explicit credentials
+# Optional: override credentials from environment variables
 npm run jmap-fetch -- --user dibora --password mypass --process-all
 
-# Alternative: Use dotenv-cli
-dotenv -e .env -- npm run jmap-fetch -- --process-all
 ```
 
 #### 4. Message Reprocessing (`reprocess-messages`)
 
-Reprocess and reclassify existing messages with updated embeddings.
+Recompute embeddings and classifications for existing messages.
 
 **Usage:**
 
@@ -457,54 +409,26 @@ npx tsx bin/reprocess-messages.ts [options]
 
 **Options:**
 
-- `--user <username>`: JMAP username (default: `STALWART_USERNAME` env or "dibora")
+- `--user <username>`: JMAP username (default: `STALWART_USERNAME` env)
 - `--password <password>`: JMAP app password (default: `STALWART_APP_PASSWORD` env)
 - `--process-all`: Reprocess uncategorized messages from Stalwart inbox (no campaign_id or campaign_id 472)
 - `--campaign-id <id>`: Only reprocess messages for a specific campaign
-- `--since <date>`: Only reprocess messages received after date (ISO 8601)
+- `--since <date>`: Only reprocess messages received after a date (ISO 8601)
 - `--limit <number>`: Maximum number of messages to reprocess
-- `--move-to-folders`: Move messages to campaign folders in Stalwart (campaign name only, no subfolders)
+- `--no-move-to-folders`: Disable moving messages to campaign folders after reclassification (enabled by default unless `--dry-run`)
 - `--dry-run`: Preview messages without reprocessing
 - `-h, --help`: Show help message
-
-**Environment Variables:**
-
-```bash
-# Option 1: Export directly (recommended for development)
-export SUPABASE_URL="your-supabase-url"
-export SUPABASE_KEY="your-supabase-key"
-export STALWART_APP_PASSWORD="your-stalwart-app-password"
-export STALWART_USERNAME="dibora"  # optional, defaults to "dibora"
-
-# Option 2: Use dotenv-cli with .env file
-# First install globally: npm install -g dotenv-cli
-# Then run: dotenv -e .env -- npx tsx bin/reprocess-messages.ts --process-all
-```
 
 **Examples:**
 
 ```bash
-# Method 1: Export environment variables (works with both CLI methods)
-export SUPABASE_URL="your-supabase-url"
-export SUPABASE_KEY="your-supabase-key"
-export STALWART_APP_PASSWORD="your-stalwart-app-password"
-
-# Then use either method:
 npx tsx bin/cli reprocess-messages --process-all
-# or
 npx tsx bin/reprocess-messages.ts --process-all
-
-# Method 2: Use dotenv-cli (only works with direct execution)
-# First install: npm install -g dotenv-cli
-dotenv -e .env -- npx tsx bin/reprocess-messages.ts --process-all
-dotenv -e .env -- npx tsx bin/reprocess-messages.ts --process-all --move-to-folders
-dotenv -e .env -- npx tsx bin/reprocess-messages.ts --limit 100
-dotenv -e .env -- npx tsx bin/reprocess-messages.ts --campaign-id 5
-dotenv -e .env -- npx tsx bin/reprocess-messages.ts --since "2024-03-01"
-dotenv -e .env -- npx tsx bin/reprocess-messages.ts --dry-run --limit 10
-
-# Note: dotenv-cli does NOT work with npx tsx bin/cli reprocess-messages
-# Use direct execution (npx tsx bin/reprocess-messages.ts) with dotenv-cli
+npx tsx bin/reprocess-messages.ts --limit 100
+npx tsx bin/reprocess-messages.ts --campaign-id 5
+npx tsx bin/reprocess-messages.ts --since "2024-03-01"
+npx tsx bin/reprocess-messages.ts --dry-run --limit 10
+npx tsx bin/reprocess-messages.ts --process-all --no-move-to-folders
 ```
 
 #### Getting Help

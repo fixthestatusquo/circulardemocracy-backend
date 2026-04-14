@@ -24,7 +24,7 @@ SUPABASE_KEY=your-supabase-key
 
 # Required for JMAP and email processing
 STALWART_APP_PASSWORD=your-stalwart-app-password
-STALWART_USERNAME=dibora  # optional, defaults to "dibora"
+STALWART_USERNAME=your-stalwart-username
 
 # Optional
 STALWART_JMAP_ENDPOINT=https://mail.circulardemocracy.org/.well-known/jmap
@@ -50,21 +50,11 @@ npm run db:push
 - `SUPABASE_URL`: Your Supabase project URL
 - `SUPABASE_KEY`: Your Supabase service key
 - `STALWART_APP_PASSWORD`: App password for Stalwart mail server
-- `STALWART_USERNAME`: Username for Stalwart (default: "dibora")
+- `STALWART_USERNAME`: Username for Stalwart
 
 ### Optional Variables
 
 - `STALWART_JMAP_ENDPOINT`: JMAP endpoint URL
-- `OPENAI_API_KEY`: For Supabase AI features (if using)
-
-### API Key Setup
-
-For production deployment, you'll need to set up secure API keys:
-
-```bash
-# Example API key (replace with your secure key)
-API_KEY=your_api_key_here
-```
 
 ## Production Deployment
 
@@ -100,67 +90,19 @@ npm run mail -- --help
 npm run jmap-fetch -- --help
 ```
 
-## API Key Documentation
+## API Key Setup
 
-### Purpose
+The API key protects authenticated API endpoints.
 
-The API key is required for authentication and secure access to the API endpoints. It validates requests and ensures only authorized clients can interact with the system.
-
-### Format Requirements
-
-- **Type**: String value
-- **Length**: 32-64 characters (recommended for production-grade security)
-- **Characters**: Random alphanumeric string, no spaces
-- **Usage**: Set as environment variable `API_KEY`
-
-### Security Standards
-
-**MUST Requirements:**
-- Must be randomly generated with sufficient entropy
-- Must never be hardcoded in source code
-- Must never be committed to Git or version control
-- Must be stored securely as environment variables
-
-**SHOULD Requirements:**
-- Should be at least 32 characters long
-- Should use different keys for different environments
-- Should be rotated regularly in production
-- Should be generated using cryptographically secure methods
-
-### Environment Variable Setup
-
-Create or update your `.env` file:
-
-```bash
-# Example - replace with your generated secure key
-API_KEY=your_api_key_here
-
-# Example of a properly generated key (32 characters):
-API_KEY=aB7xK9mP2qR5tY8wC1dF4gH7jK0lM3nO
-```
-
-### Generating Secure API Keys
-
-Use one of these methods to generate a secure API key:
-
-```bash
-# Using OpenSSL (recommended)
-openssl rand -base64 32
-
-# Using Node.js
-node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
-
-# Using Python
-python -c "import secrets; print(secrets.token_urlsafe(32))"
-```
-
-### Security Best Practices
-
-1. **Environment Variables Only**: Always store API keys in environment variables, never in code
-2. **Version Control Safety**: Add `.env` to `.gitignore` to prevent accidental commits
-3. **Access Control**: Limit who has access to production API keys
-4. **Regular Rotation**: Change API keys periodically, especially if compromised
-5. **Environment Separation**: Use different keys for development, staging, and production
+1. Generate a secure key:
+   ```bash
+   openssl rand -base64 32
+   ```
+2. Set it as `API_KEY` in one of:
+   - local `.env` for development
+   - Cloudflare secrets (`wrangler secret put API_KEY`) for Workers
+   - service environment (`systemd` unit environment or equivalent) for server deployments
+3. Do not commit keys to version control.
 
 ## Verification
 

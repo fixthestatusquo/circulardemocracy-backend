@@ -4,6 +4,9 @@ import { DatabaseClient } from "../src/database.js";
 import { processMessage, PoliticianNotFoundError, type Ai, type MessageInput } from "../src/message_processor.js";
 import { z } from "zod";
 import Turndown from "turndown";
+import { config as dotenv } from "dotenv";
+
+dotenv();
 
 const MessageInputSchema = z.object({
   external_id: z
@@ -166,7 +169,7 @@ USAGE:
   jmap-fetch [--user <username>] [--password <password>] [options]
 
 OPTIONS:
-  --user <username>      JMAP username (default: STALWART_USERNAME env or "dibora")
+  --user <username>      JMAP username (default: STALWART_USERNAME env)
   --password <password>  JMAP app password (default: STALWART_APP_PASSWORD env)
   --process-all          Fetch all available messages (default when no filter provided)
   --since <date>         Fetch messages received after date (ISO 8601)
@@ -176,7 +179,7 @@ OPTIONS:
 
 ENVIRONMENT VARIABLES:
   STALWART_APP_PASSWORD  Required app password for JMAP auth
-  STALWART_USERNAME      Optional, default: "dibora"
+  STALWART_USERNAME      Required unless passed with --user
   STALWART_JMAP_ENDPOINT Optional, default: "${STALWART_JMAP_ENDPOINT}"
   SUPABASE_URL           Required Supabase URL
   SUPABASE_KEY           Required Supabase key
@@ -814,8 +817,13 @@ async function main() {
     }
   }
 
-  const username = parsed.user || process.env.STALWART_USERNAME || "dibora";
+  const username = parsed.user || process.env.STALWART_USERNAME;
   const password = parsed.password || process.env.STALWART_APP_PASSWORD || process.env.STALWART_PASSWORD;
+
+  if (!username) {
+    console.error("Error: STALWART_USERNAME environment variable or --user must be set");
+    process.exit(1);
+  }
 
   if (!password) {
     console.error("Error: STALWART_APP_PASSWORD environment variable or --password must be set");
