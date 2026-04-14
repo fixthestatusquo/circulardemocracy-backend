@@ -502,6 +502,142 @@ async function syncClusters() {
   }
 }
 
+async function listClosestCampaigns() {
+  const url = argv.url;
+  let text = argv.message || argv.text;
+  const messageId = argv['message-id'] || argv.messageId;
+  const limit = Number(argv.limit || 5);
+
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const supabaseKey = process.env.SUPABASE_KEY;
+
+  if (!supabaseUrl || !supabaseKey) {
+    console.error("Error: SUPABASE_URL and SUPABASE_KEY environment variables must be set");
+    process.exit(1);
+  }
+
+  const supabase = createClient(supabaseUrl, supabaseKey);
+
+  async function getEmbeddingFromStoredMessage(identifier) {
+    const queries = [
+      supabase
+        .from("messages")
+        .select("id,external_id,stalwart_message_id,message_embedding")
+        .eq("external_id", identifier)
+        .not("message_embedding", "is", null)
+        .limit(1),
+      supabase
+        .from("messages")
+        .select("id,external_id,stalwart_message_id,message_embedding")
+        .eq("stalwart_message_id", identifier)
+        .not("message_embedding", "is", null)
+        .limit(1),
+    ];
+
+    for (const query of queries) {
+      const { data, error } = await query;
+      if (error) {
+        console.error(`⚠️ Failed message lookup for "${identifier}": ${error.message}`);
+        continue;
+      }
+
+      if (data && data.length > 0) {
+        const row = data[0];
+        const embeddingValue = row.message_embedding;
+        const embedding = Array.isArray(embeddingValue)
+          ? embeddingValue
+          : JSON.parse(String(embeddingValue || "[]"));
+
+        if (Array.isArray(embedding) && embedding.length > 0) {
+          console.log(`✅ Using stored embedding from message ${row.id}`);
+          return embedding;
+        }
+      }
+    }
+
+    return null;
+  }
+
+  let embedding = null;
+  if (messageId) {
+    embedding = await getEmbeddingFromStoredMessage(messageId);
+  }
+
+  if (!embedding && url) {
+    try {
+      const pathName = new URL(url).pathname;
+      const identifierFromUrl = pathName.split("/").filter(Boolean).pop();
+      if (identifierFromUrl) {
+        embedding = await getEmbeddingFromStoredMessage(identifierFromUrl);
+      }
+    } catch (_error) {
+      // Ignore URL parsing errors here; URL processing fallback handles validation.
+    }
+  }
+
+  if (!embedding && !text && !url) {
+    console.error('Error: provide --message-id "<id>", --message "<text>" or --url "<url>"');
+    console.log('\nUsage: ./cli closest-campaigns --message-id "<id>" [--limit 5]');
+    console.log('   Or: ./cli closest-campaigns --message "your message text" [--limit 5]');
+    console.log('   Or: ./cli closest-campaigns --url "https://example.com/path" [--limit 5]');
+    process.exit(1);
+  }
+
+  if (!embedding && url) {
+    try {
+      const urlData = await processUrl(url);
+      text = text || urlData.text;
+    } catch (error) {
+      console.error(`❌ Failed to process URL: ${error.message}`);
+      process.exit(1);
+    }
+  }
+
+  if (!embedding && !text) {
+    console.error("Error: message text is empty after processing input");
+    process.exit(1);
+  }
+
+  if (!embedding) {
+    console.log("🔄 Generating embedding...");
+    embedding = await generateEmbedding(null, text);
+  }
+
+  console.log(`🔎 Looking up ${limit} closest campaigns...`);
+  let results = [];
+  let rpcError = null;
+
+  const { data, error } = await supabase.rpc("find_similar_campaigns", {
+    query_embedding: embedding,
+    distance_threshold: 2,
+    match_limit: limit,
+  });
+  if (!error) {
+    results = data || [];
+  } else {
+    rpcError = error;
+  }
+
+  if (rpcError && !results.length) {
+    console.error(`Error calling find_similar_campaigns: ${rpcError.message}`);
+    process.exit(1);
+  }
+
+  if (!results.length) {
+    console.log("No similar campaigns found.");
+    return;
+  }
+
+  console.log("\nClosest campaigns:");
+  results.forEach((campaign, index) => {
+    const distance = typeof campaign.distance === "number" ? campaign.distance : Number.NaN;
+
+    console.log(
+      `${index + 1}. ${campaign.name} (id: ${campaign.id}, slug: ${campaign.slug}) - distance: ${Number.isFinite(distance) ? distance.toFixed(4) : "n/a"}`
+    );
+  });
+}
+
 function loadSession() {
   if (fs.existsSync(CONFIG_PATH)) {
     const configData = fs.readFileSync(CONFIG_PATH, 'utf8');
@@ -779,6 +915,7 @@ Commands:
   logout                Clear authentication session
   add-campaign          Create a new campaign with embedding
   update-campaign       Update campaign embedding
+  closest-campaigns     Find closest campaigns for a message
   assign-cluster        Assign campaign to cluster
   sync-clusters         Sync campaign IDs from clusters to messages
   reprocess-messages    Reprocess and reclassify existing messages
@@ -803,6 +940,16 @@ Cluster Management:
     
   sync-clusters
     Sync campaign IDs from clusters to all messages (bulk update)
+
+Closest Campaign Lookup:
+  closest-campaigns --message-id <id> [--limit <n>]
+    Find closest campaigns from a stored message embedding and print distances
+
+  closest-campaigns --message <text> [--limit <n>]
+    Find closest campaigns for message text and print distances
+
+  closest-campaigns --url <url> [--limit <n>]
+    Fetch URL text, then find closest campaigns and print distances
 
 Message Reprocessing:
   reprocess-messages [options]
@@ -831,6 +978,8 @@ Examples:
   ./cli add-campaign --url "https://climate.example.com/action"
   ./cli update-campaign --id 5 --text "Updated representative text"
   ./cli update-campaign --id 5 --url "https://climate.example.com/new-page"
+  ./cli closest-campaigns --message-id "ieaaaacb" --limit 5
+  ./cli closest-campaigns --message "I support GMO demeter policy" --limit 5
   ./cli reprocess-messages --process-all
   ./cli reprocess-messages --campaign-id 5 --limit 100
   ./cli campaigns --name=example --status=active
@@ -915,6 +1064,11 @@ if (command === 'assign-cluster') {
 
 if (command === 'sync-clusters') {
   await syncClusters();
+  process.exit(0);
+}
+
+if (command === 'closest-campaigns') {
+  await listClosestCampaigns();
   process.exit(0);
 }
 
