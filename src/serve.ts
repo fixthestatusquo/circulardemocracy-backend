@@ -2,9 +2,7 @@ import { serve } from "@hono/node-server";
 import * as dotenv from "dotenv";
 import { app } from "./index";
 import { serveStatic } from "@hono/node-server/serve-static";
-
-// Load environment variables
-dotenv.config();
+import { randomBytes } from "crypto";
 
 // Load environment variables from .env file for development
 dotenv.config();
@@ -23,7 +21,12 @@ serve({
   port: 3000,
 }, (info) => {
   console.log(`Listening on http://localhost:${info.port}`);
-  console.log(`API_KEY loaded: ${process.env.API_KEY ? '✅' : '❌'}`);
+  if (process.env.API_KEY) {
+    console.log("API_KEY loaded: ✅");
+  } else {
+    const suggestedKey = randomBytes(32).toString("base64url");
+    console.error(`API_KEY loaded: ❌ (missing API_KEY, add API_KEY=${suggestedKey} in your .env)`);
+  }
 });
 
 export default app;

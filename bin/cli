@@ -813,8 +813,8 @@ Message Reprocessing:
       --limit <n>           Limit number of messages to process
       --process-all         Process all messages (default if no filter)
       --dry-run             Preview without making changes
-      --move-to-folders     Move messages to campaign folders in Stalwart (campaign name only, no subfolders)
-      --username <user>     JMAP username (default: STALWART_USERNAME env)
+      --no-move-to-folders  Disable moving messages to campaign folders (enabled unless --dry-run)
+      --username <user>     JMAP username (default: STALWART_USERNAME env, no hardcoded fallback)
       --password <pass>     JMAP password (default: STALWART_APP_PASSWORD env)
 
 API Options:

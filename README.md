@@ -208,9 +208,111 @@ Integration with mail server MTA hooks for direct email processing with automati
 
 ### CLI Tools
 
-The platform provides two specialized command-line tools for different message ingestion workflows:
+The platform provides several command-line tools for message ingestion, campaign management, and system administration.
 
-#### 1. Manual Message Import (`mail`)
+**Environment Variables (set once):**
+
+All CLI entrypoints load `.env` via `dotenv`, so set these once and reuse across commands:
+
+```bash
+# Required for all CLI commands
+export SUPABASE_URL="your-supabase-url"
+export SUPABASE_KEY="your-supabase-key"
+# Required for JMAP commands (`jmap-fetch`, `reprocess-messages`)
+export STALWART_APP_PASSWORD="your-stalwart-app-password"
+export STALWART_USERNAME="your-stalwart-username"
+
+# Optional
+export STALWART_JMAP_ENDPOINT="https://mail.circulardemocracy.org/.well-known/jmap"
+```
+
+#### 1. Main CLI Interface (`./bin/cli`)
+
+The primary CLI tool for campaign management, authentication, and API access.
+
+**Usage:**
+
+```bash
+npx tsx bin/cli <command> [options]
+```
+
+**Authentication Commands:**
+
+- `login`: Authenticate with the API
+- `logout`: Clear authentication session
+
+**Campaign Management:**
+
+- `add-campaign`: Create a new campaign with embedding
+- `update-campaign`: Update campaign embedding and/or name
+- `assign-cluster`: Assign a campaign to one inferred message cluster
+- `sync-clusters`: Bulk sync all already-assigned clusters into messages (useful after backfills/imports)
+
+Use `assign-cluster` for one manual decision. Use `sync-clusters` after many assignments or data backfills to propagate cluster campaign IDs to matching messages in bulk.
+
+**Message Processing:**
+
+- `jmap-fetch`: Fetch new mail from Stalwart and process/store/classify it
+- `reprocess-messages`: Recompute embeddings/classification for already stored messages
+- `<endpoint>`: Direct API endpoint access (e.g., campaigns, users/:id)
+
+**Campaign Management Examples:**
+
+```bash
+# Create campaign with representative text used to compute the campaign embedding vector
+npx tsx bin/cli add-campaign --name "Climate Action" --text "I urge action on climate change" --description "Environmental campaign"
+
+# Create campaign from URL (extracts subdomain as name and content as text)
+npx tsx bin/cli add-campaign --url "https://climate.example.com/action" --name "Override Name"
+
+# Update campaign representative text (regenerates the campaign embedding vector) or update only name
+npx tsx bin/cli update-campaign --id 5 --text "Updated representative text used for campaign embeddings"
+npx tsx bin/cli update-campaign --id 5 --name "New Campaign Name"
+npx tsx bin/cli update-campaign --id 5 --url "https://climate.example.com/new-page"
+
+# Assign one cluster, then run bulk sync if needed
+npx tsx bin/cli assign-cluster --cluster-id 123 --campaign-name "Climate Action"
+npx tsx bin/cli sync-clusters
+```
+
+**Message Reprocessing Examples:**
+
+```bash
+npx tsx bin/cli reprocess-messages --process-all
+npx tsx bin/cli reprocess-messages --campaign-id 5 --limit 100
+npx tsx bin/cli reprocess-messages --since "2024-03-01"
+npx tsx bin/cli reprocess-messages --process-all --dry-run
+npx tsx bin/cli reprocess-messages --process-all --no-move-to-folders
+```
+
+**API Access Examples:**
+
+```bash
+# List campaigns
+npx tsx bin/cli campaigns
+
+# Get specific campaign
+npx tsx bin/cli campaigns/123
+
+# Update campaign via API
+npx tsx bin/cli campaigns/123 --name=updated --method=PUT
+
+# List available servers
+npx tsx bin/cli --list-servers
+
+# Use specific server
+npx tsx bin/cli campaigns --server=production
+```
+
+**API Options:**
+
+- `-m, --method`: HTTP method (GET, POST, PUT, DELETE) [default: GET]
+- `-s, --server`: Server to use (index or description) [default: 0]
+- `-l, --list-servers`: List available servers from OpenAPI spec
+- `-h, --help`: Show help message
+- `-v, --version`: Show version
+
+#### 2. Manual Message Import (`mail`)
 
 For testing and manual message imports with flag-based arguments.
 
@@ -251,7 +353,7 @@ npm run mail -- \
   --campaign-name "Clean Water"
 ```
 
-#### 2. JMAP Automated Ingestion (`jmap-fetch`)
+#### 3. JMAP Automated Ingestion (`jmap-fetch`)
 
 For automated ingestion from Stalwart mail server using JMAP protocol.
 
@@ -263,23 +365,13 @@ npm run jmap-fetch -- [--user <username>] [--password <password>] [options]
 
 **Options:**
 
-- `--user <username>`: JMAP username (default: `STALWART_USERNAME` env or "dibora")
+- `--user <username>`: JMAP username (default: `STALWART_USERNAME` env)
 - `--password <password>`: JMAP app password (default: `STALWART_APP_PASSWORD` env)
 - `--process-all`: Fetch all available messages (default when no filter provided)
-- `--since <date>`: Fetch messages received after date (ISO 8601)
+- `--since <date>`: Fetch messages received after a date (ISO 8601)
 - `--message-id <id>`: Fetch one specific message (JMAP ID or Message-ID header)
 - `--dry-run`: Preview converted messages without processing/storage
 - `-h, --help`: Show help message
-
-**Environment Variables:**
-
-```bash
-export SUPABASE_URL="your-supabase-url"
-export SUPABASE_KEY="your-supabase-key"
-export STALWART_APP_PASSWORD="your-stalwart-app-password"
-export STALWART_USERNAME="dibora"  # optional, defaults to "dibora"
-export STALWART_JMAP_ENDPOINT="https://mail.circulardemocracy.org/.well-known/jmap"  # optional
-```
 
 **Examples:**
 
@@ -296,18 +388,66 @@ npm run jmap-fetch -- --message-id "specific-id"
 # Dry run to preview without processing
 npm run jmap-fetch -- --dry-run --since "2024-03-01"
 
-# Using explicit credentials
+# Optional: override credentials from environment variables
 npm run jmap-fetch -- --user dibora --password mypass --process-all
+
+```
+
+#### 4. Message Reprocessing (`reprocess-messages`)
+
+Recompute embeddings and classifications for existing messages.
+
+**Usage:**
+
+```bash
+# Method 1: Through main CLI (recommended)
+npx tsx bin/cli reprocess-messages [options]
+
+# Method 2: Direct execution
+npx tsx bin/reprocess-messages.ts [options]
+```
+
+**Options:**
+
+- `--user <username>`: JMAP username (default: `STALWART_USERNAME` env)
+- `--password <password>`: JMAP app password (default: `STALWART_APP_PASSWORD` env)
+- `--process-all`: Reprocess uncategorized messages from Stalwart inbox (no campaign_id or campaign_id 472)
+- `--campaign-id <id>`: Only reprocess messages for a specific campaign
+- `--since <date>`: Only reprocess messages received after a date (ISO 8601)
+- `--limit <number>`: Maximum number of messages to reprocess
+- `--no-move-to-folders`: Disable moving messages to campaign folders after reclassification (enabled by default unless `--dry-run`)
+- `--dry-run`: Preview messages without reprocessing
+- `-h, --help`: Show help message
+
+**Examples:**
+
+```bash
+npx tsx bin/cli reprocess-messages --process-all
+npx tsx bin/reprocess-messages.ts --process-all
+npx tsx bin/reprocess-messages.ts --limit 100
+npx tsx bin/reprocess-messages.ts --campaign-id 5
+npx tsx bin/reprocess-messages.ts --since "2024-03-01"
+npx tsx bin/reprocess-messages.ts --dry-run --limit 10
+npx tsx bin/reprocess-messages.ts --process-all --no-move-to-folders
 ```
 
 #### Getting Help
 
 ```bash
+# Main CLI help (shows all available commands)
+npx tsx bin/cli --help
+
 # Manual import help
 npm run mail -- --help
 
 # JMAP fetch help
 npm run jmap-fetch -- --help
+
+# Reprocess messages help (use direct execution for detailed help)
+npx tsx bin/reprocess-messages.ts --help
+
+# Note: npx tsx bin/cli reprocess-messages --help shows general CLI help, 
+# not command-specific help. Use direct execution for detailed command help.
 ```
 
 ### Analytics API
