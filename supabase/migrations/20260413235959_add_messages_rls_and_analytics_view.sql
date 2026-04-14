@@ -72,8 +72,14 @@ CREATE POLICY "Messages: staff can insert" ON public.messages
     )
   );
 
--- 2) Add indexes aligned with analytics access patterns.
-CREATE INDEX IF NOT EXISTS idx_messages_campaign_id ON public.messages(campaign_id);
+-- 2) Keep only purposeful indexes aligned with analytics access patterns:
+-- - campaign/day rollups
+-- - politician-scoped reads (RLS-aware)
+DROP INDEX IF EXISTS public.idx_messages_campaign_id;
+DROP INDEX IF EXISTS public.idx_messages_politician;
+
+CREATE INDEX IF NOT EXISTS idx_messages_campaign_received
+  ON public.messages(campaign_id, received_at DESC);
 CREATE INDEX IF NOT EXISTS idx_messages_politician_campaign_received
   ON public.messages(politician_id, campaign_id, received_at DESC);
 
