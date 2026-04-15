@@ -60,7 +60,7 @@ const listCampaignsRoute = createRoute({
   tags: ["Campaigns"],
 });
 
-app.openapi(listCampaignsRoute, async (c) => {
+(app as any).openapi(listCampaignsRoute, async (c: any) => {
   const db = c.get("db") as DatabaseClient;
   const data = await db.request<any[]>("/campaigns?select=*");
   return c.json(data);
@@ -95,7 +95,7 @@ const statsRoute = createRoute({
   summary: "/api/v1/campaigns/stats",
 });
 
-app.openapi(statsRoute, async (c) => {
+(app as any).openapi(statsRoute, async (c: any) => {
   const db = c.get("db") as DatabaseClient;
   try {
     const stats = await db.request("/rpc/get_campaign_stats");
@@ -123,7 +123,7 @@ const getCampaignRoute = createRoute({
   tags: ["Campaigns"],
 });
 
-app.openapi(getCampaignRoute, async (c) => {
+(app as any).openapi(getCampaignRoute, async (c: any) => {
   const db = c.get("db") as DatabaseClient;
   const { id } = c.req.valid("param");
   const data = await db.request<any[]>(
@@ -152,7 +152,7 @@ const createCampaignRoute = createRoute({
   tags: ["Campaigns"],
 });
 
-app.openapi(createCampaignRoute, async (c) => {
+(app as any).openapi(createCampaignRoute, async (c: any) => {
   const db = c.get("db") as DatabaseClient;
   const campaignData = c.req.valid("json");
   const data = await db.request<any[]>("/campaigns", {

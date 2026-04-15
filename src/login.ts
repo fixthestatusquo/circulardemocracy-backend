@@ -65,7 +65,7 @@ const loginRoute = createRoute({
   tags: ["Auth"],
 });
 
-app.openapi(loginRoute, async (c) => {
+(app as any).openapi(loginRoute, async (c: any) => {
   const { email, password } = c.req.valid("json");
 
   // Use process.env for Node.js development environment

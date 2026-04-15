@@ -160,12 +160,13 @@ async function processUrl(url) {
 // =============================================================================
 
 function getSupabase() {
-  const { SUPABASE_URL, SUPABASE_ANON_KEY } = process.env;
-  if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
-    console.error('Error: SUPABASE_URL and SUPABASE_ANON_KEY environment variables must be set.');
+  const { SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_KEY } = process.env;
+  const supabaseKey = SUPABASE_ANON_KEY || SUPABASE_KEY;
+  if (!SUPABASE_URL || !supabaseKey) {
+    console.error('Error: SUPABASE_URL and either SUPABASE_ANON_KEY or SUPABASE_KEY environment variables must be set.');
     process.exit(1);
   }
-  return createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  return createClient(SUPABASE_URL, supabaseKey);
 }
 
 async function login() {
@@ -279,44 +280,29 @@ async function addCampaign() {
 
   console.log(`✅ Generated ${embedding.length}-dimensional embedding`);
 
-  const API_BASE_URL = getApiBaseUrl(argv.server);
-  const token = await getAuthToken();
-
-  if (!token) {
-    console.error('Error: Not logged in. Please run: ./cli login');
-    process.exit(1);
-  }
-
-  const client = hc(API_BASE_URL, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
-  });
-
-  console.log('💾 Creating campaign via API...');
+  const supabase = getSupabase();
+  console.log('💾 Creating campaign via Supabase...');
 
   try {
     console.log(`📝 Using slug: ${slug}`);
 
-    const response = await client.api.v1.campaigns.$post({
-      json: {
+    const { data: campaign, error: createError } = await supabase
+      .from('campaigns')
+      .insert({
         name,
         slug,
         description: description || undefined,
-      },
-    });
+      })
+      .select()
+      .single();
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error(`❌ Error creating campaign: ${response.status} ${response.statusText}`);
-      console.error(errorText);
+    if (createError || !campaign) {
+      console.error('❌ Error creating campaign:', createError?.message || 'Unknown error');
       process.exit(1);
     }
 
-    const campaign = await response.json();
     console.log('✅ Campaign created successfully!');
 
-    const supabase = getSupabase();
     console.log('🔄 Updating campaign with embedding...');
 
     const { data: updatedCampaign, error: updateError } = await supabase

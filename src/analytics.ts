@@ -74,7 +74,7 @@ const getMessageAnalyticsRoute = createRoute({
   description: "Retrieve message analytics showing daily message counts grouped by campaign for the last N days (default: 7 days)",
 });
 
-app.openapi(getMessageAnalyticsRoute, async (c) => {
+(app as any).openapi(getMessageAnalyticsRoute, async (c: any) => {
   const db = c.get("db") as DatabaseClient;
 
   try {

@@ -159,7 +159,7 @@ const messageRoute = createRoute({
 });
 
 // The handler for the message route
-app.openapi(messageRoute, async (c) => {
+(app as any).openapi(messageRoute, async (c: any) => {
   const db = c.get("db") as DatabaseClient;
 
   try {
