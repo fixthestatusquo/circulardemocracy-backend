@@ -75,7 +75,10 @@ export function validateTemplateData(
 export async function createReplyTemplate(
   db: DatabaseClient,
   data: CreateTemplateInput,
-): Promise<{ success: true; template: ReplyTemplate } | { success: false; errors: TemplateValidationError[] }> {
+): Promise<
+  | { success: true; template: ReplyTemplate }
+  | { success: false; errors: TemplateValidationError[] }
+> {
   // Validate input data
   const validationErrors = validateTemplateData(data);
   if (validationErrors.length > 0) {
@@ -102,7 +105,10 @@ export async function createReplyTemplate(
       errors: [
         {
           field: "general",
-          message: error instanceof Error ? error.message : "Failed to create template",
+          message:
+            error instanceof Error
+              ? error.message
+              : "Failed to create template",
         },
       ],
     };
@@ -116,7 +122,10 @@ export async function updateReplyTemplate(
   db: DatabaseClient,
   templateId: number,
   updates: UpdateTemplateInput,
-): Promise<{ success: true; template: ReplyTemplate } | { success: false; errors: TemplateValidationError[] }> {
+): Promise<
+  | { success: true; template: ReplyTemplate }
+  | { success: false; errors: TemplateValidationError[] }
+> {
   // Validate input data
   const validationErrors = validateTemplateData(updates);
   if (validationErrors.length > 0) {
@@ -151,7 +160,10 @@ export async function updateReplyTemplate(
       errors: [
         {
           field: "general",
-          message: error instanceof Error ? error.message : "Failed to update template",
+          message:
+            error instanceof Error
+              ? error.message
+              : "Failed to update template",
         },
       ],
     };

@@ -1,17 +1,19 @@
 import {
-  describe,
-  it,
-  expect,
-  vi,
   beforeEach,
+  describe,
+  expect,
+  it,
   type MockedFunction,
+  vi,
 } from "vitest";
 import app from "../src/stalwart"; // Test the stalwart app directly
 
 // Mock the embedding service to avoid ONNX runtime issues
 vi.mock("../src/embedding_service", () => ({
   generateEmbedding: vi.fn().mockResolvedValue(new Array(1024).fill(0.1)),
-  formatEmailContentForEmbedding: vi.fn().mockReturnValue("# Test Subject\n\nTest message body"),
+  formatEmailContentForEmbedding: vi
+    .fn()
+    .mockReturnValue("# Test Subject\n\nTest message body"),
 }));
 
 // Mock fetch globally is in setup.ts, but we need to cast it for typing
@@ -69,27 +71,38 @@ describe("Stalwart API (/mta-hook)", () => {
 
     env.AI.run.mockResolvedValue({ data: [new Array(1024).fill(0.2)] });
 
-    mockFetch.mockImplementation(async (url: string | URL | Request, options?: any) => {
-      const urlStr = url instanceof Request ? url.url : url.toString();
-      const method = options?.method || (url instanceof Request ? url.method : 'GET');
+    mockFetch.mockImplementation(
+      async (url: string | URL | Request, options?: any) => {
+        const urlStr = url instanceof Request ? url.url : url.toString();
+        const method =
+          options?.method || (url instanceof Request ? url.method : "GET");
 
-      if (urlStr.includes("find_similar_campaigns")) {
-        return createMockResponse([{ id: 10, name: "Test Campaign", slug: "test-campaign", status: "active", distance: 0.05 }]);
-      }
-      if (urlStr.includes("external_id=eq.")) {
+        if (urlStr.includes("find_similar_campaigns")) {
+          return createMockResponse([
+            {
+              id: 10,
+              name: "Test Campaign",
+              slug: "test-campaign",
+              status: "active",
+              distance: 0.05,
+            },
+          ]);
+        }
+        if (urlStr.includes("external_id=eq.")) {
+          return createMockResponse([]);
+        }
+        if (urlStr.includes("/politicians")) {
+          return createMockResponse([{ id: 1, name: "Test Politician" }]);
+        }
+        if (method === "HEAD" && urlStr.includes("/messages")) {
+          return createMockResponse(null, 200, { "Content-Range": "*/0" });
+        }
+        if (method === "POST" && urlStr.includes("/messages")) {
+          return createMockResponse([{ id: 101 }]);
+        }
         return createMockResponse([]);
-      }
-      if (urlStr.includes("/politicians")) {
-        return createMockResponse([{ id: 1, name: "Test Politician" }]);
-      }
-      if (method === "HEAD" && urlStr.includes("/messages")) {
-        return createMockResponse(null, 200, { "Content-Range": "*/0" });
-      }
-      if (method === "POST" && urlStr.includes("/messages")) {
-        return createMockResponse([{ id: 101 }]);
-      }
-      return createMockResponse([]);
-    });
+      },
+    );
 
     const req = new Request("http://localhost/mta-hook", {
       method: "POST",
@@ -132,7 +145,9 @@ describe("Stalwart API (/mta-hook)", () => {
     expect(data.action).toBe("accept");
     // When politician not found, routes to System/Unknown
     expect(data.modifications.folder).toBe("System/Unknown");
-    expect(data.modifications.headers["X-CircularDemocracy-Status"]).toBe("politician-not-found");
+    expect(data.modifications.headers["X-CircularDemocracy-Status"]).toBe(
+      "politician-not-found",
+    );
   });
 
   it("should handle duplicate messages", async () => {
@@ -140,7 +155,17 @@ describe("Stalwart API (/mta-hook)", () => {
     env.AI.run.mockResolvedValueOnce({ data: [new Array(1024).fill(0.2)] });
 
     // 1. findSimilarCampaigns -> found
-    mockFetch.mockResolvedValueOnce(createMockResponse([{ id: 10, name: "Test Campaign", slug: "test-campaign", status: "active", distance: 0.05 }]));
+    mockFetch.mockResolvedValueOnce(
+      createMockResponse([
+        {
+          id: 10,
+          name: "Test Campaign",
+          slug: "test-campaign",
+          status: "active",
+          distance: 0.05,
+        },
+      ]),
+    );
     // 2. checkExternalIdExists -> DUPLICATE FOUND
     mockFetch.mockResolvedValueOnce(createMockResponse([{ id: 999 }]));
 
@@ -169,7 +194,9 @@ describe("Stalwart API (/mta-hook)", () => {
     // 1. checkExternalIdExists -> not a duplicate
     mockFetch.mockResolvedValueOnce(createMockResponse([]));
     // 2. findPoliticianByEmail (exact match) -> found
-    mockFetch.mockResolvedValueOnce(createMockResponse([{ id: 1, name: "Test Politician" }]));
+    mockFetch.mockResolvedValueOnce(
+      createMockResponse([{ id: 1, name: "Test Politician" }]),
+    );
 
     const shortPayload = { ...stalwartPayload, body: { text: "short" } };
 
@@ -188,7 +215,9 @@ describe("Stalwart API (/mta-hook)", () => {
     expect(res.status).toBe(200);
     expect(data.action).toBe("accept");
     // Short messages still get classified if politician found
-    expect(data.modifications.folder).toMatch(/^(Test-Campaign|System\/Unprocessed|Unclassified)$/);
+    expect(data.modifications.folder).toMatch(
+      /^(Test-Campaign|System\/Unprocessed|Unclassified)$/,
+    );
     expect(data.modifications.headers["X-CircularDemocracy-Status"]).toBe(
       "processed",
     );
@@ -231,11 +260,15 @@ describe("Stalwart API (/mta-hook)", () => {
     // Mock AI embedding for shared classification
     env.AI.run.mockResolvedValueOnce({ data: [new Array(1024).fill(0.2)] });
     // 1. classifyMessage (shared)
-    mockFetch.mockResolvedValueOnce(createMockResponse([{ id: 10, name: "Test Campaign", distance: 0.05 }]));
+    mockFetch.mockResolvedValueOnce(
+      createMockResponse([{ id: 10, name: "Test Campaign", distance: 0.05 }]),
+    );
     // 2. checkExternalIdExists -> not duplicate
     mockFetch.mockResolvedValueOnce(createMockResponse([]));
     // 3. findPoliticianByEmail -> found
-    mockFetch.mockResolvedValueOnce(createMockResponse([{ id: 1, name: "Test Politician" }]));
+    mockFetch.mockResolvedValueOnce(
+      createMockResponse([{ id: 1, name: "Test Politician" }]),
+    );
     // 4. AI embedding for message storage (called with Markdown text)
     env.AI.run.mockResolvedValueOnce({ data: [new Array(1024).fill(0.2)] });
     // 5. getDuplicateRank -> 0
@@ -253,7 +286,10 @@ describe("Stalwart API (/mta-hook)", () => {
 
     const req = new Request("http://localhost/mta-hook", {
       method: "POST",
-      headers: { "Content-Type": "application/json", "X-API-KEY": "test-api-key" },
+      headers: {
+        "Content-Type": "application/json",
+        "X-API-KEY": "test-api-key",
+      },
       body: JSON.stringify(htmlPayload),
     });
 
@@ -266,16 +302,23 @@ describe("Stalwart API (/mta-hook)", () => {
 
   it("should fallback to plain text when HTML is not available", async () => {
     env.AI.run.mockResolvedValueOnce({ data: [new Array(1024).fill(0.2)] });
-    mockFetch.mockResolvedValueOnce(createMockResponse([{ id: 10, name: "Test Campaign", distance: 0.05 }]));
+    mockFetch.mockResolvedValueOnce(
+      createMockResponse([{ id: 10, name: "Test Campaign", distance: 0.05 }]),
+    );
     mockFetch.mockResolvedValueOnce(createMockResponse([]));
-    mockFetch.mockResolvedValueOnce(createMockResponse([{ id: 1, name: "Test Politician" }]));
+    mockFetch.mockResolvedValueOnce(
+      createMockResponse([{ id: 1, name: "Test Politician" }]),
+    );
     env.AI.run.mockResolvedValueOnce({ data: [new Array(1024).fill(0.2)] });
     mockFetch.mockResolvedValueOnce(createMockResponse([{ count: 0 }]));
     mockFetch.mockResolvedValueOnce(createMockResponse([{ id: 103 }]));
 
     const req = new Request("http://localhost/mta-hook", {
       method: "POST",
-      headers: { "Content-Type": "application/json", "X-API-KEY": "test-api-key" },
+      headers: {
+        "Content-Type": "application/json",
+        "X-API-KEY": "test-api-key",
+      },
       body: JSON.stringify(stalwartPayload), // has body.text only
     });
 
@@ -293,28 +336,43 @@ describe("Stalwart API (/mta-hook)", () => {
     env.AI.run.mockResolvedValue({ data: [new Array(1024).fill(0.2)] });
 
     // Use mockImplementation to handle all fetch calls - order matters!
-    mockFetch.mockImplementation(async (url: string | URL | Request, options?: any) => {
-      const urlStr = url instanceof Request ? url.url : url.toString();
-      const method = options?.method || (url instanceof Request ? url.method : 'GET');
+    mockFetch.mockImplementation(
+      async (url: string | URL | Request, options?: any) => {
+        const urlStr = url instanceof Request ? url.url : url.toString();
+        const method =
+          options?.method || (url instanceof Request ? url.method : "GET");
 
-      if (urlStr.includes("find_similar_campaigns")) {
-        return createMockResponse([{ id: 10, name: "Test Campaign", slug: "test-campaign", status: "active", distance: 0.05 }]);
-      }
-      // Duplicate check: GET /messages with select=id - return empty = NOT duplicate
-      if (method === "GET" && urlStr.includes("/messages") && urlStr.includes("select")) {
-        return createMockResponse([]); // Empty array = NOT a duplicate
-      }
-      if (urlStr.includes("/politicians")) {
-        return createMockResponse([{ id: 1, name: "Test Politician" }]);
-      }
-      if (method === "HEAD") {
-        return createMockResponse(null, 200, { "Content-Range": "*/0" });
-      }
-      if (method === "POST" && urlStr.includes("/messages")) {
-        return createMockResponse([{ id: 104 }]);
-      }
-      return createMockResponse([]);
-    });
+        if (urlStr.includes("find_similar_campaigns")) {
+          return createMockResponse([
+            {
+              id: 10,
+              name: "Test Campaign",
+              slug: "test-campaign",
+              status: "active",
+              distance: 0.05,
+            },
+          ]);
+        }
+        // Duplicate check: GET /messages with select=id - return empty = NOT duplicate
+        if (
+          method === "GET" &&
+          urlStr.includes("/messages") &&
+          urlStr.includes("select")
+        ) {
+          return createMockResponse([]); // Empty array = NOT a duplicate
+        }
+        if (urlStr.includes("/politicians")) {
+          return createMockResponse([{ id: 1, name: "Test Politician" }]);
+        }
+        if (method === "HEAD") {
+          return createMockResponse(null, 200, { "Content-Range": "*/0" });
+        }
+        if (method === "POST" && urlStr.includes("/messages")) {
+          return createMockResponse([{ id: 104 }]);
+        }
+        return createMockResponse([]);
+      },
+    );
 
     const replyPayload = {
       ...stalwartPayload,
@@ -326,7 +384,10 @@ describe("Stalwart API (/mta-hook)", () => {
 
     const req = new Request("http://localhost/mta-hook", {
       method: "POST",
-      headers: { "Content-Type": "application/json", "X-API-KEY": "test-api-key" },
+      headers: {
+        "Content-Type": "application/json",
+        "X-API-KEY": "test-api-key",
+      },
       body: JSON.stringify(replyPayload),
     });
 
@@ -344,28 +405,43 @@ describe("Stalwart API (/mta-hook)", () => {
 
     env.AI.run.mockResolvedValue({ data: [new Array(1024).fill(0.2)] });
 
-    mockFetch.mockImplementation(async (url: string | URL | Request, options?: any) => {
-      const urlStr = url instanceof Request ? url.url : url.toString();
-      const method = options?.method || (url instanceof Request ? url.method : 'GET');
+    mockFetch.mockImplementation(
+      async (url: string | URL | Request, options?: any) => {
+        const urlStr = url instanceof Request ? url.url : url.toString();
+        const method =
+          options?.method || (url instanceof Request ? url.method : "GET");
 
-      if (urlStr.includes("find_similar_campaigns")) {
-        return createMockResponse([{ id: 10, name: "Test Campaign", slug: "test-campaign", status: "active", distance: 0.05 }]);
-      }
-      // Duplicate check: GET /messages with select - return empty = NOT duplicate
-      if (method === "GET" && urlStr.includes("/messages") && urlStr.includes("select")) {
+        if (urlStr.includes("find_similar_campaigns")) {
+          return createMockResponse([
+            {
+              id: 10,
+              name: "Test Campaign",
+              slug: "test-campaign",
+              status: "active",
+              distance: 0.05,
+            },
+          ]);
+        }
+        // Duplicate check: GET /messages with select - return empty = NOT duplicate
+        if (
+          method === "GET" &&
+          urlStr.includes("/messages") &&
+          urlStr.includes("select")
+        ) {
+          return createMockResponse([]);
+        }
+        if (urlStr.includes("/politicians")) {
+          return createMockResponse([{ id: 1, name: "Test Politician" }]);
+        }
+        if (method === "HEAD") {
+          return createMockResponse(null, 200, { "Content-Range": "*/0" });
+        }
+        if (method === "POST" && urlStr.includes("/messages")) {
+          return createMockResponse([{ id: 105 }]);
+        }
         return createMockResponse([]);
-      }
-      if (urlStr.includes("/politicians")) {
-        return createMockResponse([{ id: 1, name: "Test Politician" }]);
-      }
-      if (method === "HEAD") {
-        return createMockResponse(null, 200, { "Content-Range": "*/0" });
-      }
-      if (method === "POST" && urlStr.includes("/messages")) {
-        return createMockResponse([{ id: 105 }]);
-      }
-      return createMockResponse([]);
-    });
+      },
+    );
 
     const flaggedPayload = {
       ...stalwartPayload,
@@ -379,7 +455,10 @@ describe("Stalwart API (/mta-hook)", () => {
 
     const req = new Request("http://localhost/mta-hook", {
       method: "POST",
-      headers: { "Content-Type": "application/json", "X-API-KEY": "test-api-key" },
+      headers: {
+        "Content-Type": "application/json",
+        "X-API-KEY": "test-api-key",
+      },
       body: JSON.stringify(flaggedPayload),
     });
 
@@ -392,17 +471,20 @@ describe("Stalwart API (/mta-hook)", () => {
 
     // Verify the message was processed with the correct sender_flag
     // The insertMessage call should have been made with sender_flag
-    const insertCalls = mockFetch.mock.calls.filter(call => {
-      const url = call[0] instanceof Request ? call[0].url : call[0]?.toString();
-      return url?.includes('/messages') && call[1]?.method === 'POST';
+    const insertCalls = mockFetch.mock.calls.filter((call) => {
+      const url =
+        call[0] instanceof Request ? call[0].url : call[0]?.toString();
+      return url?.includes("/messages") && call[1]?.method === "POST";
     });
 
     if (insertCalls.length > 0) {
       const insertCall = insertCalls[0];
       const body = insertCall[1]?.body;
-      if (body && body !== 'undefined') {
+      if (body && body !== "undefined") {
         const insertBody = JSON.parse(body as string);
-        const senderFlag = Array.isArray(insertBody) ? insertBody[0]?.sender_flag : insertBody?.sender_flag;
+        const senderFlag = Array.isArray(insertBody)
+          ? insertBody[0]?.sender_flag
+          : insertBody?.sender_flag;
         expect(senderFlag).toBe("replyToDiffers");
       }
     }
@@ -414,32 +496,50 @@ describe("Stalwart API (/mta-hook)", () => {
 
     env.AI.run.mockResolvedValue({ data: [new Array(1024).fill(0.2)] });
 
-    mockFetch.mockImplementation(async (url: string | URL | Request, options?: any) => {
-      const urlStr = url instanceof Request ? url.url : url.toString();
-      const method = options?.method || (url instanceof Request ? url.method : 'GET');
+    mockFetch.mockImplementation(
+      async (url: string | URL | Request, options?: any) => {
+        const urlStr = url instanceof Request ? url.url : url.toString();
+        const method =
+          options?.method || (url instanceof Request ? url.method : "GET");
 
-      if (urlStr.includes("find_similar_campaigns")) {
-        return createMockResponse([{ id: 10, name: "Test Campaign", slug: "test-campaign", status: "active", distance: 0.05 }]);
-      }
-      // Duplicate check: GET /messages with select - return empty = NOT duplicate
-      if (method === "GET" && urlStr.includes("/messages") && urlStr.includes("select")) {
+        if (urlStr.includes("find_similar_campaigns")) {
+          return createMockResponse([
+            {
+              id: 10,
+              name: "Test Campaign",
+              slug: "test-campaign",
+              status: "active",
+              distance: 0.05,
+            },
+          ]);
+        }
+        // Duplicate check: GET /messages with select - return empty = NOT duplicate
+        if (
+          method === "GET" &&
+          urlStr.includes("/messages") &&
+          urlStr.includes("select")
+        ) {
+          return createMockResponse([]);
+        }
+        if (urlStr.includes("/politicians")) {
+          return createMockResponse([{ id: 1, name: "Test Politician" }]);
+        }
+        if (method === "HEAD") {
+          return createMockResponse(null, 200, { "Content-Range": "*/0" });
+        }
+        if (method === "POST" && urlStr.includes("/messages")) {
+          return createMockResponse({ message: "DB error" }, 500);
+        }
         return createMockResponse([]);
-      }
-      if (urlStr.includes("/politicians")) {
-        return createMockResponse([{ id: 1, name: "Test Politician" }]);
-      }
-      if (method === "HEAD") {
-        return createMockResponse(null, 200, { "Content-Range": "*/0" });
-      }
-      if (method === "POST" && urlStr.includes("/messages")) {
-        return createMockResponse({ message: "DB error" }, 500);
-      }
-      return createMockResponse([]);
-    });
+      },
+    );
 
     const req = new Request("http://localhost/mta-hook", {
       method: "POST",
-      headers: { "Content-Type": "application/json", "X-API-KEY": "test-api-key" },
+      headers: {
+        "Content-Type": "application/json",
+        "X-API-KEY": "test-api-key",
+      },
       body: JSON.stringify(stalwartPayload),
     });
 
@@ -450,7 +550,9 @@ describe("Stalwart API (/mta-hook)", () => {
     expect(data.action).toBe("accept");
     // When insertMessage fails, we fail-open to System/Unprocessed
     expect(data.modifications.folder).toBe("System/Unprocessed");
-    expect(data.modifications.headers["X-CircularDemocracy-Status"]).toBe("error");
+    expect(data.modifications.headers["X-CircularDemocracy-Status"]).toBe(
+      "error",
+    );
   });
 
   it("should assign the same campaign folder to all recipients of a multi-recipient email", async () => {
@@ -459,30 +561,54 @@ describe("Stalwart API (/mta-hook)", () => {
 
     // URL-aware mock: Promise.all interleaves fetch calls between recipients,
     // so we use mockImplementation to return the right response regardless of order.
-    mockFetch.mockImplementation(async (url: string | URL | Request, options: any) => {
-      const urlStr = url instanceof Request ? url.url : url.toString();
-      // findSimilarCampaigns RPC
-      if (urlStr.includes("find_similar_campaigns")) {
-        return createMockResponse([{ id: 10, name: "Test Campaign", slug: "test-campaign", status: "active", distance: 0.05 }]);
-      }
-      // getDuplicateRank uses HEAD with count=exact
-      if (options?.method === "HEAD") {
-        return createMockResponse(null, 200, { "Content-Range": "0/0" });
-      }
-      // findPoliticianByEmail - exact match (GET to politicians table)
-      if (urlStr.includes("/politicians")) {
-        if (urlStr.includes("politician%40example.com")) {
-          return createMockResponse([{ id: 1, name: "Politician One", email: "politician@example.com", active: true }]);
+    mockFetch.mockImplementation(
+      async (url: string | URL | Request, options: any) => {
+        const urlStr = url instanceof Request ? url.url : url.toString();
+        // findSimilarCampaigns RPC
+        if (urlStr.includes("find_similar_campaigns")) {
+          return createMockResponse([
+            {
+              id: 10,
+              name: "Test Campaign",
+              slug: "test-campaign",
+              status: "active",
+              distance: 0.05,
+            },
+          ]);
         }
-        return createMockResponse([{ id: 2, name: "Politician Two", email: "other@example.com", active: true }]);
-      }
-      // insertMessage uses POST body
-      if (options?.method === "POST") {
-        return createMockResponse([{ id: 200 }]);
-      }
-      // checkExternalIdExists (GET to messages, not HEAD) -> not duplicate
-      return createMockResponse([]);
-    });
+        // getDuplicateRank uses HEAD with count=exact
+        if (options?.method === "HEAD") {
+          return createMockResponse(null, 200, { "Content-Range": "0/0" });
+        }
+        // findPoliticianByEmail - exact match (GET to politicians table)
+        if (urlStr.includes("/politicians")) {
+          if (urlStr.includes("politician%40example.com")) {
+            return createMockResponse([
+              {
+                id: 1,
+                name: "Politician One",
+                email: "politician@example.com",
+                active: true,
+              },
+            ]);
+          }
+          return createMockResponse([
+            {
+              id: 2,
+              name: "Politician Two",
+              email: "other@example.com",
+              active: true,
+            },
+          ]);
+        }
+        // insertMessage uses POST body
+        if (options?.method === "POST") {
+          return createMockResponse([{ id: 200 }]);
+        }
+        // checkExternalIdExists (GET to messages, not HEAD) -> not duplicate
+        return createMockResponse([]);
+      },
+    );
 
     const multiPayload = {
       ...stalwartPayload,
@@ -491,7 +617,10 @@ describe("Stalwart API (/mta-hook)", () => {
 
     const req = new Request("http://localhost/mta-hook", {
       method: "POST",
-      headers: { "Content-Type": "application/json", "X-API-KEY": "test-api-key" },
+      headers: {
+        "Content-Type": "application/json",
+        "X-API-KEY": "test-api-key",
+      },
       body: JSON.stringify(multiPayload),
     });
 

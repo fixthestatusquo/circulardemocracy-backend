@@ -1,12 +1,12 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import app from "../src/api";
-import { DatabaseClient } from "../src/database";
-import { PoliticianNotFoundError } from "../src/message_processor";
 
 // Mock the embedding service to avoid ONNX runtime issues
 vi.mock("../src/embedding_service", () => ({
   generateEmbedding: vi.fn().mockResolvedValue(new Array(1024).fill(0.1)),
-  formatEmailContentForEmbedding: vi.fn().mockReturnValue("# Test Subject\n\nTest message body"),
+  formatEmailContentForEmbedding: vi
+    .fn()
+    .mockReturnValue("# Test Subject\n\nTest message body"),
 }));
 
 // --- Create a singleton mock instance ---
@@ -96,7 +96,7 @@ describe("Messages API Integration", () => {
     const res = await app.fetch(req, env);
     expect(res.status).toBe(404);
     const body = await res.json();
-    // @ts-ignore
+    // @ts-expect-error
     expect(body.status).toBe("politician_not_found");
   });
 
@@ -121,7 +121,7 @@ describe("Messages API Integration", () => {
     const res = await app.fetch(req, env);
     expect(res.status).toBe(409);
     const body = await res.json();
-    // @ts-ignore
+    // @ts-expect-error
     expect(body.status).toBe("duplicate");
   });
 
@@ -152,7 +152,7 @@ describe("Messages API Integration", () => {
     mockDbInstance.insertMessage.mockResolvedValue(100);
     mockDbInstance.assignMessageToCluster.mockResolvedValue(1);
     mockDbInstance.storeSenderEmail.mockResolvedValue(undefined);
-    // @ts-ignore
+    // @ts-expect-error
     env.AI.run.mockResolvedValue({ data: [[0.1, 0.2]] });
 
     const req = new Request("http://localhost/api/v1/messages", {
@@ -166,9 +166,9 @@ describe("Messages API Integration", () => {
     const res = await app.fetch(req, env);
     expect(res.status).toBe(200);
     const body = await res.json();
-    // @ts-ignore
+    // @ts-expect-error
     expect(body.status).toBe("processed");
-    // @ts-ignore
+    // @ts-expect-error
     expect(body.message_id).toBe(100);
   });
 });

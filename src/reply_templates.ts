@@ -1,4 +1,4 @@
-import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
+import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
 import { authMiddleware } from "./auth";
 import type { DatabaseClient } from "./database";
 import {
@@ -44,8 +44,12 @@ const CreateReplyTemplateSchema = z.object({
   name: z.string().min(3, "Name must be at least 3 characters"),
   subject: z.string().min(1, "Subject is required").max(255),
   body: z.string().min(10, "Message body must be at least 10 characters"),
-  layout_type: z.enum(["text_only", "standard_header"]).default("standard_header"),
-  send_timing: z.enum(["immediate", "office_hours", "scheduled"]).default("office_hours"),
+  layout_type: z
+    .enum(["text_only", "standard_header"])
+    .default("standard_header"),
+  send_timing: z
+    .enum(["immediate", "office_hours", "scheduled"])
+    .default("office_hours"),
   scheduled_for: z.string().datetime().optional(),
   active: z.boolean().default(true),
 });
@@ -73,7 +77,8 @@ const listReplyTemplatesRoute = createRoute({
   method: "get",
   path: "/api/v1/reply-templates",
   summary: "/api/v1/reply-templates",
-  description: "Retrieve a list of all campaign auto-reply templates. Templates define automated email responses sent to supporters.",
+  description:
+    "Retrieve a list of all campaign auto-reply templates. Templates define automated email responses sent to supporters.",
   security: [{ Bearer: [] }],
   responses: {
     200: {
@@ -95,7 +100,8 @@ const getReplyTemplateRoute = createRoute({
   method: "get",
   path: "/api/v1/reply-templates/{id}",
   summary: "/api/v1/reply-templates/{id}",
-  description: "Retrieve detailed information about a specific campaign auto-reply template.",
+  description:
+    "Retrieve detailed information about a specific campaign auto-reply template.",
   security: [{ Bearer: [] }],
   request: {
     params: z.object({ id: z.string().regex(/^\d+$/).describe("Template ID") }),
@@ -127,12 +133,14 @@ const createReplyTemplateRoute = createRoute({
   method: "post",
   path: "/api/v1/reply-templates",
   summary: "/api/v1/reply-templates",
-  description: "Create a new auto-reply template for a campaign. The template defines the email content, layout, and scheduling for automated responses to supporters. If active=true, this will deactivate other templates for the same campaign.",
+  description:
+    "Create a new auto-reply template for a campaign. The template defines the email content, layout, and scheduling for automated responses to supporters. If active=true, this will deactivate other templates for the same campaign.",
   security: [{ Bearer: [] }],
   request: {
     body: {
       content: { "application/json": { schema: CreateReplyTemplateSchema } },
-      description: "Reply template data including subject, message body (markdown), layout type, and send timing.",
+      description:
+        "Reply template data including subject, message body (markdown), layout type, and send timing.",
     },
   },
   responses: {
@@ -171,7 +179,8 @@ const updateReplyTemplateRoute = createRoute({
   method: "patch",
   path: "/api/v1/reply-templates/{id}",
   summary: "/api/v1/reply-templates/{id}",
-  description: "Update an existing auto-reply template. You can modify the subject, message body, layout type, send timing, and active status. Setting active=true will deactivate other templates for the same campaign.",
+  description:
+    "Update an existing auto-reply template. You can modify the subject, message body, layout type, send timing, and active status. Setting active=true will deactivate other templates for the same campaign.",
   security: [{ Bearer: [] }],
   request: {
     params: z.object({ id: z.string().regex(/^\d+$/).describe("Template ID") }),
@@ -198,7 +207,7 @@ app.openapi(updateReplyTemplateRoute, async (c) => {
   const db = c.get("db") as DatabaseClient;
   const { id } = c.req.valid("param");
   const updatesInput = c.req.valid("json");
-  const templateId = Number.parseInt(id);
+  const templateId = Number.parseInt(id, 10);
 
   const result = await updateTemplateService(db, templateId, updatesInput);
 
@@ -225,7 +234,8 @@ const deleteReplyTemplateRoute = createRoute({
   method: "delete",
   path: "/api/v1/reply-templates/{id}",
   summary: "/api/v1/reply-templates/{id}",
-  description: "Permanently delete an auto-reply template. This action cannot be undone.",
+  description:
+    "Permanently delete an auto-reply template. This action cannot be undone.",
   security: [{ Bearer: [] }],
   request: {
     params: z.object({ id: z.string().regex(/^\d+$/).describe("Template ID") }),
@@ -241,7 +251,7 @@ const deleteReplyTemplateRoute = createRoute({
 app.openapi(deleteReplyTemplateRoute, async (c) => {
   const db = c.get("db") as DatabaseClient;
   const { id } = c.req.valid("param");
-  const templateId = Number.parseInt(id);
+  const templateId = Number.parseInt(id, 10);
 
   try {
     await db.deleteReplyTemplate(templateId);
@@ -263,7 +273,8 @@ const toggleTemplateActiveRoute = createRoute({
   method: "post",
   path: "/api/v1/reply-templates/{id}/toggle-active",
   summary: "/api/v1/reply-templates/{id}/toggle-active",
-  description: "Activate or deactivate an auto-reply template. Only one template can be active per campaign. Setting active=true will automatically deactivate other templates for the same campaign.",
+  description:
+    "Activate or deactivate an auto-reply template. Only one template can be active per campaign. Setting active=true will automatically deactivate other templates for the same campaign.",
   security: [{ Bearer: [] }],
   request: {
     params: z.object({ id: z.string().regex(/^\d+$/).describe("Template ID") }),
@@ -271,7 +282,9 @@ const toggleTemplateActiveRoute = createRoute({
       content: {
         "application/json": {
           schema: z.object({
-            active: z.boolean().describe("Set to true to activate, false to deactivate"),
+            active: z
+              .boolean()
+              .describe("Set to true to activate, false to deactivate"),
           }),
         },
       },
@@ -292,7 +305,7 @@ app.openapi(toggleTemplateActiveRoute, async (c) => {
   const db = c.get("db") as DatabaseClient;
   const { id } = c.req.valid("param");
   const { active } = c.req.valid("json");
-  const templateId = Number.parseInt(id);
+  const templateId = Number.parseInt(id, 10);
 
   try {
     const existingTemplate = await db.getReplyTemplateById(templateId);
@@ -308,7 +321,9 @@ app.openapi(toggleTemplateActiveRoute, async (c) => {
       );
     }
 
-    const updatedTemplate = await db.updateReplyTemplate(templateId, { active });
+    const updatedTemplate = await db.updateReplyTemplate(templateId, {
+      active,
+    });
     return c.json(toApiTemplate(updatedTemplate), 200);
   } catch (error) {
     console.error("Error toggling template active status:", error);

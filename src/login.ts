@@ -1,4 +1,4 @@
-import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
+import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
 import { createClient } from "@supabase/supabase-js";
 
 // Define types for env and app
@@ -71,9 +71,13 @@ app.openapi(loginRoute, async (c) => {
   // Use process.env for Node.js development environment
   const supabase = createClient(
     process.env.SUPABASE_URL || c.env.SUPABASE_URL,
-    process.env.SUPABASE_KEY || c.env.SUPABASE_KEY
+    process.env.SUPABASE_KEY || c.env.SUPABASE_KEY,
   );
-  console.log(process.env.SUPABASE_URL, process.env.SUPABASE_KEY ? "present" : "missing", email);
+  console.log(
+    process.env.SUPABASE_URL,
+    process.env.SUPABASE_KEY ? "present" : "missing",
+    email,
+  );
 
   const { data, error } = await supabase.auth.signInWithPassword({
     email,

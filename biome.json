@@ -1,12 +1,15 @@
 {
-  "$schema": "https://biomejs.dev/schemas/1.6.0/schema.json",
+  "$schema": "https://biomejs.dev/schemas/2.4.12/schema.json",
   "files": {
-    "include": ["src/**/*.ts", "test/**/*.ts"],
-    "ignore": ["dist/", "node_modules/", "*.d.ts"]
+    "includes": [
+      "**/src/**/*.ts",
+      "**/test/**/*.ts",
+      "!**/dist/",
+      "!**/node_modules/",
+      "!**/*.d.ts"
+    ]
   },
-  "organizeImports": {
-    "enabled": true
-  },
+  "assist": { "actions": { "source": { "organizeImports": "on" } } },
   "linter": {
     "enabled": true,
     "rules": {
@@ -49,7 +52,7 @@
   },
   "overrides": [
     {
-      "include": ["test/database.test.ts"],
+      "includes": ["**/test/database.test.ts"],
       "javascript": {
         "formatter": {
           "quoteStyle": "double",
@@ -59,8 +62,6 @@
     }
   ],
   "json": {
-    "formatter": {
-      "quoteStyle": "double"
-    }
+    "formatter": {}
   }
 }

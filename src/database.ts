@@ -1,4 +1,4 @@
-import { type SupabaseClient, createClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
 // Database Layer - Supabase REST API Client
 // Handles all database operations for Circular Democracy
@@ -54,8 +54,8 @@ export interface ReplyTemplate {
   subject: string;
   body: string;
   active: boolean;
-  layout_type: 'text_only' | 'standard_header';
-  send_timing: 'immediate' | 'office_hours' | 'scheduled';
+  layout_type: "text_only" | "standard_header";
+  send_timing: "immediate" | "office_hours" | "scheduled";
   scheduled_for?: string | null;
   created_at: string;
   updated_at: string;
@@ -90,7 +90,9 @@ export class DatabaseClient {
 
     try {
       if (method === "GET") {
-        let query: any = this.supabase.from(table).select(queryParams.get("select") || "*");
+        let query: any = this.supabase
+          .from(table)
+          .select(queryParams.get("select") || "*");
 
         for (const [key, value] of queryParams.entries()) {
           if (key === "select" || key === "limit") {
@@ -105,7 +107,9 @@ export class DatabaseClient {
         }
 
         if (queryParams.get("limit")) {
-          query = query.limit(Number.parseInt(queryParams.get("limit") || "0"));
+          query = query.limit(
+            Number.parseInt(queryParams.get("limit") || "0", 10),
+          );
         }
 
         const { data, error } = await query;
@@ -116,7 +120,10 @@ export class DatabaseClient {
       }
 
       if (method === "POST") {
-        const { data, error } = await this.supabase.from(table).insert(body).select();
+        const { data, error } = await this.supabase
+          .from(table)
+          .insert(body)
+          .select();
         if (error) {
           throw new Error(`Database error: ${error.message}`);
         }
@@ -146,7 +153,10 @@ export class DatabaseClient {
           throw new Error("DELETE requests require id=eq.<value> in endpoint");
         }
         const deleteId = id.replace("eq.", "");
-        const { error } = await this.supabase.from(table).delete().eq("id", deleteId);
+        const { error } = await this.supabase
+          .from(table)
+          .delete()
+          .eq("id", deleteId);
         if (error) {
           throw new Error(`Database error: ${error.message}`);
         }
@@ -155,7 +165,9 @@ export class DatabaseClient {
 
       throw new Error(`Unsupported request method: ${method}`);
     } catch (error) {
-      throw error instanceof Error ? error : new Error("Unknown database request error");
+      throw error instanceof Error
+        ? error
+        : new Error("Unknown database request error");
     }
   }
 
@@ -299,32 +311,42 @@ export class DatabaseClient {
 
   private async acquireGlobalClusteringLock(): Promise<boolean> {
     try {
-      const { data, error } = await this.supabase.rpc('acquire_global_clustering_lock');
+      const { data, error } = await this.supabase.rpc(
+        "acquire_global_clustering_lock",
+      );
 
       if (error) {
-        console.error('Error acquiring advisory lock:', error);
+        console.error("Error acquiring advisory lock:", error);
         return false;
       }
 
       return data === true;
     } catch (error) {
-      console.error('Exception acquiring advisory lock:', error);
+      console.error("Exception acquiring advisory lock:", error);
       return false;
     }
   }
 
   private async releaseGlobalClusteringLock(): Promise<void> {
     try {
-      await this.supabase.rpc('release_global_clustering_lock');
+      await this.supabase.rpc("release_global_clustering_lock");
     } catch (error) {
-      console.error('Error releasing advisory lock:', error);
+      console.error("Error releasing advisory lock:", error);
     }
   }
 
   async findSimilarMessages(
     embedding: number[],
     limit = 10,
-  ): Promise<Array<{ id: number; distance: number; campaign_id: number | null; cluster_id: number | null; politician_id: number }>> {
+  ): Promise<
+    Array<{
+      id: number;
+      distance: number;
+      campaign_id: number | null;
+      cluster_id: number | null;
+      politician_id: number;
+    }>
+  > {
     try {
       const { data, error } = await this.supabase.rpc(
         "find_similar_messages_global",
@@ -341,7 +363,12 @@ export class DatabaseClient {
       }
 
       if (data && data.length > 0) {
-        console.log(`  🔍 RPC returned ${data.length} messages, distances: ${data.slice(0, 3).map((m: any) => m.distance?.toFixed(4)).join(', ')}`);
+        console.log(
+          `  🔍 RPC returned ${data.length} messages, distances: ${data
+            .slice(0, 3)
+            .map((m: any) => m.distance?.toFixed(4))
+            .join(", ")}`,
+        );
       }
 
       return data || [];
@@ -354,7 +381,9 @@ export class DatabaseClient {
   async findSimilarClusters(
     embedding: number[],
     limit = 10,
-  ): Promise<Array<{ clusterId: number; distance: number; messageCount: number }>> {
+  ): Promise<
+    Array<{ clusterId: number; distance: number; messageCount: number }>
+  > {
     try {
       const { data, error } = await this.supabase.rpc("find_similar_clusters", {
         query_embedding: embedding,
@@ -387,7 +416,7 @@ export class DatabaseClient {
 
     if (!lockAcquired) {
       console.log(`  ⏳ Could not acquire global clustering lock, retrying...`);
-      await new Promise(resolve => setTimeout(resolve, 100));
+      await new Promise((resolve) => setTimeout(resolve, 100));
       return this.assignMessageToCluster(messageId, embedding, politicianId);
     }
 
@@ -395,15 +424,16 @@ export class DatabaseClient {
       const similarClusters = await this.findSimilarClusters(embedding, 50);
 
       if (similarClusters.length > 0) {
-        const selectedCluster = [...similarClusters]
-          .sort((a, b) => {
-            if (b.messageCount !== a.messageCount) {
-              return b.messageCount - a.messageCount;
-            }
-            return a.distance - b.distance;
-          })[0];
+        const selectedCluster = [...similarClusters].sort((a, b) => {
+          if (b.messageCount !== a.messageCount) {
+            return b.messageCount - a.messageCount;
+          }
+          return a.distance - b.distance;
+        })[0];
 
-        console.log(`  ✅ Joining existing cluster ${selectedCluster.clusterId} by centroid (distance: ${selectedCluster.distance.toFixed(4)}, size: ${selectedCluster.messageCount})`);
+        console.log(
+          `  ✅ Joining existing cluster ${selectedCluster.clusterId} by centroid (distance: ${selectedCluster.distance.toFixed(4)}, size: ${selectedCluster.messageCount})`,
+        );
 
         await this.supabase
           .from("messages")
@@ -416,19 +446,23 @@ export class DatabaseClient {
         return selectedCluster.clusterId;
       }
 
-      console.log(`  🔍 No similar clusters by centroid, checking similar unclustered messages`);
+      console.log(
+        `  🔍 No similar clusters by centroid, checking similar unclustered messages`,
+      );
       const similarMessages = await this.findSimilarMessages(embedding, 50);
       const closeMatches = similarMessages.filter(
-        m => m.id !== messageId && m.distance < 0.1,
+        (m) => m.id !== messageId && m.distance < 0.1,
       );
 
       const existingClusterFromCloseMatches = closeMatches.find(
-        m => m.cluster_id !== null,
+        (m) => m.cluster_id !== null,
       );
 
       if (existingClusterFromCloseMatches?.cluster_id) {
         const clusterId = existingClusterFromCloseMatches.cluster_id;
-        console.log(`  ✅ Joining existing cluster ${clusterId} via fallback close-match logic`);
+        console.log(
+          `  ✅ Joining existing cluster ${clusterId} via fallback close-match logic`,
+        );
 
         await this.supabase
           .from("messages")
@@ -436,11 +470,13 @@ export class DatabaseClient {
           .eq("id", messageId);
 
         const unclusteredSimilarMessageIds = closeMatches
-          .filter(m => m.cluster_id === null)
-          .map(m => m.id);
+          .filter((m) => m.cluster_id === null)
+          .map((m) => m.id);
 
         if (unclusteredSimilarMessageIds.length > 0) {
-          console.log(`  🔗 Also assigning ${unclusteredSimilarMessageIds.length} unclustered similar messages to cluster ${clusterId}`);
+          console.log(
+            `  🔗 Also assigning ${unclusteredSimilarMessageIds.length} unclustered similar messages to cluster ${clusterId}`,
+          );
           await this.supabase
             .from("messages")
             .update({ cluster_id: clusterId })
@@ -454,15 +490,17 @@ export class DatabaseClient {
       }
 
       const unclusteredSimilarMessages = closeMatches.filter(
-        m => m.cluster_id === null,
+        (m) => m.cluster_id === null,
       );
 
       if (unclusteredSimilarMessages.length > 0) {
-        console.log(`  🆕 Creating cluster for ${unclusteredSimilarMessages.length + 1} similar unclustered messages`);
+        console.log(
+          `  🆕 Creating cluster for ${unclusteredSimilarMessages.length + 1} similar unclustered messages`,
+        );
         const { data: newCluster, error: createError } = await this.supabase
           .from("message_clusters")
           .insert({
-            centroid_vector: `[${embedding.join(',')}]`,
+            centroid_vector: `[${embedding.join(",")}]`,
             message_count: unclusteredSimilarMessages.length + 1,
             status: "forming",
           })
@@ -475,7 +513,10 @@ export class DatabaseClient {
         }
 
         const newClusterId = newCluster.id;
-        const allMessageIds = [messageId, ...unclusteredSimilarMessages.map(m => m.id)];
+        const allMessageIds = [
+          messageId,
+          ...unclusteredSimilarMessages.map((m) => m.id),
+        ];
 
         await this.supabase
           .from("messages")
@@ -488,11 +529,13 @@ export class DatabaseClient {
         return newClusterId;
       }
 
-      console.log(`  🆕 Creating isolated cluster (no similar clusters or messages)`);
+      console.log(
+        `  🆕 Creating isolated cluster (no similar clusters or messages)`,
+      );
       const { data: newCluster, error: createError } = await this.supabase
         .from("message_clusters")
         .insert({
-          centroid_vector: `[${embedding.join(',')}]`,
+          centroid_vector: `[${embedding.join(",")}]`,
           message_count: 1,
           status: "forming",
         })
@@ -533,10 +576,10 @@ export class DatabaseClient {
       }
 
       const embeddings = messages
-        .map(m => {
+        .map((m) => {
           const emb = m.message_embedding;
           // Handle both string and array formats
-          if (typeof emb === 'string') {
+          if (typeof emb === "string") {
             try {
               return JSON.parse(emb);
             } catch {
@@ -553,7 +596,7 @@ export class DatabaseClient {
         await this.supabase
           .from("message_clusters")
           .update({
-            centroid_vector: `[${centroid.join(',')}]`,
+            centroid_vector: `[${centroid.join(",")}]`,
             message_count: embeddings.length,
             updated_at: new Date().toISOString(),
           })
@@ -572,7 +615,11 @@ export class DatabaseClient {
         .eq("id", clusterId)
         .single();
 
-      if (cluster && cluster.message_count >= DatabaseClient.MIN_CLUSTER_SIZE_FOR_CAMPAIGN && cluster.status === "forming") {
+      if (
+        cluster &&
+        cluster.message_count >= DatabaseClient.MIN_CLUSTER_SIZE_FOR_CAMPAIGN &&
+        cluster.status === "forming"
+      ) {
         await this.supabase
           .from("message_clusters")
           .update({ status: "ready" })
@@ -583,7 +630,10 @@ export class DatabaseClient {
     }
   }
 
-  async assignCampaignToCluster(clusterId: number, campaignId: number): Promise<void> {
+  async assignCampaignToCluster(
+    clusterId: number,
+    campaignId: number,
+  ): Promise<void> {
     try {
       console.log(`Assigning campaign ${campaignId} to cluster ${clusterId}`);
 
@@ -598,7 +648,9 @@ export class DatabaseClient {
         throw updateError;
       }
 
-      console.log(`Updated ${updatedMessages?.length || 0} messages in cluster ${clusterId} with campaign ${campaignId}`);
+      console.log(
+        `Updated ${updatedMessages?.length || 0} messages in cluster ${clusterId} with campaign ${campaignId}`,
+      );
     } catch (error) {
       console.error("Error assigning campaign to cluster:", error);
       throw error;
@@ -607,7 +659,7 @@ export class DatabaseClient {
 
   async syncCampaignFromClusters(): Promise<number> {
     try {
-      console.log('Syncing campaign IDs from clusters to messages...');
+      console.log("Syncing campaign IDs from clusters to messages...");
 
       // First, get all messages that have clusters but no campaign_id
       const { data: messagesToSync, error: fetchError } = await this.supabase
@@ -621,15 +673,19 @@ export class DatabaseClient {
       }
 
       if (!messagesToSync || messagesToSync.length === 0) {
-        console.log('No messages need syncing');
+        console.log("No messages need syncing");
         return 0;
       }
 
       // For now, this is a simple implementation that just returns the count
       // In a full implementation, you would need to have a way to determine which campaign
       // should be assigned to each cluster (e.g., via a cluster_campaigns table)
-      console.log(`Found ${messagesToSync.length} messages that could be synced`);
-      console.log('Note: Full sync implementation requires cluster-campaign mapping table');
+      console.log(
+        `Found ${messagesToSync.length} messages that could be synced`,
+      );
+      console.log(
+        "Note: Full sync implementation requires cluster-campaign mapping table",
+      );
 
       return messagesToSync.length;
     } catch (error) {
@@ -639,9 +695,15 @@ export class DatabaseClient {
   }
 
   calculateCentroid(embeddings: number[][]): number[] | null {
-    if (embeddings.length === 0) return null;
+    if (embeddings.length === 0) {
+      return null;
+    }
 
-    if (embeddings.some(emb => !Array.isArray(emb) || emb.length !== embeddings[0].length)) {
+    if (
+      embeddings.some(
+        (emb) => !Array.isArray(emb) || emb.length !== embeddings[0].length,
+      )
+    ) {
       console.error("Embeddings have inconsistent dimensions");
       return null;
     }
@@ -670,22 +732,22 @@ export class DatabaseClient {
     // Verify that PII fields are not present in the payload
     const payload = data as any;
     const forbiddenFields = [
-      'sender_email',
-      'sender_name',
-      'message',
-      'body',
-      'subject',
-      'text_content',
-      'html_content'
+      "sender_email",
+      "sender_name",
+      "message",
+      "body",
+      "subject",
+      "text_content",
+      "html_content",
     ];
 
-    const violations = forbiddenFields.filter(field =>
-      payload[field] !== undefined && payload[field] !== null
+    const violations = forbiddenFields.filter(
+      (field) => payload[field] !== undefined && payload[field] !== null,
     );
 
     if (violations.length > 0) {
       throw new Error(
-        `Privacy violation: Cannot store PII in database. Found forbidden fields: ${violations.join(', ')}`
+        `Privacy violation: Cannot store PII in database. Found forbidden fields: ${violations.join(", ")}`,
       );
     }
   }
@@ -770,14 +832,13 @@ export class DatabaseClient {
       if (error) {
         throw error;
       }
-      // @ts-ignore - Supabase types are sometimes tricky with joins
+      // @ts-expect-error - Supabase types are sometimes tricky with joins
       return data.length > 0 ? data[0] : null;
     } catch (error) {
       console.error("Error getting message by external ID:", error);
       return null;
     }
   }
-
 
   // =============================================================================
   // REPLY TEMPLATE OPERATIONS
@@ -887,9 +948,7 @@ export class DatabaseClient {
     }
   }
 
-  async verifyPoliticianOwnsTemplate(
-    templateId: number,
-  ): Promise<boolean> {
+  async verifyPoliticianOwnsTemplate(templateId: number): Promise<boolean> {
     try {
       const { data, error } = await this.supabase
         .from("reply_templates")
@@ -963,13 +1022,11 @@ export class DatabaseClient {
     senderEmail: string,
   ): Promise<void> {
     try {
-      const { error } = await this.supabase
-        .from("sender_emails")
-        .insert({
-          message_id: messageId,
-          sender_hash: senderHash,
-          email: senderEmail,
-        });
+      const { error } = await this.supabase.from("sender_emails").insert({
+        message_id: messageId,
+        sender_hash: senderHash,
+        email: senderEmail,
+      });
 
       if (error) {
         throw error;
@@ -1176,7 +1233,11 @@ export class DatabaseClient {
     campaignHint?: string,
   ): Promise<ClassificationResult> {
     // Step 1: Classify the message
-    const classification = await this.classifyMessage(embedding, politicianId, campaignHint);
+    const classification = await this.classifyMessage(
+      embedding,
+      politicianId,
+      campaignHint,
+    );
 
     // Step 2: Update message with campaign classification
     await this.updateMessageFields(messageId, {
@@ -1192,7 +1253,7 @@ export class DatabaseClient {
 
   async classifyMessage(
     embedding: number[],
-    politicianId: number,
+    _politicianId: number,
     campaignHint?: string,
   ): Promise<ClassificationResult> {
     // Step 1: Try campaign hint if provided
@@ -1237,12 +1298,14 @@ export class DatabaseClient {
   // ANALYTICS OPERATIONS
   // =============================================================================
 
-  async getMessageAnalyticsDaily(daysBack: number): Promise<Array<{
-    date: string;
-    campaign_id: number;
-    campaign_name: string;
-    message_count: number;
-  }>> {
+  async getMessageAnalyticsDaily(daysBack: number): Promise<
+    Array<{
+      date: string;
+      campaign_id: number;
+      campaign_name: string;
+      message_count: number;
+    }>
+  > {
     try {
       const { data, error } = await this.supabase.rpc(
         "get_message_analytics_daily",

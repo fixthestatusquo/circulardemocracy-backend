@@ -1,4 +1,4 @@
-import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
+import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
 import { authMiddleware } from "./auth";
 import type { DatabaseClient } from "./database";
 
@@ -48,7 +48,12 @@ const getMessageAnalyticsRoute = createRoute({
   security: [{ Bearer: [] }],
   request: {
     query: z.object({
-      days: z.string().regex(/^\d+$/).optional().default("7").describe("Number of days to look back (default: 7)"),
+      days: z
+        .string()
+        .regex(/^\d+$/)
+        .optional()
+        .default("7")
+        .describe("Number of days to look back (default: 7)"),
     }),
   },
   responses: {
@@ -71,7 +76,8 @@ const getMessageAnalyticsRoute = createRoute({
   },
   tags: ["Analytics"],
   summary: "/api/v1/messages/analytics",
-  description: "Retrieve message analytics showing daily message counts grouped by campaign for the last N days (default: 7 days)",
+  description:
+    "Retrieve message analytics showing daily message counts grouped by campaign for the last N days (default: 7 days)",
 });
 
 app.openapi(getMessageAnalyticsRoute, async (c) => {

@@ -1,31 +1,27 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mock the embedding service to avoid ONNX runtime issues
 vi.mock("../src/embedding_service", () => ({
   generateEmbedding: vi.fn().mockResolvedValue(new Array(1024).fill(0.1)),
-  formatEmailContentForEmbedding: vi.fn().mockReturnValue("# Test Subject\n\nTest message body"),
+  formatEmailContentForEmbedding: vi
+    .fn()
+    .mockReturnValue("# Test Subject\n\nTest message body"),
 }));
 
+import type { DatabaseClient } from "../src/database";
+import { renderEmailLayout } from "../src/email_layout";
+import { type MessageInput, processMessage } from "../src/message_processor";
 // Import modules to test
 import {
   calculateReplySchedule,
   isInOfficeHours,
-  getNextOfficeHourSlot,
   isReadyToSend,
 } from "../src/scheduling";
-import { renderEmailLayout } from "../src/email_layout";
 import {
-  validateTemplateData,
   createReplyTemplate,
   updateReplyTemplate,
+  validateTemplateData,
 } from "../src/template_service";
-import {
-  processMessage,
-  MessageInput,
-} from "../src/message_processor";
-import { processScheduledReplies } from "../src/reply_worker";
-import { DatabaseClient } from "../src/database";
-import { JMAPClient } from "../src/jmap_client";
 
 // =============================================================================
 // SCHEDULING TESTS

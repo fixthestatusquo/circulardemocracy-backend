@@ -1,8 +1,12 @@
-import { z } from "zod";
-import type { MessageInput } from "./message_processor";
-import { processMessage, type Ai, type MessageProcessingResult } from "./message_processor";
-import type { DatabaseClient } from "./database";
 import Turndown from "turndown";
+import { z } from "zod";
+import type { DatabaseClient } from "./database";
+import type { MessageInput } from "./message_processor";
+import {
+  type Ai,
+  type MessageProcessingResult,
+  processMessage,
+} from "./message_processor";
 
 export const StalwartHookSchema = z.object({
   context: z.object({}).passthrough().optional(),
@@ -56,7 +60,7 @@ function extractNameFromHeader(headerValue: string): string {
   return "";
 }
 
-function htmlToMarkdown(html: string): string {
+function _htmlToMarkdown(html: string): string {
   if (!html || html.trim().length === 0) {
     return "";
   }
@@ -68,30 +72,36 @@ function htmlToMarkdown(html: string): string {
     fence: "```",
     emDelimiter: "*",
     strongDelimiter: "**",
-    linkStyle: "inlined"
+    linkStyle: "inlined",
   });
 
   return turndownService.turndown(html).trim();
 }
 
-function extractBody(payload: StalwartHookPayload): { htmlContent?: string; textContent?: string } {
+function extractBody(payload: StalwartHookPayload): {
+  htmlContent?: string;
+  textContent?: string;
+} {
   const htmlContent = payload.message.body?.html;
   const textContent = payload.message.body?.text;
 
   return {
     htmlContent: htmlContent || undefined,
-    textContent: textContent || undefined
+    textContent: textContent || undefined,
   };
 }
 
-function extractCampaignHint(recipientEmail: string, subject: string): string | undefined {
+function extractCampaignHint(
+  recipientEmail: string,
+  subject: string,
+): string | undefined {
   const aliasMatch = recipientEmail.match(/^([^+@]+)\+([^@]+)@/);
-  if (aliasMatch && aliasMatch[2]) {
+  if (aliasMatch?.[2]) {
     return aliasMatch[2].trim();
   }
 
   const subjectTagMatch = subject.match(/\[([^\]]+)\]/);
-  if (subjectTagMatch && subjectTagMatch[1]) {
+  if (subjectTagMatch?.[1]) {
     return subjectTagMatch[1].trim();
   }
 
@@ -127,7 +137,10 @@ function determineSenderFlag(
   const normalizedFrom = fromEmail?.toLowerCase() || null;
   const normalizedEnvelope = envelopeSender.toLowerCase();
 
-  if (normalizedReplyTo !== normalizedFrom && normalizedReplyTo !== normalizedEnvelope) {
+  if (
+    normalizedReplyTo !== normalizedFrom &&
+    normalizedReplyTo !== normalizedEnvelope
+  ) {
     return "replyToDiffers";
   }
 
@@ -147,7 +160,9 @@ export function adaptStalwartHookToMessageInput(
   const fromHeader = getHeader(headers, "from");
   const envelopeSender = payload.envelope.from;
 
-  const replyToEmail = replyToHeader ? extractEmailFromHeader(replyToHeader) : null;
+  const replyToEmail = replyToHeader
+    ? extractEmailFromHeader(replyToHeader)
+    : null;
   const fromEmail = fromHeader ? extractEmailFromHeader(fromHeader) : null;
 
   let senderEmail: string;
@@ -181,13 +196,19 @@ export function adaptStalwartHookToMessageInput(
 
   const { htmlContent, textContent } = extractBody(payload);
 
-  const externalId = payload.messageId || `stalwart-${Date.now()}-${Math.random().toString(36).substring(7)}`;
+  const externalId =
+    payload.messageId ||
+    `stalwart-${Date.now()}-${Math.random().toString(36).substring(7)}`;
 
   const timestamp = payload.timestamp
     ? new Date(payload.timestamp * 1000).toISOString()
     : new Date().toISOString();
 
-  const senderFlag = determineSenderFlag(replyToEmail, fromEmail, envelopeSender);
+  const senderFlag = determineSenderFlag(
+    replyToEmail,
+    fromEmail,
+    envelopeSender,
+  );
 
   const campaignHint = extractCampaignHint(recipientEmail, subject);
 
@@ -285,7 +306,8 @@ export async function processStalwartHook(
   ai: Ai,
   payload: StalwartHookPayload,
 ): Promise<StalwartProcessingResult> {
-  const { messageInput, senderFlag, isReply } = adaptStalwartHookToMessageInput(payload);
+  const { messageInput, senderFlag, isReply } =
+    adaptStalwartHookToMessageInput(payload);
 
   const result = await processMessage(db, ai, messageInput);
 

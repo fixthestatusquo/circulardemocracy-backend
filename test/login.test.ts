@@ -1,6 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import app from "../src/index"; // We test the main app
-import { Hono } from "hono";
 
 // Mock the embedding service to avoid ONNX runtime errors
 vi.mock("../src/embedding_service", () => ({
@@ -58,7 +57,7 @@ describe("Login API", () => {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "Authorization": "Bearer test-api-key"
+        Authorization: "Bearer test-api-key",
       },
       body: JSON.stringify(loginCredentials),
     });
@@ -88,7 +87,7 @@ describe("Login API", () => {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "Authorization": "Bearer test-api-key"
+        Authorization: "Bearer test-api-key",
       },
       body: JSON.stringify(loginCredentials),
     });

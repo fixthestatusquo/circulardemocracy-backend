@@ -1,10 +1,10 @@
 import {
-  describe,
-  it,
-  expect,
-  vi,
   beforeEach,
+  describe,
+  expect,
+  it,
   type MockedFunction,
+  vi,
 } from "vitest";
 import { DatabaseClient, type MessageInsert } from "../src/database";
 
@@ -55,7 +55,7 @@ describe("Privacy-First Message Storage", () => {
       } as any;
 
       await expect(db.insertMessage(invalidPayload)).rejects.toThrow(
-        "Privacy violation: Cannot store PII in database. Found forbidden fields: sender_email"
+        "Privacy violation: Cannot store PII in database. Found forbidden fields: sender_email",
       );
     });
 
@@ -77,7 +77,7 @@ describe("Privacy-First Message Storage", () => {
       } as any;
 
       await expect(db.insertMessage(invalidPayload)).rejects.toThrow(
-        "Privacy violation: Cannot store PII in database. Found forbidden fields: sender_name"
+        "Privacy violation: Cannot store PII in database. Found forbidden fields: sender_name",
       );
     });
 
@@ -99,7 +99,7 @@ describe("Privacy-First Message Storage", () => {
       } as any;
 
       await expect(db.insertMessage(invalidPayload)).rejects.toThrow(
-        "Privacy violation: Cannot store PII in database. Found forbidden fields: message"
+        "Privacy violation: Cannot store PII in database. Found forbidden fields: message",
       );
     });
 
@@ -121,7 +121,7 @@ describe("Privacy-First Message Storage", () => {
       } as any;
 
       await expect(db.insertMessage(invalidPayload)).rejects.toThrow(
-        "Privacy violation: Cannot store PII in database. Found forbidden fields: subject"
+        "Privacy violation: Cannot store PII in database. Found forbidden fields: subject",
       );
     });
 
@@ -143,7 +143,7 @@ describe("Privacy-First Message Storage", () => {
       } as any;
 
       await expect(db.insertMessage(invalidPayload)).rejects.toThrow(
-        "Privacy violation: Cannot store PII in database. Found forbidden fields: text_content"
+        "Privacy violation: Cannot store PII in database. Found forbidden fields: text_content",
       );
     });
 
@@ -165,7 +165,7 @@ describe("Privacy-First Message Storage", () => {
       } as any;
 
       await expect(db.insertMessage(invalidPayload)).rejects.toThrow(
-        "Privacy violation: Cannot store PII in database. Found forbidden fields: html_content"
+        "Privacy violation: Cannot store PII in database. Found forbidden fields: html_content",
       );
     });
 
@@ -190,11 +190,11 @@ describe("Privacy-First Message Storage", () => {
       } as any;
 
       await expect(db.insertMessage(invalidPayload)).rejects.toThrow(
-        "Privacy violation: Cannot store PII in database"
+        "Privacy violation: Cannot store PII in database",
       );
 
       await expect(db.insertMessage(invalidPayload)).rejects.toThrow(
-        /sender_email.*sender_name.*message.*subject/
+        /sender_email.*sender_name.*message.*subject/,
       );
     });
 
@@ -216,9 +216,7 @@ describe("Privacy-First Message Storage", () => {
         stalwart_account_id: "politician@example.com",
       };
 
-      mockFetch.mockResolvedValueOnce(
-        createMockResponse([{ id: 1 }])
-      );
+      mockFetch.mockResolvedValueOnce(createMockResponse([{ id: 1 }]));
 
       const result = await db.insertMessage(validPayload);
       expect(result).toBe(1);
@@ -242,9 +240,7 @@ describe("Privacy-First Message Storage", () => {
         stalwart_account_id: undefined,
       };
 
-      mockFetch.mockResolvedValueOnce(
-        createMockResponse([{ id: 2 }])
-      );
+      mockFetch.mockResolvedValueOnce(createMockResponse([{ id: 2 }]));
 
       const result = await db.insertMessage(validPayload);
       expect(result).toBe(2);
@@ -272,9 +268,7 @@ describe("Privacy-First Message Storage", () => {
         stalwart_account_id: "politician@gov.com",
       };
 
-      mockFetch.mockResolvedValueOnce(
-        createMockResponse([{ id: 100 }])
-      );
+      mockFetch.mockResolvedValueOnce(createMockResponse([{ id: 100 }]));
 
       await db.insertMessage(metadataPayload);
 
@@ -317,9 +311,7 @@ describe("Privacy-First Message Storage", () => {
         stalwart_account_id: undefined,
       };
 
-      mockFetch.mockResolvedValueOnce(
-        createMockResponse([{ id: 200 }])
-      );
+      mockFetch.mockResolvedValueOnce(createMockResponse([{ id: 200 }]));
 
       await db.insertMessage(apiPayload);
 
@@ -360,7 +352,11 @@ describe("Privacy-First Message Storage", () => {
         },
       } as unknown as Response);
 
-      const rank = await db.getDuplicateRank(senderHash, politicianId, campaignId);
+      const rank = await db.getDuplicateRank(
+        senderHash,
+        politicianId,
+        campaignId,
+      );
 
       expect(rank).toBe(3);
       expect(mockFetch).toHaveBeenCalledTimes(1);
@@ -392,7 +388,11 @@ describe("Privacy-First Message Storage", () => {
         },
       } as unknown as Response);
 
-      const rank = await db.getDuplicateRank(senderHash, politicianId, campaignId);
+      const rank = await db.getDuplicateRank(
+        senderHash,
+        politicianId,
+        campaignId,
+      );
 
       expect(rank).toBe(0);
     });
@@ -412,7 +412,7 @@ describe("Privacy-First Message Storage", () => {
             status: "active",
             distance: 0.05, // Within 0.1 threshold, confidence = 1 - 0.05 = 0.95
           },
-        ])
+        ]),
       );
 
       // Mock the updateMessageFields method to avoid Supabase issues

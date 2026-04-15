@@ -1,11 +1,15 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mock the embedding service to avoid ONNX runtime issues
 vi.mock("../src/embedding_service", () => ({
   generateEmbedding: vi.fn().mockResolvedValue(new Array(1024).fill(0.1)),
-  formatEmailContentForEmbedding: vi.fn().mockReturnValue("# Test Subject\n\nTest message body"),
+  formatEmailContentForEmbedding: vi
+    .fn()
+    .mockReturnValue("# Test Subject\n\nTest message body"),
 }));
 
+import type { DatabaseClient } from "../src/database";
+import { PoliticianNotFoundError } from "../src/message_processor";
 import {
   adaptStalwartHookToMessageInput,
   mapToStalwartResponse,
@@ -13,8 +17,6 @@ import {
   type StalwartHookPayload,
   type StalwartProcessingResult,
 } from "../src/stalwart_adapter";
-import { PoliticianNotFoundError } from "../src/message_processor";
-import type { DatabaseClient } from "../src/database";
 
 const mockDb = {
   getMessageByExternalId: vi.fn(),
@@ -52,11 +54,13 @@ vi.mock("../src/database", () => ({
       name: "Test Politician",
     }),
     findCampaignByHint: vi.fn().mockResolvedValue(null),
-    findSimilarCampaigns: vi.fn().mockResolvedValue([{
-      id: 5,
-      name: "Climate Action",
-      distance: 0.05,
-    }]),
+    findSimilarCampaigns: vi.fn().mockResolvedValue([
+      {
+        id: 5,
+        name: "Climate Action",
+        distance: 0.05,
+      },
+    ]),
     getDuplicateRank: vi.fn().mockResolvedValue(0),
     insertMessage: vi.fn().mockResolvedValue(100),
     assignMessageToCluster: vi.fn().mockResolvedValue(1),
@@ -164,7 +168,9 @@ describe("Stalwart Webhook", () => {
 
       const result = adaptStalwartHookToMessageInput(payload);
 
-      expect(result.messageInput.html_content).toBe("<p>HTML <strong>version</strong> with <em>formatting</em></p>");
+      expect(result.messageInput.html_content).toBe(
+        "<p>HTML <strong>version</strong> with <em>formatting</em></p>",
+      );
       expect(result.messageInput.text_content).toBe("Plain text version");
       expect(result.messageInput.message).toBe("Plain text version");
     });
@@ -210,7 +216,9 @@ describe("Stalwart Webhook", () => {
 
       const result = adaptStalwartHookToMessageInput(payload);
 
-      expect(result.messageInput.html_content).toBe('<a href="https://example.com">Click here</a>');
+      expect(result.messageInput.html_content).toBe(
+        '<a href="https://example.com">Click here</a>',
+      );
       expect(result.messageInput.message).toBe("");
     });
 
@@ -254,7 +262,9 @@ describe("Stalwart Webhook", () => {
 
       const result = adaptStalwartHookToMessageInput(payload);
 
-      expect(result.messageInput.external_id).toMatch(/^stalwart-\d+-[a-z0-9]+$/);
+      expect(result.messageInput.external_id).toMatch(
+        /^stalwart-\d+-[a-z0-9]+$/,
+      );
     });
 
     it("should generate timestamp when not provided", () => {
@@ -273,7 +283,9 @@ describe("Stalwart Webhook", () => {
 
       const result = adaptStalwartHookToMessageInput(payload);
 
-      expect(result.messageInput.timestamp).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
+      expect(result.messageInput.timestamp).toMatch(
+        /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/,
+      );
     });
 
     it("should handle empty body gracefully", () => {
@@ -616,7 +628,9 @@ describe("Stalwart Webhook", () => {
       const result = adaptStalwartHookToMessageInput(payload);
 
       expect(result.messageInput.campaign_hint).toBe("climate");
-      expect(result.messageInput.recipient_email).toBe("politician+climate@gov.com");
+      expect(result.messageInput.recipient_email).toBe(
+        "politician+climate@gov.com",
+      );
     });
   });
 
@@ -682,7 +696,9 @@ describe("Stalwart Webhook", () => {
       const response = mapToStalwartResponse(result);
 
       expect(response.action).toBe("accept");
-      expect(response.modifications?.folder).toBe("Healthcare Reform/Duplicates");
+      expect(response.modifications?.folder).toBe(
+        "Healthcare Reform/Duplicates",
+      );
     });
 
     it("should map error to accept without folder (fail-open)", () => {
@@ -771,13 +787,15 @@ describe("Stalwart Webhook", () => {
       } as any);
       vi.spyOn(mockAi, "run").mockResolvedValue({ data: [[0.1, 0.2, 0.3]] });
       vi.spyOn(mockDb, "findCampaignByHint").mockResolvedValue(null);
-      vi.spyOn(mockDb, "findSimilarCampaigns").mockResolvedValue([{
-        id: 5,
-        name: "Climate Action",
-        slug: "climate-action",
-        status: "active",
-        distance: 0.05,
-      }]);
+      vi.spyOn(mockDb, "findSimilarCampaigns").mockResolvedValue([
+        {
+          id: 5,
+          name: "Climate Action",
+          slug: "climate-action",
+          status: "active",
+          distance: 0.05,
+        },
+      ]);
       vi.spyOn(mockDb, "classifyAndAssignToCluster").mockResolvedValue({
         campaign_id: 5,
         campaign_name: "Climate Action",
@@ -946,13 +964,15 @@ describe("Stalwart Webhook", () => {
       } as any);
       vi.spyOn(mockAi, "run").mockResolvedValue({ data: [[0.1, 0.2]] });
       vi.spyOn(mockDb, "findCampaignByHint").mockResolvedValue(null);
-      vi.spyOn(mockDb, "findSimilarCampaigns").mockResolvedValue([{
-        id: 5,
-        name: "Climate Action",
-        slug: "climate-action",
-        status: "active",
-        distance: 0.05,
-      }]);
+      vi.spyOn(mockDb, "findSimilarCampaigns").mockResolvedValue([
+        {
+          id: 5,
+          name: "Climate Action",
+          slug: "climate-action",
+          status: "active",
+          distance: 0.05,
+        },
+      ]);
       vi.spyOn(mockDb, "classifyAndAssignToCluster").mockResolvedValue({
         campaign_id: 5,
         campaign_name: "Climate Action",

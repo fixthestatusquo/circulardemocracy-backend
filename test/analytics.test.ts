@@ -1,11 +1,12 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import app from "../src/api";
-import { DatabaseClient } from "../src/database";
 
 // Mock the embedding service to avoid ONNX runtime errors
 vi.mock("../src/embedding_service", () => ({
   generateEmbedding: vi.fn().mockResolvedValue(new Array(1024).fill(0.1)),
-  formatEmailContentForEmbedding: vi.fn().mockReturnValue("# Test Subject\n\nTest message body"),
+  formatEmailContentForEmbedding: vi
+    .fn()
+    .mockReturnValue("# Test Subject\n\nTest message body"),
 }));
 
 // --- Create a singleton mock instance ---
@@ -99,7 +100,9 @@ describe("Analytics API Integration", () => {
       },
     ];
 
-    mockDbInstance.getMessageAnalyticsDaily.mockResolvedValue(mockDailyAnalytics);
+    mockDbInstance.getMessageAnalyticsDaily.mockResolvedValue(
+      mockDailyAnalytics,
+    );
 
     const req = new Request("http://localhost/api/v1/messages/analytics", {
       method: "GET",
@@ -111,7 +114,7 @@ describe("Analytics API Integration", () => {
     const res = await app.fetch(req, env);
     expect(res.status).toBe(200);
     const body = await res.json();
-    // @ts-ignore
+    // @ts-expect-error
     expect(body.analytics).toEqual(mockDailyAnalytics);
     expect(mockDbInstance.getMessageAnalyticsDaily).toHaveBeenCalledWith(7);
   });
@@ -133,19 +136,24 @@ describe("Analytics API Integration", () => {
       },
     ];
 
-    mockDbInstance.getMessageAnalyticsDaily.mockResolvedValue(mockDailyAnalytics);
+    mockDbInstance.getMessageAnalyticsDaily.mockResolvedValue(
+      mockDailyAnalytics,
+    );
 
-    const req = new Request("http://localhost/api/v1/messages/analytics?days=14", {
-      method: "GET",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: "Bearer test-token",
+    const req = new Request(
+      "http://localhost/api/v1/messages/analytics?days=14",
+      {
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: "Bearer test-token",
+        },
       },
-    });
+    );
     const res = await app.fetch(req, env);
     expect(res.status).toBe(200);
     const body = await res.json();
-    // @ts-ignore
+    // @ts-expect-error
     expect(body.analytics).toEqual(mockDailyAnalytics);
     expect(mockDbInstance.getMessageAnalyticsDaily).toHaveBeenCalledWith(14);
   });
@@ -169,7 +177,7 @@ describe("Analytics API Integration", () => {
     const res = await app.fetch(req, env);
     expect(res.status).toBe(200);
     const body = await res.json();
-    // @ts-ignore
+    // @ts-expect-error
     expect(body.analytics).toEqual([]);
   });
 
@@ -194,9 +202,9 @@ describe("Analytics API Integration", () => {
     const res = await app.fetch(req, env);
     expect(res.status).toBe(500);
     const body = await res.json();
-    // @ts-ignore
+    // @ts-expect-error
     expect(body.success).toBe(false);
-    // @ts-ignore
+    // @ts-expect-error
     expect(body.error).toBe("Failed to fetch message analytics");
   });
 
@@ -207,13 +215,16 @@ describe("Analytics API Integration", () => {
       error: null,
     });
 
-    const req = new Request("http://localhost/api/v1/messages/analytics?days=invalid", {
-      method: "GET",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: "Bearer test-token",
+    const req = new Request(
+      "http://localhost/api/v1/messages/analytics?days=invalid",
+      {
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: "Bearer test-token",
+        },
       },
-    });
+    );
     const res = await app.fetch(req, env);
     expect(res.status).toBe(400);
   });

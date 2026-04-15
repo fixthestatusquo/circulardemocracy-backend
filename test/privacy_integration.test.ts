@@ -1,19 +1,25 @@
 import {
-  describe,
-  it,
-  expect,
-  vi,
   beforeEach,
+  describe,
+  expect,
+  it,
   type MockedFunction,
+  vi,
 } from "vitest";
 import { DatabaseClient } from "../src/database";
-import { processMessage, type Ai, type MessageInput } from "../src/message_processor";
+import {
+  type Ai,
+  type MessageInput,
+  processMessage,
+} from "../src/message_processor";
 import { restoreConsole } from "./setup";
 
 // Mock the embedding service to avoid ONNX runtime issues
 vi.mock("../src/embedding_service", () => ({
   generateEmbedding: vi.fn().mockResolvedValue(new Array(1024).fill(0.1)),
-  formatEmailContentForEmbedding: vi.fn().mockReturnValue("# Test Subject\n\nTest message body"),
+  formatEmailContentForEmbedding: vi
+    .fn()
+    .mockReturnValue("# Test Subject\n\nTest message body"),
 }));
 
 global.fetch = vi.fn();
@@ -69,7 +75,14 @@ describe("Privacy-First Integration Tests", () => {
 
       // Mock politician lookup
       mockFetch.mockResolvedValueOnce(
-        createMockResponse([{ id: 1, name: "Politician", email: "politician@gov.com", active: true }])
+        createMockResponse([
+          {
+            id: 1,
+            name: "Politician",
+            email: "politician@gov.com",
+            active: true,
+          },
+        ]),
       );
 
       // Mock duplicate check - message already exists
@@ -82,7 +95,7 @@ describe("Privacy-First Integration Tests", () => {
             duplicate_rank: 0,
             campaigns: { id: 5, name: "Existing Campaign" },
           },
-        ])
+        ]),
       );
 
       const result = await processMessage(db, mockAi, messageInput);
@@ -233,7 +246,7 @@ describe("Privacy-First Integration Tests", () => {
       } as any;
 
       await expect(db.insertMessage(invalidPayload)).rejects.toThrow(
-        "Privacy violation"
+        "Privacy violation",
       );
     });
 
@@ -289,7 +302,9 @@ describe("Privacy-First Integration Tests", () => {
         headers: new Headers({ "content-range": "*/0" }),
         json: async () => [],
         text: async () => "[]",
-        clone: function () { return this; },
+        clone: function () {
+          return this;
+        },
       } as unknown as Response);
 
       const rank1 = await db.getDuplicateRank(senderHash, 1, 1);
@@ -302,7 +317,9 @@ describe("Privacy-First Integration Tests", () => {
         headers: new Headers({ "content-range": "0-0/1" }),
         json: async () => [{}],
         text: async () => "[{}]",
-        clone: function () { return this; },
+        clone: function () {
+          return this;
+        },
       } as unknown as Response);
 
       const rank2 = await db.getDuplicateRank(senderHash, 1, 1);
@@ -321,7 +338,7 @@ describe("Privacy-First Integration Tests", () => {
             status: "active",
             distance: 0.05,
           },
-        ])
+        ]),
       );
 
       // Mock clustering-related methods to avoid Supabase issues

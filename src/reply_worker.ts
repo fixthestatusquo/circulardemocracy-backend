@@ -2,8 +2,8 @@
 // Runs periodically to process pending and scheduled reply emails
 
 import type { DatabaseClient } from "./database";
-import { JMAPClient, type EmailMessage } from "./jmap_client";
 import { renderEmailLayout } from "./email_layout";
+import { type EmailMessage, JMAPClient } from "./jmap_client";
 
 export interface WorkerConfig {
   jmapApiUrl: string;
@@ -77,7 +77,8 @@ export async function processScheduledReplies(
         console.log(`[Reply Worker] ✓ Sent reply for message ${message.id}`);
       } catch (error) {
         result.failed++;
-        const errorMsg = error instanceof Error ? error.message : "Unknown error";
+        const errorMsg =
+          error instanceof Error ? error.message : "Unknown error";
         result.errors.push({
           message_id: message.id,
           error: errorMsg,
@@ -136,7 +137,7 @@ async function getMessagesReadyToSend(
     // - reply_scheduled_at is NULL (immediate) OR <= NOW (scheduled time reached)
     // - reply_sent_at is NULL (not already sent)
     // - reply_retry_count < MAX_RETRY_ATTEMPTS (haven't exceeded retry limit)
-    const { data, error } = await db["supabase"]
+    const { data, error } = await db.supabase
       .from("messages")
       .select(
         "id, external_id, politician_id, campaign_id, sender_hash, reply_status, reply_scheduled_at, received_at, reply_retry_count",
@@ -168,7 +169,7 @@ async function getMessageById(
   messageId: number,
 ): Promise<MessageToProcess | null> {
   try {
-    const { data, error } = await db["supabase"]
+    const { data, error } = await db.supabase
       .from("messages")
       .select(
         "id, external_id, politician_id, campaign_id, sender_hash, reply_status, reply_scheduled_at, received_at, reply_retry_count",
@@ -204,89 +205,70 @@ async function processSingleMessage(
   jmapClient: JMAPClient,
   message: MessageToProcess,
 ): Promise<void> {
-  try {
-    // 1. Get the active reply template for this campaign
-    const template = await db.getActiveTemplateForCampaign(
-      message.campaign_id,
-    );
+  // 1. Get the active reply template for this campaign
+  const template = await db.getActiveTemplateForCampaign(message.campaign_id);
 
-    if (!template) {
-      const errorMsg = `No active template found for campaign ${message.campaign_id}`;
-      await handleSendFailure(db, message, errorMsg);
-      throw new Error(errorMsg);
-    }
+  if (!template) {
+    const errorMsg = `No active template found for campaign ${message.campaign_id}`;
+    await handleSendFailure(db, message, errorMsg);
+    throw new Error(errorMsg);
+  }
 
-    // 2. Get politician details for sender/reply-to
-    const politician = await getPoliticianById(db, message.politician_id);
-    if (!politician) {
-      const errorMsg = `Politician ${message.politician_id} not found`;
-      await handleSendFailure(db, message, errorMsg);
-      throw new Error(errorMsg);
-    }
+  // 2. Get politician details for sender/reply-to
+  const politician = await getPoliticianById(db, message.politician_id);
+  if (!politician) {
+    const errorMsg = `Politician ${message.politician_id} not found`;
+    await handleSendFailure(db, message, errorMsg);
+    throw new Error(errorMsg);
+  }
 
-    // 3. Get original sender email from sender_emails table
-    const senderEmail = await db.getSenderEmailByMessageId(message.id);
-    if (!senderEmail) {
-      const errorMsg = `Sender email not found for message ${message.id}`;
-      await handleSendFailure(db, message, errorMsg);
-      throw new Error(errorMsg);
-    }
+  // 3. Get original sender email from sender_emails table
+  const senderEmail = await db.getSenderEmailByMessageId(message.id);
+  if (!senderEmail) {
+    const errorMsg = `Sender email not found for message ${message.id}`;
+    await handleSendFailure(db, message, errorMsg);
+    throw new Error(errorMsg);
+  }
 
-    // 4. Get campaign details for header and sender address
-    const campaign = await getCampaignById(db, message.campaign_id);
-    if (!campaign?.technical_email) {
-      const errorMsg = `Campaign technical email missing for campaign ${message.campaign_id}`;
-      await handleSendFailure(db, message, errorMsg);
-      throw new Error(errorMsg);
-    }
-    const sendContext = await buildSendContext(
-      db,
-      message,
-      senderEmail,
-      campaign.technical_email,
-    );
+  // 4. Get campaign details for header and sender address
+  const campaign = await getCampaignById(db, message.campaign_id);
+  if (!campaign?.technical_email) {
+    const errorMsg = `Campaign technical email missing for campaign ${message.campaign_id}`;
+    await handleSendFailure(db, message, errorMsg);
+    throw new Error(errorMsg);
+  }
+  const sendContext = await buildSendContext(
+    db,
+    message,
+    senderEmail,
+    campaign.technical_email,
+  );
 
-    // 5. Render email content based on layout type
-    const emailContent = renderEmailLayout({
-      subject: template.subject,
-      markdown_body: template.body,
-      layout_type: template.layout_type,
-      campaign_name: campaign?.name,
-      politician_name: politician.name,
-      politician_email: politician.email,
-    });
+  // 5. Render email content based on layout type
+  const emailContent = renderEmailLayout({
+    subject: template.subject,
+    markdown_body: template.body,
+    layout_type: template.layout_type,
+    campaign_name: campaign?.name,
+    politician_name: politician.name,
+    politician_email: politician.email,
+  });
 
-    // 6. Build email message
-    const email: EmailMessage = {
-      from: sendContext.senderAddress,
-      to: [senderEmail],
-      replyTo: campaign.reply_to_email || politician.email,
-      subject: emailContent.subject,
-      textBody: emailContent.textBody,
-      htmlBody: emailContent.htmlBody,
-    };
+  // 6. Build email message
+  const email: EmailMessage = {
+    from: sendContext.senderAddress,
+    to: [senderEmail],
+    replyTo: campaign.reply_to_email || politician.email,
+    subject: emailContent.subject,
+    textBody: emailContent.textBody,
+    htmlBody: emailContent.htmlBody,
+  };
 
-    // 7. Send via JMAP
-    const sendResult = await jmapClient.sendEmail(email);
+  // 7. Send via JMAP
+  const sendResult = await jmapClient.sendEmail(email);
 
-    if (!sendResult.success) {
-      const errorMsg = `JMAP send failed: ${sendResult.error}`;
-      await db.logEmailEvent({
-        message_id: message.id,
-        campaign_id: message.campaign_id,
-        politician_id: message.politician_id,
-        supporter_id: sendContext.supporterId,
-        sender_email: sendContext.senderAddress,
-        recipient_email: senderEmail,
-        subject: emailContent.subject,
-        status: "failed",
-        provider: "jmap",
-        error_message: errorMsg,
-      });
-      await handleSendFailure(db, message, errorMsg);
-      throw new Error(errorMsg);
-    }
-
+  if (!sendResult.success) {
+    const errorMsg = `JMAP send failed: ${sendResult.error}`;
     await db.logEmailEvent({
       message_id: message.id,
       campaign_id: message.campaign_id,
@@ -295,17 +277,29 @@ async function processSingleMessage(
       sender_email: sendContext.senderAddress,
       recipient_email: senderEmail,
       subject: emailContent.subject,
-      status: "sent",
+      status: "failed",
       provider: "jmap",
-      provider_message_id: sendResult.messageId,
+      error_message: errorMsg,
     });
-
-    // 8. Update message status
-    await markMessageAsSent(db, message.id);
-  } catch (error) {
-    // Re-throw to be caught by the main worker loop
-    throw error;
+    await handleSendFailure(db, message, errorMsg);
+    throw new Error(errorMsg);
   }
+
+  await db.logEmailEvent({
+    message_id: message.id,
+    campaign_id: message.campaign_id,
+    politician_id: message.politician_id,
+    supporter_id: sendContext.supporterId,
+    sender_email: sendContext.senderAddress,
+    recipient_email: senderEmail,
+    subject: emailContent.subject,
+    status: "sent",
+    provider: "jmap",
+    provider_message_id: sendResult.messageId,
+  });
+
+  // 8. Update message status
+  await markMessageAsSent(db, message.id);
 }
 
 /**
@@ -368,17 +362,14 @@ async function buildSendContext(
 async function getCampaignById(
   db: DatabaseClient,
   campaignId: number,
-): Promise<
-  | {
-    id: number;
-    name: string;
-    technical_email: string | null;
-    reply_to_email: string | null;
-  }
-  | null
-> {
+): Promise<{
+  id: number;
+  name: string;
+  technical_email: string | null;
+  reply_to_email: string | null;
+} | null> {
   try {
-    const { data, error } = await db["supabase"]
+    const { data, error } = await db.supabase
       .from("campaigns")
       .select("id, name, technical_email, reply_to_email")
       .eq("id", campaignId)
@@ -403,7 +394,7 @@ async function getPoliticianById(
   politicianId: number,
 ): Promise<{ id: number; email: string; name: string } | null> {
   try {
-    const { data, error } = await db["supabase"]
+    const { data, error } = await db.supabase
       .from("politicians")
       .select("id, email, name")
       .eq("id", politicianId)
@@ -428,7 +419,7 @@ async function markMessageAsSent(
   messageId: number,
 ): Promise<void> {
   try {
-    const { error } = await db["supabase"]
+    const { error } = await db.supabase
       .from("messages")
       .update({
         reply_status: "sent",

@@ -1,16 +1,14 @@
 import { OpenAPIHono } from "@hono/zod-openapi";
-import { apiKeyAuthMiddleware } from "./auth_middleware";
-import { DatabaseClient } from "./database";
-import type { Ai } from "./message_processor";
-import { processScheduledReplies, type WorkerConfig } from "./reply_worker";
-
 import analyticsApp from "./analytics";
 import campaignsApp from "./campaigns";
+import { DatabaseClient } from "./database";
 import loginApp from "./login";
+import type { Ai } from "./message_processor";
 // Import modular route handlers
 import messagesApp from "./messages";
 import politiciansApp from "./politicians";
 import replyTemplatesApp from "./reply_templates";
+import { processScheduledReplies, type WorkerConfig } from "./reply_worker";
 
 // Define types for env and app
 interface Env {
@@ -35,7 +33,7 @@ app.use("/api/*", async (c, next) => {
     "db",
     new DatabaseClient({
       url: process.env.SUPABASE_URL || c.env.SUPABASE_URL,
-      key: process.env.SUPABASE_KEY || c.env.SUPABASE_KEY
+      key: process.env.SUPABASE_KEY || c.env.SUPABASE_KEY,
     }),
   );
   await next();
@@ -116,9 +114,7 @@ app.get("/api/v1/worker/health", (c) => {
  * Handles scheduled events from Cloudflare Cron Triggers
  * This is exported and used in index.ts
  */
-export async function handleScheduledEvent(
-  env: Env,
-): Promise<void> {
+export async function handleScheduledEvent(env: Env): Promise<void> {
   console.log("[Reply Worker] Scheduled event triggered");
 
   try {

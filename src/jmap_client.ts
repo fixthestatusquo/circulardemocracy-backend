@@ -88,7 +88,9 @@ export class JMAPClient {
 
       if (!response.ok) {
         const errorText = await response.text();
-        throw new Error(`JMAP request failed: ${response.status} - ${errorText}`);
+        throw new Error(
+          `JMAP request failed: ${response.status} - ${errorText}`,
+        );
       }
 
       const result = await response.json();
@@ -100,13 +102,13 @@ export class JMAPClient {
 
         if (emailSetResponse[0] === "Email/set") {
           const created = emailSetResponse[1].created;
-          if (created && created.draft) {
+          if (created?.draft) {
             const messageId = created.draft.id;
 
             // Check submission success
             if (submissionResponse[0] === "EmailSubmission/set") {
               const submissionCreated = submissionResponse[1].created;
-              if (submissionCreated && submissionCreated.submission) {
+              if (submissionCreated?.submission) {
                 return {
                   success: true,
                   messageId: messageId,
@@ -121,7 +123,9 @@ export class JMAPClient {
         if (notCreated) {
           const errorKey = Object.keys(notCreated)[0];
           const error = notCreated[errorKey];
-          throw new Error(`JMAP Email/set failed: ${error.type} - ${error.description}`);
+          throw new Error(
+            `JMAP Email/set failed: ${error.type} - ${error.description}`,
+          );
         }
       }
 

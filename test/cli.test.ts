@@ -1,9 +1,11 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mock the embedding service to avoid ONNX runtime issues
 vi.mock("../src/embedding_service", () => ({
   generateEmbedding: vi.fn().mockResolvedValue(new Array(1024).fill(0.1)),
-  formatEmailContentForEmbedding: vi.fn().mockReturnValue("# Test Subject\n\nTest message body"),
+  formatEmailContentForEmbedding: vi
+    .fn()
+    .mockReturnValue("# Test Subject\n\nTest message body"),
 }));
 
 describe("CLI Argument Parsing", () => {
@@ -13,10 +15,12 @@ describe("CLI Argument Parsing", () => {
 
   beforeEach(() => {
     originalArgv = process.argv;
-    consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => { });
-    processExitSpy = vi.spyOn(process, "exit").mockImplementation((code?: any) => {
-      throw new Error(`process.exit(${code})`);
-    });
+    consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    processExitSpy = vi
+      .spyOn(process, "exit")
+      .mockImplementation((code?: any) => {
+        throw new Error(`process.exit(${code})`);
+      });
   });
 
   afterEach(() => {
@@ -30,13 +34,20 @@ describe("CLI Argument Parsing", () => {
       process.argv = [
         "node",
         "mail.ts",
-        "--message-id", "msg-123",
-        "--sender-name", "John Doe",
-        "--sender-email", "john@example.com",
-        "--recipient-email", "politician@example.com",
-        "--subject", "Test Subject",
-        "--message", "This is a test message with enough content",
-        "--timestamp", "2024-03-15T10:30:00Z",
+        "--message-id",
+        "msg-123",
+        "--sender-name",
+        "John Doe",
+        "--sender-email",
+        "john@example.com",
+        "--recipient-email",
+        "politician@example.com",
+        "--subject",
+        "Test Subject",
+        "--message",
+        "This is a test message with enough content",
+        "--timestamp",
+        "2024-03-15T10:30:00Z",
       ];
 
       const { parseArgs } = await import("../bin/mail.js");
@@ -58,14 +69,22 @@ describe("CLI Argument Parsing", () => {
       process.argv = [
         "node",
         "mail.ts",
-        "--message-id", "msg-456",
-        "--sender-name", "Jane Doe",
-        "--sender-email", "jane@example.com",
-        "--recipient-email", "politician@example.com",
-        "--subject", "Climate Action",
-        "--message", "We need action on climate change now",
-        "--timestamp", "2024-03-15T10:30:00Z",
-        "--campaign-name", "Climate Initiative",
+        "--message-id",
+        "msg-456",
+        "--sender-name",
+        "Jane Doe",
+        "--sender-email",
+        "jane@example.com",
+        "--recipient-email",
+        "politician@example.com",
+        "--subject",
+        "Climate Action",
+        "--message",
+        "We need action on climate change now",
+        "--timestamp",
+        "2024-03-15T10:30:00Z",
+        "--campaign-name",
+        "Climate Initiative",
       ];
 
       const { parseArgs } = await import("../bin/mail.js");
@@ -88,14 +107,22 @@ describe("CLI Argument Parsing", () => {
       process.argv = [
         "node",
         "mail.ts",
-        "--message-id", "msg-789",
-        "--sender-name", "Test User",
-        "--sender-email", "test@example.com",
-        "--recipient-email", "politician@example.com",
-        "--subject", "Test",
-        "--message", "Test message content here",
-        "--timestamp", "2024-03-15T10:30:00Z",
-        "--channel-source", "custom-source",
+        "--message-id",
+        "msg-789",
+        "--sender-name",
+        "Test User",
+        "--sender-email",
+        "test@example.com",
+        "--recipient-email",
+        "politician@example.com",
+        "--subject",
+        "Test",
+        "--message",
+        "Test message content here",
+        "--timestamp",
+        "2024-03-15T10:30:00Z",
+        "--channel-source",
+        "custom-source",
       ];
 
       const { parseArgs } = await import("../bin/mail.js");
@@ -135,13 +162,20 @@ describe("CLI Argument Parsing", () => {
       process.argv = [
         "node",
         "mail.ts",
-        "--message-id", "msg-123",
-        "--sender-name", "John Doe",
-        "--sender-email", "invalid-email",
-        "--recipient-email", "politician@example.com",
-        "--subject", "Test",
-        "--message", "Test message content",
-        "--timestamp", "2024-03-15T10:30:00Z",
+        "--message-id",
+        "msg-123",
+        "--sender-name",
+        "John Doe",
+        "--sender-email",
+        "invalid-email",
+        "--recipient-email",
+        "politician@example.com",
+        "--subject",
+        "Test",
+        "--message",
+        "Test message content",
+        "--timestamp",
+        "2024-03-15T10:30:00Z",
       ];
 
       const { parseArgs } = await import("../bin/mail.js");
@@ -154,13 +188,20 @@ describe("CLI Argument Parsing", () => {
       process.argv = [
         "node",
         "mail.ts",
-        "--message-id", "msg-123",
-        "--sender-name", "John Doe",
-        "--sender-email", "john@example.com",
-        "--recipient-email", "politician@example.com",
-        "--subject", "Test",
-        "--message", "Short",
-        "--timestamp", "2024-03-15T10:30:00Z",
+        "--message-id",
+        "msg-123",
+        "--sender-name",
+        "John Doe",
+        "--sender-email",
+        "john@example.com",
+        "--recipient-email",
+        "politician@example.com",
+        "--subject",
+        "Test",
+        "--message",
+        "Short",
+        "--timestamp",
+        "2024-03-15T10:30:00Z",
       ];
 
       const { parseArgs } = await import("../bin/mail.js");
@@ -173,13 +214,20 @@ describe("CLI Argument Parsing", () => {
       process.argv = [
         "node",
         "mail.ts",
-        "--message-id", "msg-123",
-        "--sender-name", "John Doe",
-        "--sender-email", "john@example.com",
-        "--recipient-email", "politician@example.com",
-        "--subject", "Test",
-        "--message", "Test message content here",
-        "--timestamp", "invalid-date",
+        "--message-id",
+        "msg-123",
+        "--sender-name",
+        "John Doe",
+        "--sender-email",
+        "john@example.com",
+        "--recipient-email",
+        "politician@example.com",
+        "--subject",
+        "Test",
+        "--message",
+        "Test message content here",
+        "--timestamp",
+        "invalid-date",
       ];
 
       const { parseArgs } = await import("../bin/mail.js");
@@ -192,11 +240,16 @@ describe("CLI Argument Parsing", () => {
       process.argv = [
         "node",
         "mail.ts",
-        "--message-id", "msg-123",
-        "--sender-name", "John Doe",
-        "--subject", "Test",
-        "--message", "Test message content",
-        "--timestamp", "2024-03-15T10:30:00Z",
+        "--message-id",
+        "msg-123",
+        "--sender-name",
+        "John Doe",
+        "--subject",
+        "Test",
+        "--message",
+        "Test message content",
+        "--timestamp",
+        "2024-03-15T10:30:00Z",
       ];
 
       const { parseArgs } = await import("../bin/mail.js");
@@ -206,29 +259,25 @@ describe("CLI Argument Parsing", () => {
     });
 
     it("should exit with error for invalid argument format", async () => {
-      process.argv = [
-        "node",
-        "mail.ts",
-        "invalid-arg",
-      ];
+      process.argv = ["node", "mail.ts", "invalid-arg"];
 
       const { parseArgs } = await import("../bin/mail.js");
 
       expect(() => parseArgs()).toThrow("process.exit(1)");
-      expect(consoleErrorSpy).toHaveBeenCalledWith("Invalid argument format: invalid-arg");
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        "Invalid argument format: invalid-arg",
+      );
     });
 
     it("should exit with error for missing value", async () => {
-      process.argv = [
-        "node",
-        "mail.ts",
-        "--message-id",
-      ];
+      process.argv = ["node", "mail.ts", "--message-id"];
 
       const { parseArgs } = await import("../bin/mail.js");
 
       expect(() => parseArgs()).toThrow("process.exit(1)");
-      expect(consoleErrorSpy).toHaveBeenCalledWith("Missing value for argument: --message-id");
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        "Missing value for argument: --message-id",
+      );
     });
   });
 
@@ -242,7 +291,9 @@ describe("CLI Argument Parsing", () => {
 
         for (let i = 0; i < args.length; i++) {
           const flag = args[i];
-          if (!flag.startsWith("--")) continue;
+          if (!flag.startsWith("--")) {
+            continue;
+          }
           const key = flag.substring(2);
           if (booleanFlags.has(key)) {
             parsed[key] = true;
@@ -254,11 +305,16 @@ describe("CLI Argument Parsing", () => {
           }
         }
 
-        const processAll = parsed["process-all"] === true || (!parsed.since && !parsed["message-id"]);
+        const processAll =
+          parsed["process-all"] === true ||
+          (!parsed.since && !parsed["message-id"]);
         return {
           processAll,
           since: typeof parsed.since === "string" ? parsed.since : undefined,
-          messageId: typeof parsed["message-id"] === "string" ? parsed["message-id"] : undefined,
+          messageId:
+            typeof parsed["message-id"] === "string"
+              ? parsed["message-id"]
+              : undefined,
           dryRun: parsed["dry-run"] === true,
         };
       };
@@ -282,7 +338,9 @@ describe("CLI Argument Parsing", () => {
 
         for (let i = 0; i < args.length; i++) {
           const flag = args[i];
-          if (!flag.startsWith("--")) continue;
+          if (!flag.startsWith("--")) {
+            continue;
+          }
           const key = flag.substring(2);
           if (booleanFlags.has(key)) {
             parsed[key] = true;
@@ -294,11 +352,16 @@ describe("CLI Argument Parsing", () => {
           }
         }
 
-        const processAll = parsed["process-all"] === true || (!parsed.since && !parsed["message-id"]);
+        const processAll =
+          parsed["process-all"] === true ||
+          (!parsed.since && !parsed["message-id"]);
         return {
           processAll,
           since: typeof parsed.since === "string" ? parsed.since : undefined,
-          messageId: typeof parsed["message-id"] === "string" ? parsed["message-id"] : undefined,
+          messageId:
+            typeof parsed["message-id"] === "string"
+              ? parsed["message-id"]
+              : undefined,
           dryRun: parsed["dry-run"] === true,
         };
       };
@@ -322,7 +385,9 @@ describe("CLI Argument Parsing", () => {
 
         for (let i = 0; i < args.length; i++) {
           const flag = args[i];
-          if (!flag.startsWith("--")) continue;
+          if (!flag.startsWith("--")) {
+            continue;
+          }
           const key = flag.substring(2);
           if (booleanFlags.has(key)) {
             parsed[key] = true;
@@ -334,11 +399,16 @@ describe("CLI Argument Parsing", () => {
           }
         }
 
-        const processAll = parsed["process-all"] === true || (!parsed.since && !parsed["message-id"]);
+        const processAll =
+          parsed["process-all"] === true ||
+          (!parsed.since && !parsed["message-id"]);
         return {
           processAll,
           since: typeof parsed.since === "string" ? parsed.since : undefined,
-          messageId: typeof parsed["message-id"] === "string" ? parsed["message-id"] : undefined,
+          messageId:
+            typeof parsed["message-id"] === "string"
+              ? parsed["message-id"]
+              : undefined,
           dryRun: parsed["dry-run"] === true,
         };
       };
@@ -362,7 +432,9 @@ describe("CLI Argument Parsing", () => {
 
         for (let i = 0; i < args.length; i++) {
           const flag = args[i];
-          if (!flag.startsWith("--")) continue;
+          if (!flag.startsWith("--")) {
+            continue;
+          }
           const key = flag.substring(2);
           if (booleanFlags.has(key)) {
             parsed[key] = true;
@@ -374,11 +446,16 @@ describe("CLI Argument Parsing", () => {
           }
         }
 
-        const processAll = parsed["process-all"] === true || (!parsed.since && !parsed["message-id"]);
+        const processAll =
+          parsed["process-all"] === true ||
+          (!parsed.since && !parsed["message-id"]);
         return {
           processAll,
           since: typeof parsed.since === "string" ? parsed.since : undefined,
-          messageId: typeof parsed["message-id"] === "string" ? parsed["message-id"] : undefined,
+          messageId:
+            typeof parsed["message-id"] === "string"
+              ? parsed["message-id"]
+              : undefined,
           dryRun: parsed["dry-run"] === true,
         };
       };
@@ -402,7 +479,9 @@ describe("CLI Argument Parsing", () => {
 
         for (let i = 0; i < args.length; i++) {
           const flag = args[i];
-          if (!flag.startsWith("--")) continue;
+          if (!flag.startsWith("--")) {
+            continue;
+          }
           const key = flag.substring(2);
           if (booleanFlags.has(key)) {
             parsed[key] = true;
@@ -414,11 +493,16 @@ describe("CLI Argument Parsing", () => {
           }
         }
 
-        const processAll = parsed["process-all"] === true || (!parsed.since && !parsed["message-id"]);
+        const processAll =
+          parsed["process-all"] === true ||
+          (!parsed.since && !parsed["message-id"]);
         return {
           processAll,
           since: typeof parsed.since === "string" ? parsed.since : undefined,
-          messageId: typeof parsed["message-id"] === "string" ? parsed["message-id"] : undefined,
+          messageId:
+            typeof parsed["message-id"] === "string"
+              ? parsed["message-id"]
+              : undefined,
           dryRun: parsed["dry-run"] === true,
         };
       };
@@ -442,7 +526,9 @@ describe("CLI Argument Parsing", () => {
 
         for (let i = 0; i < args.length; i++) {
           const flag = args[i];
-          if (!flag.startsWith("--")) continue;
+          if (!flag.startsWith("--")) {
+            continue;
+          }
           const key = flag.substring(2);
           if (booleanFlags.has(key)) {
             parsed[key] = true;
@@ -454,11 +540,16 @@ describe("CLI Argument Parsing", () => {
           }
         }
 
-        const processAll = parsed["process-all"] === true || (!parsed.since && !parsed["message-id"]);
+        const processAll =
+          parsed["process-all"] === true ||
+          (!parsed.since && !parsed["message-id"]);
         return {
           processAll,
           since: typeof parsed.since === "string" ? parsed.since : undefined,
-          messageId: typeof parsed["message-id"] === "string" ? parsed["message-id"] : undefined,
+          messageId:
+            typeof parsed["message-id"] === "string"
+              ? parsed["message-id"]
+              : undefined,
           dryRun: parsed["dry-run"] === true,
         };
       };
@@ -476,7 +567,13 @@ describe("CLI Argument Parsing", () => {
 
   describe("jmap-fetch CLI - user and password parsing", () => {
     it("should parse --user and --password flags", () => {
-      const args = ["--user", "testuser", "--password", "testpass", "--process-all"];
+      const args = [
+        "--user",
+        "testuser",
+        "--password",
+        "testpass",
+        "--process-all",
+      ];
 
       const parsed: Record<string, string> = {};
       for (let i = 0; i < args.length; i++) {

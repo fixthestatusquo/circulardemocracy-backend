@@ -4,10 +4,21 @@ import { vi } from "vitest";
 Object.defineProperty(global, "crypto", {
   value: {
     subtle: {
-      importKey: async (_format: string, _keyData: BufferSource, _algorithm: any, _extractable: boolean, _keyUsages: string[]) => {
-        return { type: "secret", algorithm: { name: "HMAC" }, extractable: true, usages: ["sign", "verify"] } as unknown as CryptoKey;
+      importKey: async (
+        _format: string,
+        _keyData: BufferSource,
+        _algorithm: any,
+        _extractable: boolean,
+        _keyUsages: string[],
+      ) => {
+        return {
+          type: "secret",
+          algorithm: { name: "HMAC" },
+          extractable: true,
+          usages: ["sign", "verify"],
+        } as unknown as CryptoKey;
       },
-      digest: async (algorithm: string, data: BufferSource) => {
+      digest: async (_algorithm: string, data: BufferSource) => {
         // Simple mock for SHA-256 - in real tests you might want more accurate hashing
         const text = new TextDecoder().decode(data);
         const hash = text.split("").reduce((a, b) => {

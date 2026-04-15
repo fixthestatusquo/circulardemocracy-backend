@@ -1,12 +1,9 @@
+import { type DatabaseClient, hashEmail, type MessageInsert } from "./database";
 import {
-  type Campaign,
-  type DatabaseClient,
-  type MessageInsert,
-  type ReplyTemplate,
-  hashEmail,
-} from "./database";
+  formatEmailContentForEmbedding,
+  generateEmbedding,
+} from "./embedding_service";
 import { calculateReplySchedule } from "./scheduling";
-import { generateEmbedding, formatEmailContentForEmbedding } from "./embedding_service";
 
 export class PoliticianNotFoundError extends Error {
   constructor(email: string) {
@@ -76,9 +73,9 @@ export async function processMessage(
     let campaignName = "Unknown";
     let campaignId = existingMessage.campaign_id;
 
-    // @ts-ignore - Handle Supabase join result structure
+    // @ts-expect-error - Handle Supabase join result structure
     if (existingMessage.campaigns) {
-      // @ts-ignore
+      // @ts-expect-error
       const camp = Array.isArray(existingMessage.campaigns)
         ? existingMessage.campaigns[0]
         : existingMessage.campaigns;
@@ -165,7 +162,10 @@ export async function processMessage(
 
     if (activeTemplate) {
       replySchedule = calculateReplySchedule(
-        activeTemplate.send_timing as "immediate" | "office_hours" | "scheduled",
+        activeTemplate.send_timing as
+          | "immediate"
+          | "office_hours"
+          | "scheduled",
         activeTemplate.scheduled_for,
         data.timestamp,
       );

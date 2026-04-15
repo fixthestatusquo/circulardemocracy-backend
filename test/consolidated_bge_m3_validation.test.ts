@@ -1,6 +1,6 @@
 /**
  * Consolidated BGE-M3 Classification Validation Test
- * 
+ *
  * This test validates the BGE-M3 message classification system by:
  * - Testing message-to-message similarity across multiple languages using Proca endpoints
  * - Sending real messages through the API for classification testing
@@ -10,26 +10,39 @@
  * - Analyzing uncategorized message rates
  */
 
-import { describe, it, expect } from "vitest";
+import * as path from "node:path";
 import { createClient } from "@supabase/supabase-js";
-import { generateEmbedding, formatEmailContentForEmbedding } from "../src/embedding_service.js";
-import { DatabaseClient } from "../src/database.js";
 import * as dotenv from "dotenv";
-import * as path from "path";
+import { describe, expect, it } from "vitest";
+import { generateEmbedding } from "../src/embedding_service.js";
 
 // Load environment variables
 dotenv.config({ path: path.join(process.cwd(), ".env") });
 
 // Define 16 language codes to test
 const LANGUAGES = [
-  'en', 'fr', 'de', 'es', 'it', 'pt', 'nl', 'pl',
-  'cs', 'da', 'fi', 'hu', 'ro', 'sv', 'bg', 'hr'
+  "en",
+  "fr",
+  "de",
+  "es",
+  "it",
+  "pt",
+  "nl",
+  "pl",
+  "cs",
+  "da",
+  "fi",
+  "hu",
+  "ro",
+  "sv",
+  "bg",
+  "hr",
 ];
 
 // Proca endpoint base URLs
 const PROCA_BASE_URLS = [
-  'https://wages_not_jail_2025.proca.app/en',
-  'https://can_mercosur_2026.proca.app'
+  "https://wages_not_jail_2025.proca.app/en",
+  "https://can_mercosur_2026.proca.app",
 ];
 
 interface ProcaMessage {
@@ -93,7 +106,8 @@ const TEST_MESSAGES: TestMessage[] = [
     sender_name: "Sarah Johnson",
     sender_email: "sarah.j.test@example.com",
     subject: "Urgent Action Needed on Climate Crisis",
-    message: "Dear Representative, I am deeply concerned about the accelerating climate crisis. We need immediate action to reduce carbon emissions, transition to renewable energy, and protect our environment for future generations. The recent extreme weather events in our district demonstrate the urgency of this issue. Please support comprehensive climate legislation and reject fossil fuel subsidies.",
+    message:
+      "Dear Representative, I am deeply concerned about the accelerating climate crisis. We need immediate action to reduce carbon emissions, transition to renewable energy, and protect our environment for future generations. The recent extreme weather events in our district demonstrate the urgency of this issue. Please support comprehensive climate legislation and reject fossil fuel subsidies.",
   },
   {
     id: "climate-en-2",
@@ -103,7 +117,8 @@ const TEST_MESSAGES: TestMessage[] = [
     sender_name: "Michael Chen",
     sender_email: "m.chen.test@example.com",
     subject: "Support Clean Energy Transition",
-    message: "I'm writing to urge you to support clean energy initiatives. Solar and wind power are the future, and we must invest in green infrastructure now. Climate change is real and threatens our coastal communities. Please vote yes on renewable energy bills and carbon pricing mechanisms.",
+    message:
+      "I'm writing to urge you to support clean energy initiatives. Solar and wind power are the future, and we must invest in green infrastructure now. Climate change is real and threatens our coastal communities. Please vote yes on renewable energy bills and carbon pricing mechanisms.",
   },
 
   // Climate Change - French
@@ -115,7 +130,8 @@ const TEST_MESSAGES: TestMessage[] = [
     sender_name: "Marie Dubois",
     sender_email: "marie.d.test@example.com",
     subject: "Action climatique urgente nécessaire",
-    message: "Madame la Députée, je vous écris pour exprimer ma profonde inquiétude concernant le changement climatique. Nous devons agir maintenant pour réduire les émissions de gaz à effet de serre et investir dans les énergies renouvelables. L'avenir de nos enfants en dépend. Veuillez soutenir les politiques environnementales ambitieuses.",
+    message:
+      "Madame la Députée, je vous écris pour exprimer ma profonde inquiétude concernant le changement climatique. Nous devons agir maintenant pour réduire les émissions de gaz à effet de serre et investir dans les énergies renouvelables. L'avenir de nos enfants en dépend. Veuillez soutenir les politiques environnementales ambitieuses.",
   },
 
   // Climate Change - Spanish
@@ -127,7 +143,8 @@ const TEST_MESSAGES: TestMessage[] = [
     sender_name: "Carlos Rodriguez",
     sender_email: "carlos.r.test@example.com",
     subject: "Acción climática ahora",
-    message: "Estimado Representante, le escribo para pedirle que apoye políticas fuertes contra el cambio climático. Necesitamos energía limpia, protección de nuestros bosques y océanos, y reducción de emisiones de carbono. El futuro de nuestro planeta está en juego.",
+    message:
+      "Estimado Representante, le escribo para pedirle que apoye políticas fuertes contra el cambio climático. Necesitamos energía limpia, protección de nuestros bosques y océanos, y reducción de emisiones de carbono. El futuro de nuestro planeta está en juego.",
   },
 
   // Healthcare Reform
@@ -139,7 +156,8 @@ const TEST_MESSAGES: TestMessage[] = [
     sender_name: "Jennifer Williams",
     sender_email: "j.williams.test@example.com",
     subject: "Healthcare is a Human Right",
-    message: "Dear Senator, I am writing to advocate for universal healthcare coverage. Too many families in our community cannot afford basic medical care. We need Medicare for All, lower prescription drug prices, and protection for pre-existing conditions. Healthcare should be a right, not a privilege for the wealthy.",
+    message:
+      "Dear Senator, I am writing to advocate for universal healthcare coverage. Too many families in our community cannot afford basic medical care. We need Medicare for All, lower prescription drug prices, and protection for pre-existing conditions. Healthcare should be a right, not a privilege for the wealthy.",
   },
   {
     id: "healthcare-en-2",
@@ -149,7 +167,8 @@ const TEST_MESSAGES: TestMessage[] = [
     sender_name: "Robert Martinez",
     sender_email: "r.martinez.test@example.com",
     subject: "Lower Prescription Drug Costs",
-    message: "I'm a senior citizen struggling to afford my medications. Please support legislation to allow Medicare to negotiate drug prices and cap out-of-pocket costs for prescriptions. Many of us are choosing between medicine and food. This is unacceptable in a wealthy nation.",
+    message:
+      "I'm a senior citizen struggling to afford my medications. Please support legislation to allow Medicare to negotiate drug prices and cap out-of-pocket costs for prescriptions. Many of us are choosing between medicine and food. This is unacceptable in a wealthy nation.",
   },
 
   // Education Funding
@@ -161,7 +180,8 @@ const TEST_MESSAGES: TestMessage[] = [
     sender_name: "Lisa Thompson",
     sender_email: "l.thompson.test@example.com",
     subject: "Invest in Our Schools",
-    message: "Dear Representative, as a public school teacher, I see firsthand how underfunding hurts our students. We need smaller class sizes, better resources, higher teacher salaries, and universal pre-K. Please vote to increase education funding and oppose school privatization schemes.",
+    message:
+      "Dear Representative, as a public school teacher, I see firsthand how underfunding hurts our students. We need smaller class sizes, better resources, higher teacher salaries, and universal pre-K. Please vote to increase education funding and oppose school privatization schemes.",
   },
   {
     id: "education-en-2",
@@ -171,7 +191,8 @@ const TEST_MESSAGES: TestMessage[] = [
     sender_name: "David Kim",
     sender_email: "d.kim.test@example.com",
     subject: "Student Debt Relief Needed",
-    message: "I'm writing about the student debt crisis. Millions of young people are burdened with crushing loans that prevent them from buying homes or starting families. Please support student loan forgiveness and make public colleges tuition-free. Education is an investment in our future.",
+    message:
+      "I'm writing about the student debt crisis. Millions of young people are burdened with crushing loans that prevent them from buying homes or starting families. Please support student loan forgiveness and make public colleges tuition-free. Education is an investment in our future.",
   },
 
   // Mixed/Ambiguous Messages
@@ -182,7 +203,8 @@ const TEST_MESSAGES: TestMessage[] = [
     sender_name: "Amanda Brown",
     sender_email: "a.brown.test@example.com",
     subject: "Multiple Concerns from Your Constituent",
-    message: "Dear Senator, I have several concerns I'd like to share. First, we need action on climate change and renewable energy. Second, healthcare costs are too high and we need reform. Third, our schools are underfunded. Finally, infrastructure in our district is crumbling. Please address these critical issues.",
+    message:
+      "Dear Senator, I have several concerns I'd like to share. First, we need action on climate change and renewable energy. Second, healthcare costs are too high and we need reform. Third, our schools are underfunded. Finally, infrastructure in our district is crumbling. Please address these critical issues.",
   },
   {
     id: "mixed-2",
@@ -191,7 +213,8 @@ const TEST_MESSAGES: TestMessage[] = [
     sender_name: "James Wilson",
     sender_email: "j.wilson.test@example.com",
     subject: "Community Issues",
-    message: "I'm concerned about our community's future. We need better jobs, improved public transportation, and safer neighborhoods. Also, please support small businesses and local farmers. Thank you for your service.",
+    message:
+      "I'm concerned about our community's future. We need better jobs, improved public transportation, and safer neighborhoods. Also, please support small businesses and local farmers. Thank you for your service.",
   },
 
   // Edge Cases - Very Short
@@ -213,7 +236,8 @@ const TEST_MESSAGES: TestMessage[] = [
     sender_name: "Patricia Long",
     sender_email: "p.long.test@example.com",
     subject: "Comprehensive Policy Recommendations for Climate Action",
-    message: "Dear Representative, I am writing to provide detailed recommendations on climate policy. " +
+    message:
+      "Dear Representative, I am writing to provide detailed recommendations on climate policy. " +
       "First, we must transition to 100% renewable energy by 2035. This requires massive investment in solar, wind, and battery storage infrastructure. " +
       "Second, we need a carbon tax starting at $50 per ton and increasing annually. Revenue should fund clean energy rebates for low-income families. " +
       "Third, end all fossil fuel subsidies immediately and redirect those funds to green technology research and development. " +
@@ -238,7 +262,8 @@ const TEST_MESSAGES: TestMessage[] = [
     sender_name: "Generic Voter",
     sender_email: "voter.test@example.com",
     subject: "Thank you",
-    message: "Thank you for your service to our district. Keep up the good work representing us.",
+    message:
+      "Thank you for your service to our district. Keep up the good work representing us.",
   },
 ];
 
@@ -257,14 +282,16 @@ class ConsolidatedBGE_M3_Test {
 
     // Skip database tests if environment variables are not set
     if (!process.env.SUPABASE_URL || !process.env.SUPABASE_KEY) {
-      console.warn("⚠️  SUPABASE_URL and SUPABASE_KEY not set, skipping database tests");
+      console.warn(
+        "⚠️  SUPABASE_URL and SUPABASE_KEY not set, skipping database tests",
+      );
       this.skipDatabaseTests = true;
       return;
     }
 
     this.supabase = createClient(
       process.env.SUPABASE_URL,
-      process.env.SUPABASE_KEY
+      process.env.SUPABASE_KEY,
     );
   }
 
@@ -292,33 +319,34 @@ class ConsolidatedBGE_M3_Test {
       try {
         // Set a timeout for embedding generation (model download can be slow)
         const timeoutPromise = new Promise<never>((_, reject) => {
-          setTimeout(() => reject(new Error("Embedding generation timeout")), 30000);
+          setTimeout(
+            () => reject(new Error("Embedding generation timeout")),
+            30000,
+          );
         });
 
         const embeddingPromise = generateEmbedding(null, testText);
         embedding = await Promise.race([embeddingPromise, timeoutPromise]);
-
-      } catch (timeoutError) {
-        console.warn("⚠️  Embedding generation timed out, trying with shorter text...");
+      } catch (_timeoutError) {
+        console.warn(
+          "⚠️  Embedding generation timed out, trying with shorter text...",
+        );
         // Try with a very simple text
         const simpleText = "Hello world";
         embedding = await generateEmbedding(null, simpleText);
       }
 
       if (!Array.isArray(embedding) || embedding.length !== 1024) {
-        throw new Error(`Invalid embedding: expected array of 1024 numbers, got ${typeof embedding} with length ${embedding?.length || 0}`);
+        throw new Error(
+          `Invalid embedding: expected array of 1024 numbers, got ${typeof embedding} with length ${embedding?.length || 0}`,
+        );
       }
 
       console.log("✅ Embedding generation works correctly");
       console.log(`✅ Generated ${embedding.length}-dimensional embedding`);
 
       // Test multilingual embedding generation (with simpler texts to avoid timeouts)
-      const multilingualTexts = [
-        "Hello",
-        "Bonjour",
-        "Hola",
-        "Guten"
-      ];
+      const multilingualTexts = ["Hello", "Bonjour", "Hola", "Guten"];
 
       console.log("Testing multilingual embedding generation...");
       for (let i = 0; i < multilingualTexts.length; i++) {
@@ -326,23 +354,29 @@ class ConsolidatedBGE_M3_Test {
         const emb = await generateEmbedding(null, text);
 
         if (!Array.isArray(emb) || emb.length !== 1024) {
-          throw new Error(`Invalid embedding for "${text}": expected array of 1024 numbers`);
+          throw new Error(
+            `Invalid embedding for "${text}": expected array of 1024 numbers`,
+          );
         }
       }
 
       console.log("✅ Multilingual embedding generation works correctly");
       console.log("✅ All embedding-only tests passed!");
-
     } catch (error) {
       console.error("❌ Embedding-only tests failed:", error);
 
       // If this is a model loading issue, provide a helpful message
-      if (error instanceof Error && error.message.includes("Failed to generate message embedding")) {
+      if (
+        error instanceof Error &&
+        error.message.includes("Failed to generate message embedding")
+      ) {
         console.warn("⚠️  This might be due to:");
         console.warn("   - Network issues downloading the BGE-M3 model");
         console.warn("   - Insufficient memory for model loading");
         console.warn("   - First-time model download taking too long");
-        console.warn("   The embedding service works, but the model failed to load in this test run");
+        console.warn(
+          "   The embedding service works, but the model failed to load in this test run",
+        );
       }
 
       throw error;
@@ -362,19 +396,28 @@ class ConsolidatedBGE_M3_Test {
       .limit(1);
 
     if (error || !politicians || politicians.length === 0) {
-      console.log("⚠️  No active politicians found in database - skipping integration test");
-      console.log("   This test requires active politicians in the database to run.");
+      console.log(
+        "⚠️  No active politicians found in database - skipping integration test",
+      );
+      console.log(
+        "   This test requires active politicians in the database to run.",
+      );
       return; // Skip test gracefully
     }
 
     this.politicianEmail = politicians[0].email;
-    console.log(`✅ Using politician: ${politicians[0].name} (${this.politicianEmail})\n`);
+    console.log(
+      `✅ Using politician: ${politicians[0].name} (${this.politicianEmail})\n`,
+    );
   }
 
   /**
    * Fetch message content from Proca endpoints for a specific language
    */
-  async fetchProcaMessage(baseUrl: string, language?: string): Promise<ProcaMessage> {
+  async fetchProcaMessage(
+    baseUrl: string,
+    language?: string,
+  ): Promise<ProcaMessage> {
     const url = language ? `${baseUrl}/${language}` : baseUrl;
 
     try {
@@ -386,7 +429,7 @@ class ConsolidatedBGE_M3_Test {
       const data = await response.json();
       return {
         subject: data.subject,
-        message: data.message
+        message: data.message,
       };
     } catch (error) {
       console.error(`Failed to fetch message from ${url}:`, error);
@@ -399,7 +442,7 @@ class ConsolidatedBGE_M3_Test {
    */
   cosineDistance(vec1: number[], vec2: number[]): number {
     if (vec1.length !== vec2.length) {
-      throw new Error('Vectors must have same length');
+      throw new Error("Vectors must have same length");
     }
 
     let dotProduct = 0;
@@ -417,7 +460,7 @@ class ConsolidatedBGE_M3_Test {
     }
 
     // Direct distance calculation (1 - cosine similarity)
-    return 1 - (dotProduct / (Math.sqrt(norm1) * Math.sqrt(norm2)));
+    return 1 - dotProduct / (Math.sqrt(norm1) * Math.sqrt(norm2));
   }
 
   /**
@@ -431,26 +474,59 @@ class ConsolidatedBGE_M3_Test {
   /**
    * Determine if two messages are from the same campaign
    */
-  isSameCampaign(lang1: string, lang2: string, msg1: ProcaMessage, msg2: ProcaMessage): boolean {
+  isSameCampaign(
+    lang1: string,
+    lang2: string,
+    msg1: ProcaMessage,
+    msg2: ProcaMessage,
+  ): boolean {
     // Check if language codes indicate same campaign
-    if (lang1.includes('wages_not_jail') && lang2.includes('wages_not_jail')) return true;
-    if (lang1.includes('climate') && lang2.includes('climate')) return true;
-    if (lang1.includes('healthcare') && lang2.includes('healthcare')) return true;
+    if (lang1.includes("wages_not_jail") && lang2.includes("wages_not_jail")) {
+      return true;
+    }
+    if (lang1.includes("climate") && lang2.includes("climate")) {
+      return true;
+    }
+    if (lang1.includes("healthcare") && lang2.includes("healthcare")) {
+      return true;
+    }
 
     // For sample data, check by language code patterns
-    const climateKeywords = ['climate', 'climat', 'klima', 'climático', 'climatico'];
-    const healthcareKeywords = ['healthcare', 'santé', 'gesundheit', 'salud', 'salute'];
+    const climateKeywords = [
+      "climate",
+      "climat",
+      "klima",
+      "climático",
+      "climatico",
+    ];
+    const healthcareKeywords = [
+      "healthcare",
+      "santé",
+      "gesundheit",
+      "salud",
+      "salute",
+    ];
 
-    const msg1Text = (msg1.subject + ' ' + msg1.message).toLowerCase();
-    const msg2Text = (msg2.subject + ' ' + msg2.message).toLowerCase();
+    const msg1Text = `${msg1.subject} ${msg1.message}`.toLowerCase();
+    const msg2Text = `${msg2.subject} ${msg2.message}`.toLowerCase();
 
     // Check if both messages contain keywords from the same domain
-    const msg1IsClimate = climateKeywords.some(keyword => msg1Text.includes(keyword));
-    const msg2IsClimate = climateKeywords.some(keyword => msg2Text.includes(keyword));
-    const msg1IsHealthcare = healthcareKeywords.some(keyword => msg1Text.includes(keyword));
-    const msg2IsHealthcare = healthcareKeywords.some(keyword => msg2Text.includes(keyword));
+    const msg1IsClimate = climateKeywords.some((keyword) =>
+      msg1Text.includes(keyword),
+    );
+    const msg2IsClimate = climateKeywords.some((keyword) =>
+      msg2Text.includes(keyword),
+    );
+    const msg1IsHealthcare = healthcareKeywords.some((keyword) =>
+      msg1Text.includes(keyword),
+    );
+    const msg2IsHealthcare = healthcareKeywords.some((keyword) =>
+      msg2Text.includes(keyword),
+    );
 
-    return (msg1IsClimate && msg2IsClimate) || (msg1IsHealthcare && msg2IsHealthcare);
+    return (
+      (msg1IsClimate && msg2IsClimate) || (msg1IsHealthcare && msg2IsHealthcare)
+    );
   }
 
   /**
@@ -460,7 +536,7 @@ class ConsolidatedBGE_M3_Test {
     lang1: string,
     lang2: string,
     msg1: ProcaMessage,
-    msg2: ProcaMessage
+    msg2: ProcaMessage,
   ): Promise<MessageDistanceResult> {
     console.log(`\n🔄 Testing distance between ${lang1} and ${lang2}...`);
 
@@ -469,25 +545,37 @@ class ConsolidatedBGE_M3_Test {
       const structuredMessage1 = `# ${msg1.subject}\n${msg1.message}`;
       const structuredMessage2 = `# ${msg2.subject}\n${msg2.message}`;
 
-      console.log(`   📝 Message 1: "${structuredMessage1.substring(0, 80)}..."`);
-      console.log(`   📝 Message 2: "${structuredMessage2.substring(0, 80)}..."`);
+      console.log(
+        `   📝 Message 1: "${structuredMessage1.substring(0, 80)}..."`,
+      );
+      console.log(
+        `   📝 Message 2: "${structuredMessage2.substring(0, 80)}..."`,
+      );
 
       // Generate single embedding for each structured message
-      const messageEmbedding1 = await this.generateRealEmbeddings(structuredMessage1);
-      const messageEmbedding2 = await this.generateRealEmbeddings(structuredMessage2);
+      const messageEmbedding1 =
+        await this.generateRealEmbeddings(structuredMessage1);
+      const messageEmbedding2 =
+        await this.generateRealEmbeddings(structuredMessage2);
 
       // Calculate distance
-      const distance = this.cosineDistance(messageEmbedding1, messageEmbedding2);
+      const distance = this.cosineDistance(
+        messageEmbedding1,
+        messageEmbedding2,
+      );
 
       console.log(`  📊 Distance: ${distance.toFixed(4)}`);
 
       return {
         lang1,
         lang2,
-        distance
+        distance,
       };
     } catch (error) {
-      console.error(`❌ Error testing distance between ${lang1} and ${lang2}:`, error);
+      console.error(
+        `❌ Error testing distance between ${lang1} and ${lang2}:`,
+        error,
+      );
       throw error;
     }
   }
@@ -496,35 +584,40 @@ class ConsolidatedBGE_M3_Test {
    * Run cross-lingual similarity tests using Proca endpoints
    */
   async runSimilarityTests(): Promise<void> {
-    console.log('\n🌍 Starting Cross-Lingual Similarity Tests');
-    console.log(`🌍 Testing ${LANGUAGES.length} languages: ${LANGUAGES.join(', ')}`);
+    console.log("\n🌍 Starting Cross-Lingual Similarity Tests");
+    console.log(
+      `🌍 Testing ${LANGUAGES.length} languages: ${LANGUAGES.join(", ")}`,
+    );
 
     // Show model status first
-    console.log('\n🧠 Checking BGE-M3 model status...');
+    console.log("\n🧠 Checking BGE-M3 model status...");
     try {
-      const testEmbedding = await this.generateRealEmbeddings("Model status check");
+      const testEmbedding =
+        await this.generateRealEmbeddings("Model status check");
       console.log(`✅ BGE-M3 model ready (${testEmbedding.length} dimensions)`);
     } catch (error) {
-      console.error('❌ BGE-M3 model not ready:', error);
-      console.log('💡 Please run: npm run model:preload');
+      console.error("❌ BGE-M3 model not ready:", error);
+      console.log("💡 Please run: npm run model:preload");
       return;
     }
 
     // Fetch all messages first
-    console.log('\n📥 Fetching messages from Proca endpoints...');
+    console.log("\n📥 Fetching messages from Proca endpoints...");
     const messages: Map<string, ProcaMessage> = new Map();
 
     // Fetch from both base URLs
     for (const baseUrl of PROCA_BASE_URLS) {
       console.log(`🌐 Fetching from ${baseUrl}...`);
 
-      if (baseUrl.includes('wages_not_jail')) {
+      if (baseUrl.includes("wages_not_jail")) {
         // This URL has a fixed /en path
         try {
           console.log(`   Trying URL: ${baseUrl}`);
           const message = await this.fetchProcaMessage(baseUrl);
-          messages.set('wages_not_jail_en', message);
-          console.log(`✅ wages_not_jail_en: ${message.subject.substring(0, 50)}...`);
+          messages.set("wages_not_jail_en", message);
+          console.log(
+            `✅ wages_not_jail_en: ${message.subject.substring(0, 50)}...`,
+          );
         } catch (error) {
           console.error(`❌ Failed to fetch wages_not_jail_en: ${error}`);
         }
@@ -532,12 +625,14 @@ class ConsolidatedBGE_M3_Test {
         // This URL supports multiple languages
         console.log(`   Testing with English first...`);
         try {
-          const testMessage = await this.fetchProcaMessage(baseUrl, 'en');
-          messages.set('en', testMessage);
-          console.log(`✅ en (test): ${testMessage.subject.substring(0, 50)}...`);
+          const testMessage = await this.fetchProcaMessage(baseUrl, "en");
+          messages.set("en", testMessage);
+          console.log(
+            `✅ en (test): ${testMessage.subject.substring(0, 50)}...`,
+          );
 
           // If English works, try a few more languages
-          for (const lang of ['fr', 'es', 'de']) {
+          for (const lang of ["fr", "es", "de"]) {
             try {
               const message = await this.fetchProcaMessage(baseUrl, lang);
               messages.set(lang, message);
@@ -553,42 +648,52 @@ class ConsolidatedBGE_M3_Test {
     }
 
     if (messages.size < 2) {
-      console.log('⚠️  Could not fetch messages from endpoints, using multilingual sample data for demonstration...');
+      console.log(
+        "⚠️  Could not fetch messages from endpoints, using multilingual sample data for demonstration...",
+      );
 
       // Add sample messages representing different languages for demonstration
       const sampleMessages: ProcaMessage[] = [
         {
           subject: "Support Climate Action Now",
-          message: "We need immediate action on climate change. Please support renewable energy policies."
+          message:
+            "We need immediate action on climate change. Please support renewable energy policies.",
         },
         {
           subject: "Soutenir l'action climatique maintenant",
-          message: "Nous avons besoin d'une action immédiate sur le changement climatique. Soutenez les politiques d'énergie renouvelable."
+          message:
+            "Nous avons besoin d'une action immédiate sur le changement climatique. Soutenez les politiques d'énergie renouvelable.",
         },
         {
           subject: "Unterstützen Sie jetzt Klimaschutzmaßnahmen",
-          message: "Wir benötigen sofortige Maßnahmen gegen den Klimawandel. Unterstützen Sie Erneuerbare-Energien-Politik."
+          message:
+            "Wir benötigen sofortige Maßnahmen gegen den Klimawandel. Unterstützen Sie Erneuerbare-Energien-Politik.",
         },
         {
           subject: "Apoyar la acción climática ahora",
-          message: "Necesitamos acción inmediata sobre el cambio climático. Apoye las políticas de energía renovable."
+          message:
+            "Necesitamos acción inmediata sobre el cambio climático. Apoye las políticas de energía renovable.",
         },
         {
           subject: "Salute per Tutti",
-          message: "L'assistenza sanitaria universale è un diritto umano. Sostegno alla legislazione sul Medicare per tutti."
+          message:
+            "L'assistenza sanitaria universale è un diritto umano. Sostegno alla legislazione sul Medicare per tutti.",
         },
         {
           subject: "Healthcare for All",
-          message: "Universal healthcare is a human right. Support Medicare for All legislation."
-        }
+          message:
+            "Universal healthcare is a human right. Support Medicare for All legislation.",
+        },
       ];
 
-      const sampleLangs = ['en', 'fr', 'de', 'es', 'it', 'it_healthcare'];
+      const sampleLangs = ["en", "fr", "de", "es", "it", "it_healthcare"];
       sampleMessages.forEach((msg, i) => {
         messages.set(sampleLangs[i], msg);
       });
 
-      console.log(`✅ Created ${sampleMessages.length} multilingual sample messages for demonstration`);
+      console.log(
+        `✅ Created ${sampleMessages.length} multilingual sample messages for demonstration`,
+      );
     }
 
     console.log(`\n✅ Successfully fetched ${messages.size} messages`);
@@ -598,10 +703,10 @@ class ConsolidatedBGE_M3_Test {
     const totalPairs = (languages.length * (languages.length - 1)) / 2;
     let currentPair = 0;
 
-    console.log('\n🧪 Testing message-to-message similarities...');
+    console.log("\n🧪 Testing message-to-message similarities...");
     console.log(`📊 Total comparisons: ${totalPairs} pairs`);
-    console.log('\n📋 Detailed Distance Results:');
-    console.log('='.repeat(80));
+    console.log("\n📋 Detailed Distance Results:");
+    console.log("=".repeat(80));
 
     for (let i = 0; i < languages.length; i++) {
       for (let j = i + 1; j < languages.length; j++) {
@@ -612,16 +717,31 @@ class ConsolidatedBGE_M3_Test {
         const msg2 = messages.get(lang2)!;
 
         // Determine campaign from message content or language
-        const campaign1 = lang1.includes('wages_not_jail') ? 'Wages Not Jail' : 'CAN Mercosur';
-        const campaign2 = lang2.includes('wages_not_jail') ? 'Wages Not Jail' : 'CAN Mercosur';
+        const campaign1 = lang1.includes("wages_not_jail")
+          ? "Wages Not Jail"
+          : "CAN Mercosur";
+        const campaign2 = lang2.includes("wages_not_jail")
+          ? "Wages Not Jail"
+          : "CAN Mercosur";
 
-        console.log(`\n🔍 Pair ${currentPair}/${totalPairs}: ${lang1} ↔ ${lang2}`);
+        console.log(
+          `\n🔍 Pair ${currentPair}/${totalPairs}: ${lang1} ↔ ${lang2}`,
+        );
         console.log(`   Campaign: ${campaign1} ↔ ${campaign2}`);
-        console.log(`   Subject 1: "${msg1.subject.substring(0, 60)}${msg1.subject.length > 60 ? '...' : ''}"`);
-        console.log(`   Subject 2: "${msg2.subject.substring(0, 60)}${msg2.subject.length > 60 ? '...' : ''}"`);
+        console.log(
+          `   Subject 1: "${msg1.subject.substring(0, 60)}${msg1.subject.length > 60 ? "..." : ""}"`,
+        );
+        console.log(
+          `   Subject 2: "${msg2.subject.substring(0, 60)}${msg2.subject.length > 60 ? "..." : ""}"`,
+        );
 
         try {
-          const result = await this.testMessageDistance(lang1, lang2, msg1, msg2);
+          const result = await this.testMessageDistance(
+            lang1,
+            lang2,
+            msg1,
+            msg2,
+          );
           this.distanceResults.push(result);
 
           // Determine if this is same campaign comparison
@@ -630,11 +750,14 @@ class ConsolidatedBGE_M3_Test {
           if (isSameCampaign) {
             // Assert that same campaign messages have distance ≤ 0.1
             expect(result.distance).toBeLessThanOrEqual(0.1);
-            console.log(`\r✅ ${lang1}-${lang2}: ${result.distance.toFixed(4)} distance (same campaign ✓)`);
+            console.log(
+              `\r✅ ${lang1}-${lang2}: ${result.distance.toFixed(4)} distance (same campaign ✓)`,
+            );
           } else {
-            console.log(`\r✅ ${lang1}-${lang2}: ${result.distance.toFixed(4)} distance (different campaigns)`);
+            console.log(
+              `\r✅ ${lang1}-${lang2}: ${result.distance.toFixed(4)} distance (different campaigns)`,
+            );
           }
-
         } catch (error) {
           console.error(`\r❌ Failed to test ${lang1}-${lang2}:`, error);
         }
@@ -648,59 +771,88 @@ class ConsolidatedBGE_M3_Test {
   /**
    * Analyze and display distance test results
    */
-  analyzeDistanceResults(languages: string[]): void {
-    console.log('\n📈 Distance Test Results:');
-    console.log('==========================');
+  analyzeDistanceResults(_languages: string[]): void {
+    console.log("\n📈 Distance Test Results:");
+    console.log("==========================");
 
     if (this.distanceResults.length === 0) {
-      console.log('❌ No distance tests completed successfully');
+      console.log("❌ No distance tests completed successfully");
       return;
     }
 
     // Calculate statistics
-    const distances = this.distanceResults.map(r => r.distance);
-    const avgDistance = distances.reduce((a: number, b: number) => a + b, 0) / distances.length;
+    const distances = this.distanceResults.map((r) => r.distance);
+    const avgDistance =
+      distances.reduce((a: number, b: number) => a + b, 0) / distances.length;
     const minDistance = Math.min(...distances);
     const maxDistance = Math.max(...distances);
 
-    console.log(`📊 Tests completed: ${this.distanceResults.length} pairwise comparisons`);
+    console.log(
+      `📊 Tests completed: ${this.distanceResults.length} pairwise comparisons`,
+    );
     console.log(`📊 Average distance: ${avgDistance.toFixed(4)}`);
-    console.log(`📊 Distance range: ${minDistance.toFixed(4)} - ${maxDistance.toFixed(4)}`);
+    console.log(
+      `📊 Distance range: ${minDistance.toFixed(4)} - ${maxDistance.toFixed(4)}`,
+    );
 
     // Find best and worst matches (lowest distance = best match)
-    const bestMatch = this.distanceResults.reduce((best: MessageDistanceResult, current: MessageDistanceResult) =>
-      current.distance < best.distance ? current : best
+    const bestMatch = this.distanceResults.reduce(
+      (best: MessageDistanceResult, current: MessageDistanceResult) =>
+        current.distance < best.distance ? current : best,
     );
-    const worstMatch = this.distanceResults.reduce((worst: MessageDistanceResult, current: MessageDistanceResult) =>
-      current.distance > worst.distance ? current : worst
+    const worstMatch = this.distanceResults.reduce(
+      (worst: MessageDistanceResult, current: MessageDistanceResult) =>
+        current.distance > worst.distance ? current : worst,
     );
 
-    console.log(`\n🏆 Best match: ${bestMatch.lang1}-${bestMatch.lang2} (${bestMatch.distance.toFixed(4)} distance)`);
-    console.log(`📉 Worst match: ${worstMatch.lang1}-${worstMatch.lang2} (${worstMatch.distance.toFixed(4)} distance)`);
+    console.log(
+      `\n🏆 Best match: ${bestMatch.lang1}-${bestMatch.lang2} (${bestMatch.distance.toFixed(4)} distance)`,
+    );
+    console.log(
+      `📉 Worst match: ${worstMatch.lang1}-${worstMatch.lang2} (${worstMatch.distance.toFixed(4)} distance)`,
+    );
 
     // Distance quality assessment
-    console.log('\n🎯 Distance Quality Assessment:');
-    console.log('===================================');
+    console.log("\n🎯 Distance Quality Assessment:");
+    console.log("===================================");
 
     // Distance thresholds (lower distance = more similar)
-    const lowDistanceThreshold = 0.1;  // Very close match
+    const lowDistanceThreshold = 0.1; // Very close match
     const mediumDistanceThreshold = 0.3; // Moderate match
 
-    const lowDistanceCount = distances.filter((d: number) => d <= lowDistanceThreshold).length;
-    const mediumDistanceCount = distances.filter((d: number) => d > lowDistanceThreshold && d <= mediumDistanceThreshold).length;
-    const highDistanceCount = distances.filter((d: number) => d > mediumDistanceThreshold).length;
+    const lowDistanceCount = distances.filter(
+      (d: number) => d <= lowDistanceThreshold,
+    ).length;
+    const mediumDistanceCount = distances.filter(
+      (d: number) => d > lowDistanceThreshold && d <= mediumDistanceThreshold,
+    ).length;
+    const highDistanceCount = distances.filter(
+      (d: number) => d > mediumDistanceThreshold,
+    ).length;
 
-    console.log(`🎯 Low distance (≤${lowDistanceThreshold}): ${lowDistanceCount} pairs (${(lowDistanceCount / this.distanceResults.length * 100).toFixed(1)}%)`);
-    console.log(`⚡ Medium distance (≤${mediumDistanceThreshold}): ${mediumDistanceCount} pairs (${(mediumDistanceCount / this.distanceResults.length * 100).toFixed(1)}%)`);
-    console.log(`💧 High distance (>${mediumDistanceThreshold}): ${highDistanceCount} pairs (${(highDistanceCount / this.distanceResults.length * 100).toFixed(1)}%)`);
+    console.log(
+      `🎯 Low distance (≤${lowDistanceThreshold}): ${lowDistanceCount} pairs (${((lowDistanceCount / this.distanceResults.length) * 100).toFixed(1)}%)`,
+    );
+    console.log(
+      `⚡ Medium distance (≤${mediumDistanceThreshold}): ${mediumDistanceCount} pairs (${((mediumDistanceCount / this.distanceResults.length) * 100).toFixed(1)}%)`,
+    );
+    console.log(
+      `💧 High distance (>${mediumDistanceThreshold}): ${highDistanceCount} pairs (${((highDistanceCount / this.distanceResults.length) * 100).toFixed(1)}%)`,
+    );
 
     // Final assessment
     if (avgDistance <= 0.1) {
-      console.log('🎉 EXCELLENT: BGE-M3 shows strong cross-lingual semantic understanding');
+      console.log(
+        "🎉 EXCELLENT: BGE-M3 shows strong cross-lingual semantic understanding",
+      );
     } else if (avgDistance <= 0.3) {
-      console.log('✅ GOOD: BGE-M3 shows adequate cross-lingual semantic understanding');
+      console.log(
+        "✅ GOOD: BGE-M3 shows adequate cross-lingual semantic understanding",
+      );
     } else {
-      console.log('⚠️  NEEDS IMPROVEMENT: BGE-M3 shows limited cross-lingual semantic understanding');
+      console.log(
+        "⚠️  NEEDS IMPROVEMENT: BGE-M3 shows limited cross-lingual semantic understanding",
+      );
     }
   }
 
@@ -729,7 +881,7 @@ class ConsolidatedBGE_M3_Test {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Authorization": `Bearer ${this.apiKey}`,
+          Authorization: `Bearer ${this.apiKey}`,
         },
         body: JSON.stringify(payload),
         signal: controller.signal,
@@ -782,7 +934,9 @@ class ConsolidatedBGE_M3_Test {
    * Run a single classification test case
    */
   async runClassificationTest(testMsg: TestMessage): Promise<TestResult> {
-    console.log(`\n📝 Testing: ${testMsg.id} (${testMsg.topic} - ${testMsg.language})`);
+    console.log(
+      `\n📝 Testing: ${testMsg.id} (${testMsg.topic} - ${testMsg.language})`,
+    );
     console.log(`   Subject: "${testMsg.subject}"`);
 
     try {
@@ -796,12 +950,17 @@ class ConsolidatedBGE_M3_Test {
           testMessage: testMsg,
           response,
           success: false,
-          error: response.error || response.message || `HTTP ${response.http_status}`,
+          error:
+            response.error ||
+            response.message ||
+            `HTTP ${response.http_status}`,
         };
       }
 
       console.log(`   ✅ API Response: HTTP ${response.http_status}`);
-      console.log(`   Campaign: ${response.campaign_name} (confidence: ${response.confidence?.toFixed(3)})`);
+      console.log(
+        `   Campaign: ${response.campaign_name} (confidence: ${response.confidence?.toFixed(3)})`,
+      );
 
       // Verify in database
       const dbRecord = await this.verifyInDatabase(response.message_id);
@@ -819,18 +978,22 @@ class ConsolidatedBGE_M3_Test {
       let embedding = dbRecord.message_embedding;
 
       // If embedding is a string, parse it
-      if (typeof embedding === 'string') {
+      if (typeof embedding === "string") {
         try {
           embedding = JSON.parse(embedding);
-        } catch (e) {
+        } catch (_e) {
           console.log(`   ⚠️  Could not parse embedding`);
         }
       }
 
-      const embeddingDimensions = Array.isArray(embedding) ? embedding.length : 0;
+      const embeddingDimensions = Array.isArray(embedding)
+        ? embedding.length
+        : 0;
       const embeddingCorrect = embeddingDimensions === 1024;
 
-      console.log(`   📊 Embedding: ${embeddingDimensions} dimensions ${embeddingCorrect ? "✅" : "❌"}`);
+      console.log(
+        `   📊 Embedding: ${embeddingDimensions} dimensions ${embeddingCorrect ? "✅" : "❌"}`,
+      );
 
       // Extract campaign name
       const campaignName = dbRecord.campaigns?.name || "Unknown";
@@ -844,7 +1007,6 @@ class ConsolidatedBGE_M3_Test {
         confidence: dbRecord.classification_confidence,
         embeddingDimensions,
       };
-
     } catch (error) {
       console.error(`   ❌ Error:`, error);
       return {
@@ -864,14 +1026,16 @@ class ConsolidatedBGE_M3_Test {
     console.log("🚀 Starting Classification Validation Tests");
     console.log(`${"=".repeat(80)}`);
     console.log(`Total test messages: ${TEST_MESSAGES.length}`);
-    console.log(`\n⏳ Note: First request may take 2-5 minutes while BGE-M3 model downloads...`);
+    console.log(
+      `\n⏳ Note: First request may take 2-5 minutes while BGE-M3 model downloads...`,
+    );
 
     for (const testMsg of TEST_MESSAGES) {
       const result = await this.runClassificationTest(testMsg);
       this.classificationResults.push(result);
 
       // Small delay between tests to avoid overwhelming the API
-      await new Promise(resolve => setTimeout(resolve, 500));
+      await new Promise((resolve) => setTimeout(resolve, 500));
     }
 
     this.displayClassificationResults();
@@ -902,7 +1066,9 @@ class ConsolidatedBGE_M3_Test {
     let confidenceCount = 0;
 
     for (const result of this.classificationResults) {
-      if (!result.success) continue;
+      if (!result.success) {
+        continue;
+      }
 
       metrics.successfulClassifications++;
 
@@ -943,16 +1109,17 @@ class ConsolidatedBGE_M3_Test {
 
       // Check if classification matches expected (if provided)
       if (result.testMessage.expectedCampaign) {
-        const expectedMatch = result.actualCampaign?.toLowerCase().includes(
-          result.testMessage.expectedCampaign.toLowerCase()
-        );
+        const expectedMatch = result.actualCampaign
+          ?.toLowerCase()
+          .includes(result.testMessage.expectedCampaign.toLowerCase());
         if (expectedMatch) {
           topicStats.correct++;
         }
       }
     }
 
-    metrics.averageConfidence = confidenceCount > 0 ? totalConfidence / confidenceCount : 0;
+    metrics.averageConfidence =
+      confidenceCount > 0 ? totalConfidence / confidenceCount : 0;
 
     return metrics;
   }
@@ -971,23 +1138,41 @@ class ConsolidatedBGE_M3_Test {
     console.log("📈 OVERALL STATISTICS");
     console.log("-".repeat(80));
     console.log(`Total Tests:              ${metrics.totalTests}`);
-    console.log(`Successful:               ${metrics.successfulClassifications}`);
-    console.log(`Failed:                   ${metrics.totalTests - metrics.successfulClassifications}`);
-    console.log(`Uncategorized:            ${metrics.uncategorizedCount} (${(metrics.uncategorizedCount / metrics.successfulClassifications * 100).toFixed(1)}%)`);
-    console.log(`Average Confidence:       ${metrics.averageConfidence.toFixed(3)}`);
+    console.log(
+      `Successful:               ${metrics.successfulClassifications}`,
+    );
+    console.log(
+      `Failed:                   ${metrics.totalTests - metrics.successfulClassifications}`,
+    );
+    console.log(
+      `Uncategorized:            ${metrics.uncategorizedCount} (${((metrics.uncategorizedCount / metrics.successfulClassifications) * 100).toFixed(1)}%)`,
+    );
+    console.log(
+      `Average Confidence:       ${metrics.averageConfidence.toFixed(3)}`,
+    );
 
     // Confidence Distribution
     console.log(`\n🎯 CONFIDENCE DISTRIBUTION`);
     console.log("-".repeat(80));
-    console.log(`High (> 0.7):             ${metrics.confidenceDistribution.high} (${(metrics.confidenceDistribution.high / metrics.successfulClassifications * 100).toFixed(1)}%)`);
-    console.log(`Medium (0.5 - 0.7):       ${metrics.confidenceDistribution.medium} (${(metrics.confidenceDistribution.medium / metrics.successfulClassifications * 100).toFixed(1)}%)`);
-    console.log(`Low (< 0.5):              ${metrics.confidenceDistribution.low} (${(metrics.confidenceDistribution.low / metrics.successfulClassifications * 100).toFixed(1)}%)`);
+    console.log(
+      `High (> 0.7):             ${metrics.confidenceDistribution.high} (${((metrics.confidenceDistribution.high / metrics.successfulClassifications) * 100).toFixed(1)}%)`,
+    );
+    console.log(
+      `Medium (0.5 - 0.7):       ${metrics.confidenceDistribution.medium} (${((metrics.confidenceDistribution.medium / metrics.successfulClassifications) * 100).toFixed(1)}%)`,
+    );
+    console.log(
+      `Low (< 0.5):              ${metrics.confidenceDistribution.low} (${((metrics.confidenceDistribution.low / metrics.successfulClassifications) * 100).toFixed(1)}%)`,
+    );
 
     // Embedding Validation
     console.log(`\n🔢 EMBEDDING VALIDATION`);
     console.log("-".repeat(80));
-    console.log(`Correct (1024 dims):      ${metrics.embeddingValidation.correct1024Dimensions}`);
-    console.log(`Incorrect:                ${metrics.embeddingValidation.incorrectDimensions}`);
+    console.log(
+      `Correct (1024 dims):      ${metrics.embeddingValidation.correct1024Dimensions}`,
+    );
+    console.log(
+      `Incorrect:                ${metrics.embeddingValidation.incorrectDimensions}`,
+    );
 
     // Accuracy by Topic
     console.log(`\n📚 ACCURACY BY TOPIC`);
@@ -995,8 +1180,13 @@ class ConsolidatedBGE_M3_Test {
     const topicEntries = Array.from(metrics.accuracyByTopic.entries());
     for (let i = 0; i < topicEntries.length; i++) {
       const [topic, stats] = topicEntries[i];
-      const accuracy = stats.total > 0 ? (stats.correct / stats.total * 100).toFixed(1) : "N/A";
-      console.log(`${topic.padEnd(20)} ${stats.correct}/${stats.total} (${accuracy}%)`);
+      const accuracy =
+        stats.total > 0
+          ? ((stats.correct / stats.total) * 100).toFixed(1)
+          : "N/A";
+      console.log(
+        `${topic.padEnd(20)} ${stats.correct}/${stats.total} (${accuracy}%)`,
+      );
     }
 
     // Recommendations
@@ -1010,7 +1200,10 @@ class ConsolidatedBGE_M3_Test {
       console.log("   - Reviewing campaign descriptions");
     }
 
-    if (metrics.confidenceDistribution.low / metrics.successfulClassifications > 0.4) {
+    if (
+      metrics.confidenceDistribution.low / metrics.successfulClassifications >
+      0.4
+    ) {
       console.log("⚠️  Many low-confidence classifications (>40%). Consider:");
       console.log("   - Improving campaign reference vectors");
       console.log("   - Adding more training examples");
@@ -1027,11 +1220,13 @@ class ConsolidatedBGE_M3_Test {
       console.log("✅ Good average confidence score!");
     }
 
-    if (metrics.embeddingValidation.correct1024Dimensions === metrics.successfulClassifications) {
+    if (
+      metrics.embeddingValidation.correct1024Dimensions ===
+      metrics.successfulClassifications
+    ) {
       console.log("✅ All embeddings have correct 1024 dimensions!");
     }
   }
-
 
   /**
    * Test clustering behavior when multiple messages arrive at once
@@ -1056,7 +1251,8 @@ class ConsolidatedBGE_M3_Test {
         sender_name: "Alice Green",
         sender_email: "alice.cluster.test@example.com",
         subject: "Climate Action Now",
-        message: "We need immediate action on climate change. Please support renewable energy policies and carbon reduction initiatives.",
+        message:
+          "We need immediate action on climate change. Please support renewable energy policies and carbon reduction initiatives.",
       },
       {
         id: "cluster-test-2",
@@ -1066,7 +1262,8 @@ class ConsolidatedBGE_M3_Test {
         sender_name: "Bob Green",
         sender_email: "bob.cluster.test@example.com",
         subject: "Support Climate Legislation",
-        message: "I urge you to vote for climate legislation. Renewable energy and carbon reduction are essential for our future.",
+        message:
+          "I urge you to vote for climate legislation. Renewable energy and carbon reduction are essential for our future.",
       },
       {
         id: "cluster-test-3",
@@ -1076,25 +1273,34 @@ class ConsolidatedBGE_M3_Test {
         sender_name: "Carol Green",
         sender_email: "carol.cluster.test@example.com",
         subject: "Renewable Energy Support",
-        message: "Please support renewable energy policies. Climate change requires immediate action on carbon emissions.",
-      }
+        message:
+          "Please support renewable energy policies. Climate change requires immediate action on carbon emissions.",
+      },
     ];
 
-    console.log(`📤 Sending ${similarMessages.length} similar messages simultaneously...`);
+    console.log(
+      `📤 Sending ${similarMessages.length} similar messages simultaneously...`,
+    );
 
     // Send all messages simultaneously
-    const sendPromises = similarMessages.map(msg => this.sendMessage(msg));
+    const sendPromises = similarMessages.map((msg) => this.sendMessage(msg));
     const responses = await Promise.all(sendPromises);
 
     // Verify all messages were processed successfully
-    const successfulResponses = responses.filter(r => r.http_status === 200 && r.success);
-    console.log(`✅ ${successfulResponses.length}/${similarMessages.length} messages processed successfully`);
+    const successfulResponses = responses.filter(
+      (r) => r.http_status === 200 && r.success,
+    );
+    console.log(
+      `✅ ${successfulResponses.length}/${similarMessages.length} messages processed successfully`,
+    );
 
     if (successfulResponses.length < similarMessages.length) {
       console.log("❌ Some messages failed to process:");
       responses.forEach((response, index) => {
         if (response.http_status !== 200 || !response.success) {
-          console.log(`   Message ${index + 1}: HTTP ${response.http_status} - ${response.error || 'Unknown error'}`);
+          console.log(
+            `   Message ${index + 1}: HTTP ${response.http_status} - ${response.error || "Unknown error"}`,
+          );
         }
       });
       return;
@@ -1102,11 +1308,13 @@ class ConsolidatedBGE_M3_Test {
 
     // Wait a moment for clustering to complete
     console.log("⏳ Waiting for clustering to complete...");
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    await new Promise((resolve) => setTimeout(resolve, 2000));
 
     // Check clustering results in database
-    const messageIds = successfulResponses.map(r => r.message_id);
-    console.log(`🔍 Checking cluster assignments for ${messageIds.length} messages...`);
+    const messageIds = successfulResponses.map((r) => r.message_id);
+    console.log(
+      `🔍 Checking cluster assignments for ${messageIds.length} messages...`,
+    );
 
     const { data: messageClusters, error } = await this.supabase
       .from("messages")
@@ -1126,7 +1334,7 @@ class ConsolidatedBGE_M3_Test {
       if (!clusterGroups.has(clusterId)) {
         clusterGroups.set(clusterId, []);
       }
-      clusterGroups.get(clusterId)!.push(msg);
+      clusterGroups.get(clusterId)?.push(msg);
     });
 
     // Display clustering results
@@ -1137,27 +1345,39 @@ class ConsolidatedBGE_M3_Test {
         console.log(`   🎯 Cluster ${clusterId}: ${messages.length} messages`);
       }
       messages.forEach((msg: any) => {
-        console.log(`      - Message ${msg.id} (${msg.campaigns?.name || 'Unknown campaign'})`);
+        console.log(
+          `      - Message ${msg.id} (${msg.campaigns?.name || "Unknown campaign"})`,
+        );
       });
     }
 
     // Verify clustering expectations
-    const clusteredMessages = messageClusters?.filter((m: any) => m.cluster_id !== null) || [];
-    const unclusteredMessages = messageClusters?.filter((m: any) => m.cluster_id === null) || [];
+    const clusteredMessages =
+      messageClusters?.filter((m: any) => m.cluster_id !== null) || [];
+    const unclusteredMessages =
+      messageClusters?.filter((m: any) => m.cluster_id === null) || [];
 
     console.log(`\n📈 Clustering Analysis:`);
     console.log(`   Clustered messages: ${clusteredMessages.length}`);
     console.log(`   Unclustered messages: ${unclusteredMessages.length}`);
 
     // At least 2 messages should be clustered together (they're very similar)
-    const hasClusterWithMultipleMessages = Array.from(clusterGroups.entries())
-      .some(([clusterId, messages]: [number | null, any[]]) => clusterId !== null && messages.length >= 2);
+    const hasClusterWithMultipleMessages = Array.from(
+      clusterGroups.entries(),
+    ).some(
+      ([clusterId, messages]: [number | null, any[]]) =>
+        clusterId !== null && messages.length >= 2,
+    );
 
     if (hasClusterWithMultipleMessages) {
-      console.log("✅ SUCCESS: Similar messages were properly clustered together");
+      console.log(
+        "✅ SUCCESS: Similar messages were properly clustered together",
+      );
     } else {
       console.log("⚠️  WARNING: Similar messages were not clustered together");
-      console.log("   This may indicate clustering is not enabled or working correctly");
+      console.log(
+        "   This may indicate clustering is not enabled or working correctly",
+      );
     }
 
     // Check if clustering is being called at all
@@ -1171,14 +1391,20 @@ class ConsolidatedBGE_M3_Test {
 
     if (clusterCount === 0) {
       console.log("❌ CRITICAL: No clusters found in database");
-      console.log("   The assignMessageToCluster method may not be called during message processing");
-      console.log("   Check message_processor.ts to ensure clustering is integrated");
+      console.log(
+        "   The assignMessageToCluster method may not be called during message processing",
+      );
+      console.log(
+        "   Check message_processor.ts to ensure clustering is integrated",
+      );
     } else {
-      console.log(`✅ SUCCESS: Found ${clusterCount} clusters in database - clustering is working!`);
+      console.log(
+        `✅ SUCCESS: Found ${clusterCount} clusters in database - clustering is working!`,
+      );
     }
 
     // Save clustering test results to file for verification
-    const clusteringResults = {
+    const _clusteringResults = {
       timestamp: new Date().toISOString(),
       testType: "multiple_message_clustering",
       messagesSent: similarMessages.length,
@@ -1187,13 +1413,15 @@ class ConsolidatedBGE_M3_Test {
         clusteredMessages: clusteredMessages.length,
         unclusteredMessages: unclusteredMessages.length,
         totalClusters: clusterCount || 0,
-        clusterGroups: Array.from(clusterGroups.entries()).map(([clusterId, messages]) => ({
-          clusterId,
-          messageCount: messages.length,
-          messageIds: messages.map((m: any) => m.id)
-        }))
+        clusterGroups: Array.from(clusterGroups.entries()).map(
+          ([clusterId, messages]) => ({
+            clusterId,
+            messageCount: messages.length,
+            messageIds: messages.map((m: any) => m.id),
+          }),
+        ),
       },
-      success: hasClusterWithMultipleMessages && (clusterCount || 0) > 0
+      success: hasClusterWithMultipleMessages && (clusterCount || 0) > 0,
     };
   }
 
@@ -1210,8 +1438,12 @@ class ConsolidatedBGE_M3_Test {
 
       // Check if initialization was skipped (no politicians found)
       if (!this.politicianEmail) {
-        console.log("⚠️  No active politicians found - running similarity tests only");
-        console.log("   Classification tests require active politicians in the database.\n");
+        console.log(
+          "⚠️  No active politicians found - running similarity tests only",
+        );
+        console.log(
+          "   Classification tests require active politicians in the database.\n",
+        );
 
         // Still run similarity tests since they don't need politicians
         await this.runSimilarityTests();
@@ -1232,7 +1464,6 @@ class ConsolidatedBGE_M3_Test {
       console.log(`\n${"=".repeat(80)}`);
       console.log("✅ CONSOLIDATED TEST SUITE COMPLETE!");
       console.log(`${"=".repeat(80)}\n`);
-
     } catch (error) {
       console.error("\n❌ Test suite execution failed:", error);
       throw error;
@@ -1247,26 +1478,36 @@ describe("Consolidated BGE-M3 Validation", () => {
 
     // Skip database tests if environment variables are not set
     if (test.isSkippingDatabaseTests()) {
-      console.warn("⚠️  Skipping database-dependent tests - no environment variables set");
+      console.warn(
+        "⚠️  Skipping database-dependent tests - no environment variables set",
+      );
 
       try {
         // Just test the embedding generation functionality
         await test.runEmbeddingOnlyTests();
         expect(true).toBe(true); // Test passes if no exceptions are thrown
-      } catch (embeddingError) {
-        console.warn("⚠️  Embedding tests failed, running minimal validation...");
+      } catch (_embeddingError) {
+        console.warn(
+          "⚠️  Embedding tests failed, running minimal validation...",
+        );
 
         // Fallback: just test that the embedding service can be imported and basic functions exist
-        const { generateEmbedding, formatEmailContentForEmbedding } = await import("../src/embedding_service.js");
+        const { generateEmbedding, formatEmailContentForEmbedding } =
+          await import("../src/embedding_service.js");
 
         // Test format function (doesn't require model)
-        const formatted = formatEmailContentForEmbedding("Test Subject", "Test Body");
+        const formatted = formatEmailContentForEmbedding(
+          "Test Subject",
+          "Test Body",
+        );
         expect(formatted).toBe("# Test Subject\n\nTest Body");
 
         // Test that generateEmbedding function exists (even if it fails due to model loading)
         expect(typeof generateEmbedding).toBe("function");
 
-        console.log("✅ Basic embedding service validation passed (model loading skipped)");
+        console.log(
+          "✅ Basic embedding service validation passed (model loading skipped)",
+        );
       }
       return;
     }
@@ -1293,5 +1534,3 @@ async function main() {
 if (import.meta.url === `file://${process.argv[1]}`) {
   main();
 }
-
-export { ConsolidatedBGE_M3_Test, main };

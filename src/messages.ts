@@ -1,4 +1,4 @@
-import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
+import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
 import type { DatabaseClient } from "./database";
 import {
   type Ai,
@@ -49,8 +49,16 @@ const MessageInputSchema = z.object({
     .describe("Email address of the target politician"),
   subject: z.string().max(500).describe("Message subject line"),
   message: z.string().min(10).max(10000).describe("Message body content"),
-  html_content: z.string().max(50000).optional().describe("HTML version of message content"),
-  text_content: z.string().max(50000).optional().describe("Plain text version of message content"),
+  html_content: z
+    .string()
+    .max(50000)
+    .optional()
+    .describe("HTML version of message content"),
+  text_content: z
+    .string()
+    .max(50000)
+    .optional()
+    .describe("Plain text version of message content"),
   timestamp: z
     .string()
     .datetime()
@@ -180,16 +188,16 @@ app.openapi(messageRoute, async (c) => {
     );
 
     if (result.status === "duplicate") {
-      // @ts-ignore
+      // @ts-expect-error
       return c.json(result, 409);
     }
 
     if (!result.success) {
-      // @ts-ignore
+      // @ts-expect-error
       return c.json(result, 500);
     }
 
-    // @ts-ignore
+    // @ts-expect-error
     return c.json(result, 200);
   } catch (error) {
     if (error instanceof PoliticianNotFoundError) {

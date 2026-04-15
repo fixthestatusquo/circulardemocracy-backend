@@ -42,17 +42,16 @@ export interface ApiConfig<SecurityDataType = unknown> {
   baseApiParams?: Omit<RequestParams, "baseUrl" | "cancelToken" | "signal">;
   securityWorker?: (
     securityData: SecurityDataType | null,
-  ) => Promise<RequestParams | void> | RequestParams | void;
+  ) => Promise<RequestParams | undefined> | RequestParams | undefined;
   customFetch?: typeof fetch;
 }
 
-export interface HttpResponse<D extends unknown, E extends unknown = unknown>
-  extends Response {
+export interface HttpResponse<D, E = unknown> extends Response {
   data: D;
   error: E;
 }
 
-type CancelToken = Symbol | string | number;
+type CancelToken = symbol | string | number;
 
 export enum ContentType {
   Json = "application/json",
@@ -163,7 +162,7 @@ export class HttpClient<SecurityDataType = unknown> {
       headers: {
         ...(this.baseApiParams.headers || {}),
         ...(params1.headers || {}),
-        ...((params2 && params2.headers) || {}),
+        ...(params2?.headers || {}),
       },
     };
   }
@@ -259,7 +258,9 @@ export class HttpClient<SecurityDataType = unknown> {
         this.abortControllers.delete(cancelToken);
       }
 
-      if (!response.ok) throw data;
+      if (!response.ok) {
+        throw data;
+      }
       return data;
     });
   };
@@ -272,9 +273,7 @@ export class HttpClient<SecurityDataType = unknown> {
  *
  * API for processing citizen messages to politicians
  */
-export class Api<
-  SecurityDataType extends unknown,
-> extends HttpClient<SecurityDataType> {
+export class Api<SecurityDataType> extends HttpClient<SecurityDataType> {
   api = {
     /**
      * @description Receives a citizen message, classifies it by campaign, and stores it for politician response

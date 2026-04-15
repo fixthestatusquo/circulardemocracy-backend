@@ -1,6 +1,6 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { processScheduledReplies } from "../src/reply_worker";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { JMAPClient } from "../src/jmap_client";
+import { processScheduledReplies } from "../src/reply_worker";
 
 // =============================================================================
 // REPLY WORKER TESTS
@@ -116,7 +116,7 @@ describe("Reply Worker", () => {
   });
 
   describe("Email Sending", () => {
-    const mockMessage = {
+    const _mockMessage = {
       id: 1,
       external_id: "ext-1",
       politician_id: 1,
@@ -438,19 +438,21 @@ describe("Reply Worker", () => {
         }),
       };
 
-      vi.spyOn(mockDb.supabase, "from").mockImplementation((...args: unknown[]) => {
-        const table = args[0] as string;
-        if (table === "messages") {
-          return messagesTable as any;
-        }
-        if (table === "campaigns") {
-          return campaignsTable as any;
-        }
-        if (table === "politicians") {
-          return politiciansTable as any;
-        }
-        return {} as any;
-      });
+      vi.spyOn(mockDb.supabase, "from").mockImplementation(
+        (...args: unknown[]) => {
+          const table = args[0] as string;
+          if (table === "messages") {
+            return messagesTable as any;
+          }
+          if (table === "campaigns") {
+            return campaignsTable as any;
+          }
+          if (table === "politicians") {
+            return politiciansTable as any;
+          }
+          return {} as any;
+        },
+      );
 
       vi.spyOn(mockDb, "getActiveTemplateForCampaign").mockResolvedValue({
         id: 1,
@@ -523,19 +525,21 @@ describe("Reply Worker", () => {
         }),
       };
 
-      vi.spyOn(mockDb.supabase, "from").mockImplementation((...args: unknown[]) => {
-        const table = args[0] as string;
-        if (table === "messages") {
-          return messagesTable as any;
-        }
-        if (table === "campaigns") {
-          return campaignsTable as any;
-        }
-        if (table === "politicians") {
-          return politiciansTable as any;
-        }
-        return {} as any;
-      });
+      vi.spyOn(mockDb.supabase, "from").mockImplementation(
+        (...args: unknown[]) => {
+          const table = args[0] as string;
+          if (table === "messages") {
+            return messagesTable as any;
+          }
+          if (table === "campaigns") {
+            return campaignsTable as any;
+          }
+          if (table === "politicians") {
+            return politiciansTable as any;
+          }
+          return {} as any;
+        },
+      );
       vi.spyOn(mockDb, "getActiveTemplateForCampaign").mockResolvedValue({
         id: 1,
         politician_id: 1,

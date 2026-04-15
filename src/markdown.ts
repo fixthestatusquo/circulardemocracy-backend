@@ -73,7 +73,10 @@ export function renderMarkdownToPlainText(markdown: string): string {
  */
 function sanitizeHtml(html: string): string {
   // Remove script tags and their content
-  let sanitized = html.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, "");
+  let sanitized = html.replace(
+    /<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi,
+    "",
+  );
 
   // Remove event handlers (onclick, onerror, etc.)
   sanitized = sanitized.replace(/\son\w+\s*=\s*["'][^"']*["']/gi, "");

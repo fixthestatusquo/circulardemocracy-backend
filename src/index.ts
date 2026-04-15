@@ -19,10 +19,14 @@ const app = new Hono<{ Bindings: Env }>();
 
 // Global CORS middleware - must be applied before any other middleware
 const resolveCorsOrigin = (origin: string | undefined) => {
-  if (!origin) return undefined;
+  if (!origin) {
+    return undefined;
+  }
   try {
     const url = new URL(origin);
-    if (url.hostname === "localhost" || url.hostname === "127.0.0.1") return origin;
+    if (url.hostname === "localhost" || url.hostname === "127.0.0.1") {
+      return origin;
+    }
     if (
       url.hostname === "circulardemocracy.org" ||
       url.hostname.endsWith(".circulardemocracy.org")
@@ -61,9 +65,9 @@ export default {
   fetch: app.fetch,
   // Handle scheduled events (Cloudflare Cron Triggers)
   async scheduled(
-    event: ScheduledEvent,
+    _event: ScheduledEvent,
     env: Env,
-    ctx: ExecutionContext,
+    _ctx: ExecutionContext,
   ): Promise<void> {
     await handleScheduledEvent(env);
   },

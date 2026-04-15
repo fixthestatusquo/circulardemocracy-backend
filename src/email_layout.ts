@@ -68,11 +68,7 @@ function renderStandardHeaderLayout(
   );
 
   // Wrap in full email template
-  const fullHtml = wrapInEmailTemplate(
-    input.subject,
-    headerHtml,
-    htmlBody,
-  );
+  const fullHtml = wrapInEmailTemplate(input.subject, headerHtml, htmlBody);
 
   // Add header to text version as well
   const headerText = buildHeaderText(
@@ -157,7 +153,7 @@ function buildHeaderText(
     return "";
   }
 
-  return lines.join("\n") + "\n" + "-".repeat(50);
+  return `${lines.join("\n")}\n${"-".repeat(50)}`;
 }
 
 /**

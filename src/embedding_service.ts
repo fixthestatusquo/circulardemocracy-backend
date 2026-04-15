@@ -2,7 +2,7 @@
  * Embedding Service - Provides BGE-M3 embeddings for both local and Cloudflare Workers environments
  */
 
-import { pipeline, type FeatureExtractionPipeline } from "@xenova/transformers";
+import { type FeatureExtractionPipeline, pipeline } from "@xenova/transformers";
 
 export interface Ai {
   run(model: string, inputs: any): Promise<any>;
@@ -19,15 +19,13 @@ async function initializeLocalModel(): Promise<FeatureExtractionPipeline> {
     return embeddingPipeline;
   }
 
-  console.log("🔄 Loading BGE-M3 model (first time may take a few minutes to download)...");
-
-  embeddingPipeline = await pipeline(
-    "feature-extraction",
-    "Xenova/bge-m3",
-    {
-      quantized: true, // Use quantized model for faster inference
-    }
+  console.log(
+    "🔄 Loading BGE-M3 model (first time may take a few minutes to download)...",
   );
+
+  embeddingPipeline = await pipeline("feature-extraction", "Xenova/bge-m3", {
+    quantized: true, // Use quantized model for faster inference
+  });
 
   console.log("✅ BGE-M3 model loaded successfully!");
 
@@ -41,7 +39,10 @@ async function initializeLocalModel(): Promise<FeatureExtractionPipeline> {
  * @param body - Email body content
  * @returns Formatted text with subject as header
  */
-export function formatEmailContentForEmbedding(subject: string, body: string): string {
+export function formatEmailContentForEmbedding(
+  subject: string,
+  body: string,
+): string {
   const cleanSubject = subject.trim();
   const cleanBody = body.trim();
 
@@ -68,13 +69,13 @@ export function formatEmailContentForEmbedding(subject: string, body: string): s
  */
 export async function generateEmbedding(
   ai: Ai | null,
-  text: string
+  text: string,
 ): Promise<number[]> {
   try {
     const truncatedText = text.substring(0, 8000); // Limit to avoid token limits
 
     // If AI binding is available (Cloudflare Workers), use it
-    if (ai && ai.run) {
+    if (ai?.run) {
       const response = await ai.run("@cf/baai/bge-m3", {
         text: truncatedText,
       });
@@ -94,7 +95,9 @@ export async function generateEmbedding(
 
     // BGE-M3 produces 1024-dimensional embeddings
     if (embedding.length !== 1024) {
-      console.warn(`Warning: Expected 1024 dimensions, got ${embedding.length}`);
+      console.warn(
+        `Warning: Expected 1024 dimensions, got ${embedding.length}`,
+      );
     }
 
     return embedding;

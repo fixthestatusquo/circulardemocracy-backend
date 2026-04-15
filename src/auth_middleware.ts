@@ -1,5 +1,5 @@
-import { bearerAuth } from "hono/bearer-auth";
 import type { Context, Next } from "hono";
+import { bearerAuth } from "hono/bearer-auth";
 
 export interface AuthEnv {
   API_KEY: string;

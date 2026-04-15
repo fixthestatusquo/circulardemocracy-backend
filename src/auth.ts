@@ -1,13 +1,8 @@
+import { createClient } from "@supabase/supabase-js";
 import type { MiddlewareHandler } from "hono";
 import { createMiddleware } from "hono/factory";
-import { createClient } from "@supabase/supabase-js";
 
-interface Env {
-  SUPABASE_URL: string;
-  SUPABASE_KEY: string;
-}
-
-export const authMiddleware: MiddlewareHandler<any> = createMiddleware(
+export const authMiddleware: MiddlewareHandler = createMiddleware(
   async (c, next) => {
     const supabaseUrl = process.env.SUPABASE_URL || c.env?.SUPABASE_URL;
     const supabaseKey = process.env.SUPABASE_KEY || c.env?.SUPABASE_KEY;
@@ -19,7 +14,7 @@ export const authMiddleware: MiddlewareHandler<any> = createMiddleware(
 
     // Get the Authorization header
     const authHeader = c.req.header("Authorization");
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    if (!authHeader?.startsWith("Bearer ")) {
       return c.json({ error: "No authorization header" }, 401);
     }
 
@@ -29,7 +24,10 @@ export const authMiddleware: MiddlewareHandler<any> = createMiddleware(
     const supabase = createClient(supabaseUrl, supabaseKey);
 
     try {
-      const { data: { user }, error } = await supabase.auth.getUser(token);
+      const {
+        data: { user },
+        error,
+      } = await supabase.auth.getUser(token);
 
       if (error || !user) {
         console.error("Token verification failed:", error?.message);

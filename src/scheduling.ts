@@ -62,7 +62,9 @@ export function calculateReplySchedule(
 
     case "scheduled": {
       if (!scheduledFor) {
-        throw new Error("scheduled_for is required when send_timing is 'scheduled'");
+        throw new Error(
+          "scheduled_for is required when send_timing is 'scheduled'",
+        );
       }
 
       const scheduledDate = new Date(scheduledFor);
@@ -115,7 +117,7 @@ export function getNextOfficeHourSlot(date: Date): Date {
     date.toLocaleString("en-US", { timeZone: OFFICE_HOURS.timezone }),
   );
 
-  let nextSlot = new Date(cestDate);
+  const nextSlot = new Date(cestDate);
   const dayOfWeek = nextSlot.getDay();
   const hour = nextSlot.getHours();
 

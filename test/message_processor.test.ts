@@ -1,15 +1,17 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { DatabaseClient } from "../src/database";
 import {
-  processMessage,
-  MessageInput,
+  type MessageInput,
   PoliticianNotFoundError,
+  processMessage,
 } from "../src/message_processor";
-import { DatabaseClient } from "../src/database";
 
 // Mock the embedding service to avoid ONNX runtime errors
 vi.mock("../src/embedding_service", () => ({
   generateEmbedding: vi.fn().mockResolvedValue(new Array(1024).fill(0.1)),
-  formatEmailContentForEmbedding: vi.fn().mockReturnValue("# Test Subject\n\nTest message body"),
+  formatEmailContentForEmbedding: vi
+    .fn()
+    .mockReturnValue("# Test Subject\n\nTest message body"),
 }));
 
 // Mock DatabaseClient
