@@ -28,7 +28,7 @@ const SessionSchema = z.object({
   access_token: z.string(),
   token_type: z.string(),
   expires_in: z.number(),
-  expires_at: z.number().optional(),
+  expires_at: z.number(),
   refresh_token: z.string(),
   user: UserSchema,
 });
@@ -95,13 +95,16 @@ app.openapi(loginRoute, async (c) => {
   if (!userEmail) {
     return c.json({ error: "Session user email missing" }, 500);
   }
+  const expiresAt =
+    data.session.expires_at ??
+    Math.floor(Date.now() / 1000) + data.session.expires_in;
 
   return c.json(
     {
       access_token: data.session.access_token,
       token_type: data.session.token_type,
       expires_in: data.session.expires_in,
-      expires_at: data.session.expires_at,
+      expires_at: expiresAt,
       refresh_token: data.session.refresh_token,
       user: {
         id: data.session.user.id,
