@@ -62,8 +62,8 @@ export interface ReplyTemplate {
 }
 
 export interface ClassificationResult {
-  campaign_id: number;
-  campaign_name: string;
+  campaign_id: number | null;
+  campaign_name: string | null;
   confidence: number;
 }
 
@@ -252,42 +252,6 @@ export class DatabaseClient {
         throw fallbackError;
       }
       return fallback.map((camp) => ({ ...camp, distance: 0.1 }));
-    }
-  }
-
-  async getUncategorizedCampaign(): Promise<Campaign> {
-    try {
-      const { data: campaigns, error } = await this.supabase
-        .from("campaigns")
-        .select("id,name,slug,status")
-        .eq("slug", "uncategorized");
-
-      if (error) {
-        throw error;
-      }
-      if (campaigns.length > 0) {
-        return campaigns[0];
-      }
-
-      // Create uncategorized campaign
-      const { data: newCampaigns, error: createError } = await this.supabase
-        .from("campaigns")
-        .insert({
-          name: "Uncategorized",
-          slug: "uncategorized",
-          description: "Messages that could not be automatically categorized",
-          status: "active",
-          created_by: "system",
-        })
-        .select();
-
-      if (createError) {
-        throw createError;
-      }
-      return newCampaigns[0];
-    } catch (error) {
-      console.error("Error getting uncategorized campaign:", error);
-      throw new Error("Failed to get or create uncategorized campaign");
     }
   }
 
@@ -1180,12 +1144,14 @@ export class DatabaseClient {
 
     // Step 2: Update message with campaign classification
     await this.updateMessageFields(messageId, {
-      campaign_id: classification.campaign_id,
+      campaign_id: classification.campaign_id ?? undefined,
       classification_confidence: classification.confidence,
     });
 
-    // Step 3: Assign to cluster for grouping similar messages
-    await this.assignMessageToCluster(messageId, embedding, politicianId);
+    // Step 3: Assign to cluster only when campaign is still unknown
+    if (classification.campaign_id === null) {
+      await this.assignMessageToCluster(messageId, embedding, politicianId);
+    }
 
     return classification;
   }
@@ -1223,12 +1189,10 @@ export class DatabaseClient {
       }
     }
 
-    // Step 3: Fall back to uncategorized
-    const uncategorized = await this.getUncategorizedCampaign();
-
+    // Step 3: No reliable match -> keep campaign unset
     return {
-      campaign_id: uncategorized.id,
-      campaign_name: uncategorized.name,
+      campaign_id: null,
+      campaign_name: null,
       confidence: 0.1,
     };
   }

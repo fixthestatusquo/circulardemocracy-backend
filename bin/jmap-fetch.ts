@@ -5,6 +5,7 @@ import { processMessage, PoliticianNotFoundError, type Ai, type MessageInput } f
 import { z } from "zod";
 import Turndown from "turndown";
 import { config as dotenv } from "dotenv";
+import { pipeline, type FeatureExtractionPipeline } from "@xenova/transformers";
 
 dotenv();
 
@@ -174,7 +175,7 @@ OPTIONS:
   --process-all          Fetch all available messages (default when no filter provided)
   --since <date>         Fetch messages received after date (ISO 8601)
   --message-id <id>      Fetch one specific message (JMAP ID or Message-ID header)
-  --dry-run              Preview converted messages without processing/storage
+  --dry-run              Preview converted messages without processing/storage or folder moves
   -h, --help             Show this help message
 
 ENVIRONMENT VARIABLES:
@@ -193,25 +194,31 @@ EXAMPLES:
 `);
 }
 
-async function generateMockEmbedding(text: string): Promise<number[]> {
-  const embedding = new Array(1024).fill(0);
-  let hash = 0;
-  for (let i = 0; i < text.length; i++) {
-    hash = ((hash << 5) - hash) + text.charCodeAt(i);
-    hash = hash & hash;
-  }
-
-  for (let i = 0; i < embedding.length; i++) {
-    embedding[i] = ((hash * (i + 1)) % 1000) / 1000;
-  }
-
-  return embedding;
-}
-
 class CliAi implements Ai {
+  private static embeddingPipeline: FeatureExtractionPipeline | null = null;
+
+  private static async getEmbeddingPipeline(): Promise<FeatureExtractionPipeline> {
+    if (CliAi.embeddingPipeline) {
+      return CliAi.embeddingPipeline;
+    }
+
+    console.log("Loading local BGE-M3 model for embeddings...");
+    CliAi.embeddingPipeline = await pipeline("feature-extraction", "Xenova/bge-m3", {
+      quantized: true,
+    });
+    console.log("BGE-M3 model loaded.");
+
+    return CliAi.embeddingPipeline;
+  }
+
   async run(model: string, inputs: any): Promise<any> {
-    if (model === "@cf/baai/bge-m3" && inputs.text) {
-      const embedding = await generateMockEmbedding(inputs.text);
+    if (model === "@cf/baai/bge-m3" && typeof inputs?.text === "string") {
+      const embeddingModel = await CliAi.getEmbeddingPipeline();
+      const output = await embeddingModel(inputs.text.substring(0, 8000), {
+        pooling: "mean",
+        normalize: true,
+      });
+      const embedding = Array.from(output.data as Float32Array);
       return { data: [embedding] };
     }
     throw new Error(`Unsupported model or inputs: ${model}`);
@@ -397,6 +404,97 @@ function resolveAccountId(session: JmapSessionResponse): string {
   }
 
   throw new Error("No JMAP mail account found in session response");
+}
+
+function generateFolderPath(campaignName?: string | null): string {
+  if (!campaignName) {
+    return "Unclassified";
+  }
+
+  return campaignName
+    .replace(/[^a-zA-Z0-9\-_\s]/g, "")
+    .replace(/\s+/g, "-")
+    .substring(0, 50) || "Unclassified";
+}
+
+async function ensureMailboxExists(
+  apiUrl: string,
+  authHeader: string,
+  accountId: string,
+  folderName: string,
+): Promise<string> {
+  const queryResponses = await jmapCall(apiUrl, authHeader, [
+    [
+      "Mailbox/query",
+      {
+        accountId,
+        filter: { name: folderName },
+      },
+      "queryMailbox",
+    ],
+    [
+      "Mailbox/get",
+      {
+        accountId,
+        "#ids": {
+          resultOf: "queryMailbox",
+          name: "Mailbox/query",
+          path: "/ids",
+        },
+      },
+      "getMailbox",
+    ],
+  ]);
+
+  const getData = getMethodResponse(queryResponses, "Mailbox/get", "getMailbox");
+  if (Array.isArray(getData.list) && getData.list.length > 0) {
+    return getData.list[0].id;
+  }
+
+  const createResponses = await jmapCall(apiUrl, authHeader, [
+    [
+      "Mailbox/set",
+      {
+        accountId,
+        create: {
+          newMailbox: { name: folderName },
+        },
+      },
+      "createMailbox",
+    ],
+  ]);
+
+  const setData = getMethodResponse(createResponses, "Mailbox/set", "createMailbox");
+  if (setData.created?.newMailbox?.id) {
+    return setData.created.newMailbox.id;
+  }
+
+  throw new Error(`Failed to create mailbox: ${folderName}`);
+}
+
+async function moveEmailToMailbox(
+  apiUrl: string,
+  authHeader: string,
+  accountId: string,
+  emailId: string,
+  targetMailboxId: string,
+): Promise<void> {
+  await jmapCall(apiUrl, authHeader, [
+    [
+      "Email/set",
+      {
+        accountId,
+        update: {
+          [emailId]: {
+            mailboxIds: {
+              [targetMailboxId]: true,
+            },
+          },
+        },
+      },
+      "moveEmail",
+    ],
+  ]);
 }
 
 async function fetchEmailPage(
@@ -620,22 +718,62 @@ function createCliCompatibleDb(db: DatabaseClient): DatabaseClient {
 
   const compatibleDb = Object.create(db) as DatabaseClient;
 
-  (compatibleDb as any).findSimilarCampaigns = async (_embedding: number[], limit = 3) => {
-    const { data, error } = await supabase
-      .from("campaigns")
-      .select("id,name,slug,status")
-      .in("status", ["active", "unconfirmed"])
-      .not("reference_vector", "is", null)
-      .limit(limit);
-
-    if (error) {
-      throw error;
+  (compatibleDb as any).classifyMessage = async (
+    embedding: number[],
+    _politicianId: number,
+    campaignHint?: string,
+  ) => {
+    if (campaignHint) {
+      const hintCampaign = await db.findCampaignByHint(campaignHint);
+      if (hintCampaign) {
+        return {
+          campaign_id: hintCampaign.id,
+          campaign_name: hintCampaign.name,
+          confidence: 0.95,
+        };
+      }
     }
 
-    return (data || []).map((campaign: any) => ({
-      ...campaign,
-      similarity: 0.1,
-    }));
+    const similarCampaigns = await db.findSimilarCampaigns(embedding, 3);
+    if (similarCampaigns.length > 0) {
+      const best = similarCampaigns[0];
+      if (best.distance < 0.1) {
+        return {
+          campaign_id: best.id,
+          campaign_name: best.name,
+          confidence: 1 - best.distance,
+        };
+      }
+    }
+
+    return {
+      campaign_id: null,
+      campaign_name: null,
+      confidence: 0.1,
+    };
+  };
+
+  (compatibleDb as any).classifyAndAssignToCluster = async (
+    messageId: number,
+    embedding: number[],
+    politicianId: number,
+    campaignHint?: string,
+  ) => {
+    const classification = await (compatibleDb as any).classifyMessage(
+      embedding,
+      politicianId,
+      campaignHint,
+    );
+
+    await db.updateMessageFields(messageId, {
+      campaign_id: classification.campaign_id,
+      classification_confidence: classification.confidence,
+    });
+
+    if (classification.campaign_id === null) {
+      await db.assignMessageToCluster(messageId, embedding, politicianId);
+    }
+    return classification;
   };
 
   (compatibleDb as any).insertMessage = async (data: Record<string, unknown>) => {
@@ -687,6 +825,34 @@ function createCliCompatibleDb(db: DatabaseClient): DatabaseClient {
   return compatibleDb;
 }
 
+async function getAlreadyProcessedExternalIds(
+  db: DatabaseClient,
+  externalIds: string[],
+): Promise<Set<string>> {
+  const uniqueIds = Array.from(new Set(externalIds.filter((id) => id.trim().length > 0)));
+  if (uniqueIds.length === 0) {
+    return new Set<string>();
+  }
+
+  const supabase = (db as any).supabase;
+  if (!supabase) {
+    return new Set<string>();
+  }
+
+  const { data, error } = await supabase
+    .from("messages")
+    .select("external_id")
+    .eq("channel_source", "stalwart")
+    .eq("processing_status", "processed")
+    .in("external_id", uniqueIds);
+
+  if (error) {
+    throw new Error(`Failed to check already processed messages: ${error.message}`);
+  }
+
+  return new Set((data || []).map((row: { external_id: string }) => row.external_id));
+}
+
 async function runStalwartIngestion(
   db: DatabaseClient,
   ai: Ai,
@@ -701,6 +867,7 @@ async function runStalwartIngestion(
   console.log(`Connecting to Stalwart JMAP at ${endpoint}...`);
   const session = await fetchJmapSession(endpoint, authHeader);
   const accountId = resolveAccountId(session);
+  const mailboxCache = new Map<string, string>();
 
   let rawEmails: JmapEmail[] = [];
   if (options.messageId) {
@@ -730,9 +897,19 @@ async function runStalwartIngestion(
     );
   }
 
+  const processedExternalIds = await getAlreadyProcessedExternalIds(
+    db,
+    rawEmails.map((email) => email.id),
+  );
+  const unprocessedRawEmails = rawEmails.filter((email) => !processedExternalIds.has(email.id));
+
+  if (processedExternalIds.size > 0) {
+    console.log(`Skipping ${processedExternalIds.size} already processed message(s).`);
+  }
+
   const validMessages: MessageInput[] = [];
   let skippedCount = 0;
-  for (const rawEmail of rawEmails) {
+  for (const rawEmail of unprocessedRawEmails) {
     try {
       validMessages.push(convertJmapEmailToMessageInput(rawEmail));
     } catch (error) {
@@ -743,7 +920,7 @@ async function runStalwartIngestion(
   }
 
   console.log(
-    `Fetched ${rawEmails.length} message(s); ${validMessages.length} valid, ${skippedCount} skipped`,
+    `Fetched ${rawEmails.length} message(s); ${unprocessedRawEmails.length} unprocessed, ${validMessages.length} valid, ${skippedCount} skipped`,
   );
 
   if (options.dryRun) {
@@ -761,6 +938,7 @@ async function runStalwartIngestion(
     duplicates: 0,
     politicianNotFound: 0,
     failed: 0,
+    moved: 0,
   };
 
   for (const messageInput of validMessages) {
@@ -771,6 +949,20 @@ async function runStalwartIngestion(
         console.log(
           `Processed ${messageInput.external_id} -> campaign=${result.campaign_name || "unknown"} confidence=${result.confidence ?? "n/a"}`,
         );
+        const folderPath = generateFolderPath(result.campaign_name);
+        try {
+          let mailboxId = mailboxCache.get(folderPath);
+          if (!mailboxId) {
+            mailboxId = await ensureMailboxExists(session.apiUrl, authHeader, accountId, folderPath);
+            mailboxCache.set(folderPath, mailboxId);
+          }
+          await moveEmailToMailbox(session.apiUrl, authHeader, accountId, messageInput.external_id, mailboxId);
+          summary.moved += 1;
+          console.log(`Moved ${messageInput.external_id} -> folder=${folderPath}`);
+        } catch (moveError) {
+          const reason = moveError instanceof Error ? moveError.message : "Unknown error";
+          console.warn(`Failed to move ${messageInput.external_id}: ${reason}`);
+        }
       } else if (result.status === "duplicate") {
         summary.duplicates += 1;
         console.log(`Duplicate ${messageInput.external_id}`);
@@ -795,6 +987,7 @@ async function runStalwartIngestion(
   console.log(`Duplicates: ${summary.duplicates}`);
   console.log(`Politician not found: ${summary.politicianNotFound}`);
   console.log(`Failed: ${summary.failed}`);
+  console.log(`Moved to folders: ${summary.moved}`);
 
   return summary.failed === 0;
 }

@@ -596,7 +596,7 @@ function generateFolderName(
   duplicateRank: number,
   isReply = false,
 ): string {
-  // If no campaign assigned, use unclassified folder
+  // If no campaign assigned, use the shared Unclassified folder
   if (!classification.campaign_name) {
     return "Unclassified";
   }

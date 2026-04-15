@@ -202,8 +202,8 @@ function extractBodyFromParts(
 }
 
 function generateFolderPath(campaignName: string | null): string {
-  if (!campaignName || campaignName === "Uncategorized") {
-    return "Uncategorized";
+  if (!campaignName) {
+    return "Unclassified";
   }
 
   const campaignFolder = campaignName
@@ -378,7 +378,7 @@ USAGE:
 OPTIONS:
   --user <username>      JMAP username (default: STALWART_USERNAME env)
   --password <password>  JMAP app password (default: STALWART_APP_PASSWORD env)
-  --process-all          Reprocess uncategorized messages from Stalwart inbox (no campaign_id or campaign_id 472)
+  --process-all          Reprocess uncategorized messages from Stalwart inbox (campaign_id is null)
   --campaign-id <id>     Only reprocess messages for a specific campaign
   --since <date>         Only reprocess messages received after date (ISO 8601)
   --limit <number>       Maximum number of messages to reprocess
@@ -435,9 +435,9 @@ async function reprocessMessages(
     query = query.eq("campaign_id", options.campaignId);
   }
 
-  // When using --process-all, only process uncategorized messages (no campaign_id or campaign_id 472)
+  // When using --process-all, only process uncategorized messages (campaign_id is null)
   if (options.processAll) {
-    query = query.or("campaign_id.is.null,campaign_id.eq.472");
+    query = query.is("campaign_id", null);
   }
 
   if (options.since) {
