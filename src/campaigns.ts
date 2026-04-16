@@ -97,12 +97,16 @@ const statsRoute = createRoute({
 
 app.openapi(statsRoute, async (c) => {
   const db = c.get("db") as DatabaseClient;
-  try {
-    const stats = await db.request("/rpc/get_campaign_stats");
-    return c.json({ campaigns: stats });
-  } catch (_error) {
-    return c.json({ success: false, error: "Failed to fetch statistics" }, 500);
-  }
+  const stats = await db.request<
+    Array<{
+      id: number;
+      name: string;
+      message_count: number;
+      recent_count: number;
+      avg_confidence?: number;
+    }>
+  >("/rpc/get_campaign_stats");
+  return c.json({ campaigns: stats });
 });
 
 // Get Single Campaign
@@ -163,3 +167,115 @@ app.openapi(createCampaignRoute, async (c) => {
 });
 
 export default app;
+
+// =============================================================================
+// BROADCAST REPLIES
+// =============================================================================
+
+const broadcastRepliesRoute = createRoute({
+  method: "post",
+  path: "/api/v1/campaigns/{id}/replies/broadcast",
+  security: [{ Bearer: [] }],
+  request: {
+    params: z.object({ id: z.string().regex(/^\d+$/) }),
+  },
+  responses: {
+    200: {
+      content: {
+        "application/json": {
+          schema: z.object({
+            success: z.boolean(),
+            campaign_id: z.number(),
+            supporter_count: z.number(),
+            messages_created: z.number(),
+            failures: z.number(),
+          }),
+        },
+      },
+      description:
+        "Broadcast of the active reply template to all supporters was queued.",
+    },
+    400: {
+      description: "Bad request (e.g. no active template or no supporters)",
+    },
+    401: { description: "Unauthorized" },
+    403: { description: "Forbidden" },
+  },
+  tags: ["Campaigns"],
+  summary: "/api/v1/campaigns/{id}/replies/broadcast",
+});
+
+app.openapi(broadcastRepliesRoute, async (c) => {
+  const db = c.get("db") as DatabaseClient;
+  const { id } = c.req.valid("param");
+  const campaignId = Number.parseInt(id, 10);
+
+  const supporterRows = await db.getSupportersForCampaign(campaignId);
+
+  // Build broadcast recipients from long-term supporter hashes + short-term contacts
+  const recipients = await db.getCampaignBroadcastRecipients(campaignId);
+  if (recipients.length === 0) {
+    const errorMessage =
+      supporterRows.length === 0
+        ? "No supporters found for this campaign"
+        : "No short-term message contacts found for supporters; ingest new messages to capture reply contacts";
+    return c.json(
+      {
+        success: false,
+        campaign_id: campaignId,
+        supporter_count: supporterRows.length,
+        recipient_count: 0,
+        messages_created: 0,
+        failures: 0,
+        error: errorMessage,
+      },
+      400,
+    );
+  }
+
+  // We deliberately do not touch PII rules in messages:
+  // messages are created without email addresses; email stays in supporters only.
+
+  let messagesCreated = 0;
+  let failures = 0;
+
+  for (const recipient of recipients) {
+    try {
+      const messageId = await db.createBroadcastMessageForSupporter({
+        campaignId,
+        politicianId: recipient.politician_id,
+        senderHash: recipient.sender_hash,
+      });
+
+      if (!messageId) {
+        failures++;
+        continue;
+      }
+
+      await db.storeMessageContact({
+        messageId,
+        senderHash: recipient.sender_hash,
+        senderEmail: recipient.email,
+      });
+
+      messagesCreated++;
+    } catch (error) {
+      console.error(
+        "Failed to create broadcast message for supporter:",
+        recipient.sender_hash,
+        error,
+      );
+      failures++;
+    }
+  }
+
+  return c.json({
+    success: failures === 0,
+    campaign_id: campaignId,
+    supporter_count: supporterRows.length,
+    recipient_count: recipients.length,
+    messages_created: messagesCreated,
+    failures,
+  });
+});
+

@@ -222,10 +222,10 @@ async function processSingleMessage(
     throw new Error(errorMsg);
   }
 
-  // 3. Get original sender email from sender_emails table
-  const senderEmail = await db.getSenderEmailByMessageId(message.id);
+  // 3. Resolve recipient email from short-term contact storage
+  const senderEmail = await db.getMessageContactEmail(message.id);
   if (!senderEmail) {
-    const errorMsg = `Sender email not found for message ${message.id}`;
+    const errorMsg = `Short-term contact email not found for message ${message.id}`;
     await handleSendFailure(db, message, errorMsg);
     throw new Error(errorMsg);
   }
@@ -274,8 +274,6 @@ async function processSingleMessage(
       campaign_id: message.campaign_id,
       politician_id: message.politician_id,
       supporter_id: sendContext.supporterId,
-      sender_email: sendContext.senderAddress,
-      recipient_email: senderEmail,
       subject: emailContent.subject,
       status: "failed",
       provider: "jmap",
@@ -290,8 +288,6 @@ async function processSingleMessage(
     campaign_id: message.campaign_id,
     politician_id: message.politician_id,
     supporter_id: sendContext.supporterId,
-    sender_email: sendContext.senderAddress,
-    recipient_email: senderEmail,
     subject: emailContent.subject,
     status: "sent",
     provider: "jmap",
