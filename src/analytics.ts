@@ -110,7 +110,7 @@ app.openapi(getMessageAnalyticsRoute, async (c) => {
       throw error;
     }
 
-    return c.json({ analytics: analytics ?? [] });
+    return c.json({ analytics: analytics ?? [] }, 200);
   } catch (error) {
     console.error("Error fetching message analytics:", error);
     return c.json(
