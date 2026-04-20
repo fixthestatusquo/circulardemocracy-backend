@@ -1,8 +1,7 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import app from "../src/api";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // Mock the embedding service to avoid ONNX runtime errors
-vi.mock("../src/embedding_service", () => ({
+vi.mock("../src/embedding_service.ts", () => ({
   generateEmbedding: vi.fn().mockResolvedValue(new Array(1024).fill(0.1)),
   formatEmailContentForEmbedding: vi
     .fn()
@@ -16,8 +15,10 @@ const mockDbInstance = {
 };
 
 // --- Mock the entire database module ---
-vi.mock("../src/database", () => ({
-  DatabaseClient: vi.fn(() => mockDbInstance),
+vi.mock("../src/database.ts", () => ({
+  DatabaseClient: vi.fn(function MockDatabaseClient() {
+    return mockDbInstance;
+  }),
 }));
 
 // Mock Supabase client for auth
@@ -33,6 +34,8 @@ vi.mock("@supabase/supabase-js", () => ({
 }));
 
 describe("Analytics API Integration", () => {
+  let app: (typeof import("../src/api"))["default"];
+
   const env = {
     AI: { run: vi.fn() },
     SUPABASE_URL: "https://test.supabase.co",
@@ -44,8 +47,11 @@ describe("Analytics API Integration", () => {
     JMAP_PASSWORD: "pass",
   };
 
-  beforeEach(() => {
+  beforeEach(async () => {
+    vi.resetModules();
     vi.clearAllMocks();
+    const apiModule = await import("../src/api.ts");
+    app = apiModule.default;
     // Default: mock failed auth
     mockGetUser.mockResolvedValue({
       data: { user: null },

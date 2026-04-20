@@ -188,16 +188,20 @@ app.openapi(messageRoute, async (c) => {
     );
 
     if (result.status === "duplicate") {
-      // @ts-expect-error
       return c.json(result, 409);
     }
 
     if (!result.success) {
-      // @ts-expect-error
-      return c.json(result, 500);
+      return c.json(
+        {
+          success: false,
+          error: "Message processing failed",
+          details: (result.errors || []).join(", ") || "Unknown processing failure",
+        },
+        500,
+      );
     }
 
-    // @ts-expect-error
     return c.json(result, 200);
   } catch (error) {
     if (error instanceof PoliticianNotFoundError) {

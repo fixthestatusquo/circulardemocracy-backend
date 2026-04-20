@@ -161,6 +161,17 @@ const mtaHookRoute = createRoute({
       },
       description: "Instructions for message handling",
     },
+    401: {
+      content: {
+        "application/json": {
+          schema: z.object({
+            action: z.literal("reject"),
+            reject_reason: z.string(),
+          }),
+        },
+      },
+      description: "Unauthorized: invalid API key",
+    },
     500: {
       content: {
         "application/json": {
@@ -222,7 +233,7 @@ app.openapi(mtaHookRoute, async (c) => {
 
     // Process each recipient with the shared campaign classification
     const results = await Promise.all(
-      hookData.recipients.map(async (recipientEmail) => {
+      hookData.recipients.map(async (recipientEmail: string) => {
         return await processEmailForRecipient(
           db,
           c.env.AI,
@@ -241,7 +252,7 @@ app.openapi(mtaHookRoute, async (c) => {
         confidence: 0,
         reject_reason: "No recipients",
       };
-      return c.json<StalwartResponse>(emptyRes);
+      return c.json(emptyRes, 200);
     }
 
     // Use the result with highest confidence (they should all have same folder now)
@@ -253,7 +264,7 @@ app.openapi(mtaHookRoute, async (c) => {
       `Email processed: campaign=${bestResult.modifications?.headers?.["X-CircularDemocracy-Campaign"]}, confidence=${bestResult.confidence}`,
     );
 
-    return c.json<StalwartResponse>(bestResult);
+    return c.json(bestResult, 200);
   } catch (error) {
     console.error("MTA Hook processing error:", error);
 
@@ -263,7 +274,7 @@ app.openapi(mtaHookRoute, async (c) => {
       error: error instanceof Error ? error.message : "Unknown error",
     };
     // src/stalwart.ts - Stalwart MTA Hook Worker
-    return c.json<ErrorResponse>(errorRes, 500);
+    return c.json(errorRes, 500);
   }
 });
 
@@ -650,7 +661,7 @@ function generateFolderName(
   _duplicateRank: number,
   _isReply = false,
 ): string {
-  // If no campaign assigned, use unclassified folder
+  // If no campaign assigned, use the shared Unclassified folder
   if (!classification.campaign_name) {
     return "Unclassified";
   }

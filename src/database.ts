@@ -62,8 +62,8 @@ export interface ReplyTemplate {
 }
 
 export interface ClassificationResult {
-  campaign_id: number;
-  campaign_name: string;
+  campaign_id: number | null;
+  campaign_name: string | null;
   confidence: number;
 }
 
@@ -264,42 +264,6 @@ export class DatabaseClient {
         throw fallbackError;
       }
       return fallback.map((camp) => ({ ...camp, distance: 0.1 }));
-    }
-  }
-
-  async getUncategorizedCampaign(): Promise<Campaign> {
-    try {
-      const { data: campaigns, error } = await this.supabase
-        .from("campaigns")
-        .select("id,name,slug,status")
-        .eq("slug", "uncategorized");
-
-      if (error) {
-        throw error;
-      }
-      if (campaigns.length > 0) {
-        return campaigns[0];
-      }
-
-      // Create uncategorized campaign
-      const { data: newCampaigns, error: createError } = await this.supabase
-        .from("campaigns")
-        .insert({
-          name: "Uncategorized",
-          slug: "uncategorized",
-          description: "Messages that could not be automatically categorized",
-          status: "active",
-          created_by: "system",
-        })
-        .select();
-
-      if (createError) {
-        throw createError;
-      }
-      return newCampaigns[0];
-    } catch (error) {
-      console.error("Error getting uncategorized campaign:", error);
-      throw new Error("Failed to get or create uncategorized campaign");
     }
   }
 
@@ -832,8 +796,7 @@ export class DatabaseClient {
       if (error) {
         throw error;
       }
-      // @ts-expect-error - Supabase types are sometimes tricky with joins
-      return data.length > 0 ? data[0] : null;
+      return data.length > 0 ? (data[0] as MessageInsert & { id: number; campaigns: Campaign }) : null;
     } catch (error) {
       console.error("Error getting message by external ID:", error);
       return null;
@@ -1222,6 +1185,113 @@ export class DatabaseClient {
     }
   }
 
+  async getMessagesReadyToSend(maxRetryAttempts: number): Promise<Array<{
+    id: number;
+    external_id: string;
+    politician_id: number;
+    campaign_id: number;
+    sender_hash: string;
+    reply_status: "pending" | "scheduled";
+    reply_scheduled_at: string | null;
+    received_at: string;
+    reply_retry_count: number | null;
+  }>> {
+    const { data, error } = await this.supabase
+      .from("messages")
+      .select(
+        "id, external_id, politician_id, campaign_id, sender_hash, reply_status, reply_scheduled_at, received_at, reply_retry_count",
+      )
+      .in("reply_status", ["pending", "scheduled"])
+      .is("reply_sent_at", null)
+      .lt("reply_retry_count", maxRetryAttempts)
+      .or("reply_scheduled_at.is.null,reply_scheduled_at.lte.now()");
+
+    if (error) {
+      throw error;
+    }
+
+    return data || [];
+  }
+
+  async getMessageReadyToSendById(messageId: number): Promise<{
+    id: number;
+    external_id: string;
+    politician_id: number;
+    campaign_id: number;
+    sender_hash: string;
+    reply_status: "pending" | "scheduled";
+    reply_scheduled_at: string | null;
+    received_at: string;
+    reply_retry_count: number | null;
+  } | null> {
+    const { data, error } = await this.supabase
+      .from("messages")
+      .select(
+        "id, external_id, politician_id, campaign_id, sender_hash, reply_status, reply_scheduled_at, received_at, reply_retry_count",
+      )
+      .eq("id", messageId)
+      .in("reply_status", ["pending", "scheduled"])
+      .is("reply_sent_at", null)
+      .limit(1);
+
+    if (error) {
+      throw error;
+    }
+
+    return data && data.length > 0 ? data[0] : null;
+  }
+
+  async getCampaignById(campaignId: number): Promise<{
+    id: number;
+    name: string;
+    technical_email: string | null;
+    reply_to_email: string | null;
+  } | null> {
+    const { data, error } = await this.supabase
+      .from("campaigns")
+      .select("id, name, technical_email, reply_to_email")
+      .eq("id", campaignId)
+      .limit(1);
+
+    if (error) {
+      throw error;
+    }
+
+    return data && data.length > 0 ? data[0] : null;
+  }
+
+  async getPoliticianById(politicianId: number): Promise<{
+    id: number;
+    email: string;
+    name: string;
+  } | null> {
+    const { data, error } = await this.supabase
+      .from("politicians")
+      .select("id, email, name")
+      .eq("id", politicianId)
+      .limit(1);
+
+    if (error) {
+      throw error;
+    }
+
+    return data && data.length > 0 ? data[0] : null;
+  }
+
+  async markMessageAsSent(messageId: number): Promise<void> {
+    const { error } = await this.supabase
+      .from("messages")
+      .update({
+        reply_status: "sent",
+        reply_sent_at: new Date().toISOString(),
+      })
+      .eq("id", messageId);
+
+    if (error) {
+      throw error;
+    }
+  }
+
   // =============================================================================
   // CLASSIFICATION LOGIC
   // =============================================================================
@@ -1241,12 +1311,14 @@ export class DatabaseClient {
 
     // Step 2: Update message with campaign classification
     await this.updateMessageFields(messageId, {
-      campaign_id: classification.campaign_id,
+      campaign_id: classification.campaign_id ?? undefined,
       classification_confidence: classification.confidence,
     });
 
-    // Step 3: Assign to cluster for grouping similar messages
-    await this.assignMessageToCluster(messageId, embedding, politicianId);
+    // Step 3: Assign to cluster only when campaign is still unknown
+    if (classification.campaign_id === null) {
+      await this.assignMessageToCluster(messageId, embedding, politicianId);
+    }
 
     return classification;
   }
@@ -1284,12 +1356,10 @@ export class DatabaseClient {
       }
     }
 
-    // Step 3: Fall back to uncategorized
-    const uncategorized = await this.getUncategorizedCampaign();
-
+    // Step 3: No reliable match -> keep campaign unset
     return {
-      campaign_id: uncategorized.id,
-      campaign_name: uncategorized.name,
+      campaign_id: null,
+      campaign_name: null,
       confidence: 0.1,
     };
   }

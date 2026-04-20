@@ -1,5 +1,3 @@
-import { vi } from "vitest";
-
 // Mock Cloudflare Workers globals
 Object.defineProperty(global, "crypto", {
   value: {
@@ -39,20 +37,14 @@ Object.defineProperty(global, "crypto", {
   configurable: true,
 });
 
-// Mock console methods for cleaner test output
-const originalConsole = console;
-global.console = {
-  ...originalConsole,
-  log: () => {},
-  error: () => {},
-  warn: () => {},
-  info: () => {},
-};
+// Ensure test-safe defaults when bindings are unavailable
+process.env.SUPABASE_URL ||= "https://test.supabase.co";
+process.env.SUPABASE_KEY ||= "test-key";
+process.env.API_KEY ||= "test-api-key";
 
-// Restore console for debugging when needed
+// Compatibility helper used by older tests.
 export function restoreConsole() {
-  global.console = originalConsole;
+  // No-op: console is no longer globally mocked in setup.
 }
 
-// Mock fetch globally
-global.fetch = vi.fn();
+

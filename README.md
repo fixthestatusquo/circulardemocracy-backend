@@ -370,8 +370,14 @@ npm run jmap-fetch -- [--user <username>] [--password <password>] [options]
 - `--process-all`: Fetch all available messages (default when no filter provided)
 - `--since <date>`: Fetch messages received after a date (ISO 8601)
 - `--message-id <id>`: Fetch one specific message (JMAP ID or Message-ID header)
-- `--dry-run`: Preview converted messages without processing/storage
+- `--dry-run`: Preview converted messages without processing/storage (does not move messages between folders)
 - `-h, --help`: Show help message
+
+**Behavior notes:**
+
+- Normal runs automatically move each successfully processed message to a campaign folder in Stalwart.
+- If no campaign match is found, the message is stored with `campaign_id = null` and moved to the `Unclassified` folder.
+- Dry runs never move messages.
 
 **Examples:**
 
@@ -411,7 +417,7 @@ npx tsx bin/reprocess-messages.ts [options]
 
 - `--user <username>`: JMAP username (default: `STALWART_USERNAME` env)
 - `--password <password>`: JMAP app password (default: `STALWART_APP_PASSWORD` env)
-- `--process-all`: Reprocess uncategorized messages from Stalwart inbox (no campaign_id or campaign_id 472)
+- `--process-all`: Reprocess uncategorized messages from Stalwart inbox (`campaign_id` is null)
 - `--campaign-id <id>`: Only reprocess messages for a specific campaign
 - `--since <date>`: Only reprocess messages received after a date (ISO 8601)
 - `--limit <number>`: Maximum number of messages to reprocess

@@ -137,19 +137,7 @@ async function getMessagesReadyToSend(
     // - reply_scheduled_at is NULL (immediate) OR <= NOW (scheduled time reached)
     // - reply_sent_at is NULL (not already sent)
     // - reply_retry_count < MAX_RETRY_ATTEMPTS (haven't exceeded retry limit)
-    const { data, error } = await db.supabase
-      .from("messages")
-      .select(
-        "id, external_id, politician_id, campaign_id, sender_hash, reply_status, reply_scheduled_at, received_at, reply_retry_count",
-      )
-      .in("reply_status", ["pending", "scheduled"])
-      .is("reply_sent_at", null)
-      .lt("reply_retry_count", MAX_RETRY_ATTEMPTS)
-      .or("reply_scheduled_at.is.null,reply_scheduled_at.lte.now()");
-
-    if (error) {
-      throw error;
-    }
+    const data = await db.getMessagesReadyToSend(MAX_RETRY_ATTEMPTS);
 
     // Ensure reply_retry_count has a default value of 0
     const messages = (data || []).map((msg) => ({
@@ -169,27 +157,15 @@ async function getMessageById(
   messageId: number,
 ): Promise<MessageToProcess | null> {
   try {
-    const { data, error } = await db.supabase
-      .from("messages")
-      .select(
-        "id, external_id, politician_id, campaign_id, sender_hash, reply_status, reply_scheduled_at, received_at, reply_retry_count",
-      )
-      .eq("id", messageId)
-      .in("reply_status", ["pending", "scheduled"])
-      .is("reply_sent_at", null)
-      .limit(1);
+    const record = await db.getMessageReadyToSendById(messageId);
 
-    if (error) {
-      throw error;
-    }
-
-    if (!data || data.length === 0) {
+    if (!record) {
       return null;
     }
 
     return {
-      ...data[0],
-      reply_retry_count: data[0].reply_retry_count ?? 0,
+      ...record,
+      reply_retry_count: record.reply_retry_count ?? 0,
     };
   } catch (error) {
     console.error("Error fetching message by ID:", error);
@@ -369,17 +345,7 @@ async function getCampaignById(
   reply_to_email: string | null;
 } | null> {
   try {
-    const { data, error } = await db.supabase
-      .from("campaigns")
-      .select("id, name, technical_email, reply_to_email")
-      .eq("id", campaignId)
-      .limit(1);
-
-    if (error) {
-      throw error;
-    }
-
-    return data && data.length > 0 ? data[0] : null;
+    return await db.getCampaignById(campaignId);
   } catch (error) {
     console.error("Error fetching campaign:", error);
     return null;
@@ -394,17 +360,7 @@ async function getPoliticianById(
   politicianId: number,
 ): Promise<{ id: number; email: string; name: string } | null> {
   try {
-    const { data, error } = await db.supabase
-      .from("politicians")
-      .select("id, email, name")
-      .eq("id", politicianId)
-      .limit(1);
-
-    if (error) {
-      throw error;
-    }
-
-    return data && data.length > 0 ? data[0] : null;
+    return await db.getPoliticianById(politicianId);
   } catch (error) {
     console.error("Error fetching politician:", error);
     return null;
@@ -419,17 +375,7 @@ async function markMessageAsSent(
   messageId: number,
 ): Promise<void> {
   try {
-    const { error } = await db.supabase
-      .from("messages")
-      .update({
-        reply_status: "sent",
-        reply_sent_at: new Date().toISOString(),
-      })
-      .eq("id", messageId);
-
-    if (error) {
-      throw error;
-    }
+    await db.markMessageAsSent(messageId);
   } catch (error) {
     console.error("Error marking message as sent:", error);
     throw error;

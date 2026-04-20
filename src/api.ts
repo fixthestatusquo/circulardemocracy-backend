@@ -32,8 +32,8 @@ app.use("/api/*", async (c, next) => {
   c.set(
     "db",
     new DatabaseClient({
-      url: process.env.SUPABASE_URL || c.env.SUPABASE_URL,
-      key: process.env.SUPABASE_KEY || c.env.SUPABASE_KEY,
+      url: process.env.SUPABASE_URL || c.env?.SUPABASE_URL,
+      key: process.env.SUPABASE_KEY || c.env?.SUPABASE_KEY,
     }),
   );
   await next();

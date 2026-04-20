@@ -37,15 +37,6 @@ describe("DatabaseClient", () => {
     mockFetch.mockClear();
     mockFetch.mockReset();
 
-    // Mock all database methods that could cause timeouts
-    vi.spyOn(db, "getUncategorizedCampaign").mockResolvedValue({
-      id: 999,
-      name: "Uncategorized",
-      slug: "uncategorized",
-      status: "active",
-      reference_vector: new Array(1024).fill(0),
-    });
-
     vi.spyOn(db, "assignMessageToCluster").mockResolvedValue(1);
     vi.spyOn(db, "updateMessageFields").mockResolvedValue(undefined);
   });
@@ -185,8 +176,8 @@ describe("DatabaseClient", () => {
       );
 
       expect(result).toEqual({
-        campaign_id: 999, // Uncategorized campaign ID
-        campaign_name: "Uncategorized",
+        campaign_id: null,
+        campaign_name: null,
         confidence: 0.1,
       });
 

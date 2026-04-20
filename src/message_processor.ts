@@ -73,9 +73,7 @@ export async function processMessage(
     let campaignName = "Unknown";
     let campaignId = existingMessage.campaign_id;
 
-    // @ts-expect-error - Handle Supabase join result structure
     if (existingMessage.campaigns) {
-      // @ts-expect-error
       const camp = Array.isArray(existingMessage.campaigns)
         ? existingMessage.campaigns[0]
         : existingMessage.campaigns;

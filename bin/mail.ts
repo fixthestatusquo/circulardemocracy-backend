@@ -97,7 +97,7 @@ export function parseArgs(): MessageInput | null {
   } catch (error) {
     console.error('Validation error:');
     if (error instanceof z.ZodError) {
-      error.errors.forEach(err => {
+      error.issues.forEach(err => {
         console.error(`  ${err.path.join('.')}: ${err.message}`);
       });
     } else {

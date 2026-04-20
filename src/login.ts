@@ -22,7 +22,6 @@ const LoginSchema = z.object({
 const UserSchema = z.object({
   id: z.string(),
   email: z.string().email(),
-  // Add other user fields if you need them in the response
 });
 
 const SessionSchema = z.object({
@@ -61,6 +60,12 @@ const loginRoute = createRoute({
         "application/json": { schema: z.object({ error: z.string() }) },
       },
     },
+    500: {
+      description: "Invalid auth provider response",
+      content: {
+        "application/json": { schema: z.object({ error: z.string() }) },
+      },
+    },
   },
   tags: ["Auth"],
 });
@@ -73,24 +78,41 @@ app.openapi(loginRoute, async (c) => {
     process.env.SUPABASE_URL || c.env.SUPABASE_URL,
     process.env.SUPABASE_KEY || c.env.SUPABASE_KEY,
   );
-  console.log(
-    process.env.SUPABASE_URL,
-    process.env.SUPABASE_KEY ? "present" : "missing",
-    email,
-  );
-
   const { data, error } = await supabase.auth.signInWithPassword({
     email,
     password,
   });
 
-  console.log(data, error);
-
   if (error) {
     return c.json({ error: error?.code || "Invalid credentials" }, 401);
   }
 
-  return c.json(data.session);
+  if (!data.session) {
+    return c.json({ error: "Invalid credentials" }, 401);
+  }
+
+  const userEmail = data.session.user.email;
+  if (!userEmail) {
+    return c.json({ error: "Session user email missing" }, 500);
+  }
+  const expiresAt =
+    data.session.expires_at ??
+    Math.floor(Date.now() / 1000) + data.session.expires_in;
+
+  return c.json(
+    {
+      access_token: data.session.access_token,
+      token_type: data.session.token_type,
+      expires_in: data.session.expires_in,
+      expires_at: expiresAt,
+      refresh_token: data.session.refresh_token,
+      user: {
+        id: data.session.user.id,
+        email: userEmail,
+      },
+    },
+    200,
+  );
 });
 
 export default app;
