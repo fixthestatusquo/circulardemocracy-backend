@@ -45,17 +45,17 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.12",
-    "@cloudflare/workers-types": "^4.20260415.1",
+    "@cloudflare/workers-types": "^4.20260420.1",
     "@hono/node-server": "^1.19.14",
-    "@redocly/cli": "^2.27.1",
+    "@redocly/cli": "^2.29.0",
     "@types/turndown": "^5.0.6",
     "@vitest/coverage-v8": "^4.1.4",
     "minimist": "^1.2.8",
-    "swagger-typescript-api": "^13.6.8",
+    "swagger-typescript-api": "^13.6.10",
     "tsx": "^4.21.0",
-    "typescript": "^6.0.2",
+    "typescript": "^6.0.3",
     "vitest": "^4.1.4",
-    "wrangler": "^4.82.2"
+    "wrangler": "^4.83.0"
   },
   "engines": {
     "node": ">=18.0.0"
