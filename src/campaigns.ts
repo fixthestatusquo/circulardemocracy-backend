@@ -1,9 +1,12 @@
 import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
 import { authMiddleware } from "./auth";
 import type { DatabaseClient } from "./database";
+import { processReplyImmediately } from "./reply_worker";
+import { calculateReplySchedule } from "./scheduling";
+import { type MailSendBindings } from "./stalwart_jmap_env";
 
 // Define types for env and app
-interface Env {
+interface Env extends MailSendBindings {
   SUPABASE_URL: string;
   SUPABASE_KEY: string;
 }
@@ -187,13 +190,18 @@ const broadcastRepliesRoute = createRoute({
             success: z.boolean(),
             campaign_id: z.number(),
             supporter_count: z.number(),
+            recipient_count: z.number().optional(),
             messages_created: z.number(),
             failures: z.number(),
+            replies_sent: z.number(),
+            replies_failed: z.number(),
+            jmap_ready: z.boolean(),
+            first_send_error: z.string().optional(),
           }),
         },
       },
       description:
-        "Broadcast of the active reply template to all supporters was queued.",
+        "Creates broadcast reply rows and sends immediately when JMAP is configured; otherwise leaves messages pending for the scheduled worker.",
     },
     400: {
       description: "Bad request (e.g. no active template or no supporters)",
@@ -209,6 +217,27 @@ app.openapi(broadcastRepliesRoute, async (c) => {
   const db = c.get("db") as DatabaseClient;
   const { id } = c.req.valid("param");
   const campaignId = Number.parseInt(id, 10);
+  const activeTemplate = await db.getActiveTemplateForCampaign(campaignId);
+
+  if (!activeTemplate) {
+    return c.json(
+      {
+        success: false,
+        campaign_id: campaignId,
+        supporter_count: 0,
+        recipient_count: 0,
+        messages_created: 0,
+        failures: 0,
+        error: "No active reply template found for this campaign",
+      },
+      400,
+    );
+  }
+
+  const replySchedule = calculateReplySchedule(
+    activeTemplate.send_timing as "immediate" | "office_hours" | "scheduled",
+    activeTemplate.scheduled_for,
+  );
 
   const supporterRows = await db.getSupportersForCampaign(campaignId);
 
@@ -238,6 +267,7 @@ app.openapi(broadcastRepliesRoute, async (c) => {
 
   let messagesCreated = 0;
   let failures = 0;
+  const createdMessageIds: number[] = [];
 
   for (const recipient of recipients) {
     try {
@@ -245,6 +275,8 @@ app.openapi(broadcastRepliesRoute, async (c) => {
         campaignId,
         politicianId: recipient.politician_id,
         senderHash: recipient.sender_hash,
+        replyStatus: replySchedule.reply_status,
+        replyScheduledAt: replySchedule.reply_scheduled_at,
       });
 
       if (!messageId) {
@@ -259,6 +291,7 @@ app.openapi(broadcastRepliesRoute, async (c) => {
       });
 
       messagesCreated++;
+      createdMessageIds.push(messageId);
     } catch (error) {
       console.error(
         "Failed to create broadcast message for supporter:",
@@ -269,13 +302,50 @@ app.openapi(broadcastRepliesRoute, async (c) => {
     }
   }
 
+  let repliesSent = 0;
+  let repliesFailed = 0;
+  let firstSendError: string | undefined;
+
+  const runtimeSecrets =
+    c.env as unknown as Record<string, string | undefined>;
+  const immediateAttempted =
+    replySchedule.send_immediately && createdMessageIds.length > 0;
+  if (immediateAttempted) {
+    for (const messageId of createdMessageIds) {
+      try {
+        await processReplyImmediately(
+          db,
+          messageId,
+          runtimeSecrets,
+        );
+        repliesSent++;
+      } catch (error) {
+        repliesFailed++;
+        if (!firstSendError) {
+          firstSendError =
+            error instanceof Error ? error.message : String(error);
+        }
+        console.error(
+          "Broadcast JMAP send failed for message",
+          messageId,
+          error,
+        );
+      }
+    }
+  }
+
+  const sendOk = !immediateAttempted || repliesFailed === 0;
+
   return c.json({
-    success: failures === 0,
+    success: failures === 0 && sendOk,
     campaign_id: campaignId,
     supporter_count: supporterRows.length,
     recipient_count: recipients.length,
     messages_created: messagesCreated,
     failures,
+    replies_sent: repliesSent,
+    replies_failed: repliesFailed,
+    jmap_ready: immediateAttempted,
+    ...(firstSendError ? { first_send_error: firstSendError } : {}),
   });
 });
-

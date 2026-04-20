@@ -19,20 +19,23 @@ const LoginSchema = z.object({
   password: z.string(),
 });
 
-const UserSchema = z.object({
-  id: z.string(),
-  email: z.string().email(),
-  // Add other user fields if you need them in the response
-});
+const UserSchema = z
+  .object({
+    id: z.string(),
+    email: z.string().email().optional(),
+  })
+  .passthrough();
 
-const SessionSchema = z.object({
-  access_token: z.string(),
-  token_type: z.string(),
-  expires_in: z.number(),
-  expires_at: z.number(),
-  refresh_token: z.string(),
-  user: UserSchema,
-});
+const SessionSchema = z
+  .object({
+    access_token: z.string(),
+    token_type: z.string(),
+    expires_in: z.number(),
+    expires_at: z.number().optional(),
+    refresh_token: z.string(),
+    user: UserSchema,
+  })
+  .passthrough();
 
 // =============================================================================
 // ROUTE
@@ -90,7 +93,11 @@ app.openapi(loginRoute, async (c) => {
     return c.json({ error: error?.code || "Invalid credentials" }, 401);
   }
 
-  return c.json(data.session);
+  if (!data.session) {
+    return c.json({ error: "No session returned" }, 401);
+  }
+
+  return c.json(data.session, 200);
 });
 
 export default app;

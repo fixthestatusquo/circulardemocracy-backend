@@ -161,6 +161,17 @@ const mtaHookRoute = createRoute({
       },
       description: "Instructions for message handling",
     },
+    401: {
+      content: {
+        "application/json": {
+          schema: z.object({
+            action: z.literal("reject"),
+            reject_reason: z.string(),
+          }),
+        },
+      },
+      description: "Invalid or missing API key",
+    },
     500: {
       content: {
         "application/json": {
@@ -241,7 +252,7 @@ app.openapi(mtaHookRoute, async (c) => {
         confidence: 0,
         reject_reason: "No recipients",
       };
-      return c.json<StalwartResponse>(emptyRes);
+      return c.json(emptyRes, 200);
     }
 
     // Use the result with highest confidence (they should all have same folder now)
@@ -253,7 +264,7 @@ app.openapi(mtaHookRoute, async (c) => {
       `Email processed: campaign=${bestResult.modifications?.headers?.["X-CircularDemocracy-Campaign"]}, confidence=${bestResult.confidence}`,
     );
 
-    return c.json<StalwartResponse>(bestResult);
+    return c.json(bestResult, 200);
   } catch (error) {
     console.error("MTA Hook processing error:", error);
 
@@ -263,7 +274,7 @@ app.openapi(mtaHookRoute, async (c) => {
       error: error instanceof Error ? error.message : "Unknown error",
     };
     // src/stalwart.ts - Stalwart MTA Hook Worker
-    return c.json<ErrorResponse>(errorRes, 500);
+    return c.json(errorRes, 500);
   }
 });
 

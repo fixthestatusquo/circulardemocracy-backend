@@ -14,6 +14,11 @@ export interface Politician {
   email: string;
   additional_emails: string[];
   active: boolean;
+  stalwart_jmap_endpoint?: string | null;
+  stalwart_jmap_account_id?: string | null;
+  stalwart_username?: string | null;
+  stalwart_app_password?: string | null;
+  stalwart_app_password_secret_name?: string | null;
 }
 
 export interface Campaign {
@@ -1015,7 +1020,7 @@ export class DatabaseClient {
   }
 
   // =============================================================================
-  // SENDER EMAIL OPERATIONS (for auto-reply)
+  // Reply pipeline: supporters (hash), message_contacts (PII), send logs
   // =============================================================================
 
   async upsertSupporter(
@@ -1051,11 +1056,7 @@ export class DatabaseClient {
     }
   }
 
-  /**
-   * Returns supporters for a given campaign.
-   * This uses the existing supporters table, which already stores email addresses.
-   * No additional PII is introduced beyond existing schema.
-   */
+  /** Supporter aggregate rows for a campaign (hashes only; email lives in message_contacts). */
   async getSupportersForCampaign(
     campaignId: number,
   ): Promise<
@@ -1085,31 +1086,6 @@ export class DatabaseClient {
     } catch (error) {
       console.error("Error fetching supporters for campaign:", error);
       return [];
-    }
-  }
-
-  async getSupporterEmailBySenderHash(
-    campaignId: number,
-    politicianId: number,
-    senderHash: string,
-  ): Promise<string | null> {
-    try {
-      const { data, error } = await this.supabase
-        .from("supporters")
-        .select("email")
-        .eq("campaign_id", campaignId)
-        .eq("politician_id", politicianId)
-        .eq("sender_hash", senderHash)
-        .limit(1);
-
-      if (error) {
-        throw error;
-      }
-
-      return data && data.length > 0 ? (data[0].email as string) : null;
-    } catch (error) {
-      console.error("Error getting supporter email by sender hash:", error);
-      return null;
     }
   }
 
@@ -1282,8 +1258,16 @@ export class DatabaseClient {
     campaignId: number;
     politicianId: number;
     senderHash: string;
+    replyStatus?: "pending" | "scheduled";
+    replyScheduledAt?: string | null;
   }): Promise<number | null> {
-    const { campaignId, politicianId, senderHash } = params;
+    const {
+      campaignId,
+      politicianId,
+      senderHash,
+      replyStatus = "pending",
+      replyScheduledAt = null,
+    } = params;
 
     try {
       const externalId = `broadcast:${campaignId}:${senderHash}:${Date.now()}`;
@@ -1302,8 +1286,8 @@ export class DatabaseClient {
           received_at: new Date().toISOString(),
           duplicate_rank: 0,
           processing_status: "processed",
-          reply_status: "pending",
-          reply_scheduled_at: null,
+          reply_status: replyStatus,
+          reply_scheduled_at: replyScheduledAt,
         })
         .select("id")
         .single();
@@ -1316,6 +1300,34 @@ export class DatabaseClient {
     } catch (error) {
       console.error("Error creating broadcast message for supporter:", error);
       return null;
+    }
+  }
+
+  /** Sets message reply fields and removes short-term contact row. */
+  async markMessageReplyDelivered(messageId: number): Promise<void> {
+    const replySentAt = new Date().toISOString();
+
+    const { error: msgError } = await this.supabase
+      .from("messages")
+      .update({
+        reply_status: "sent",
+        reply_sent_at: replySentAt,
+      })
+      .eq("id", messageId);
+
+    if (msgError) {
+      console.error("Error marking message reply sent:", msgError);
+      throw msgError;
+    }
+
+    const { error: contactDeleteError } = await this.supabase
+      .from("message_contacts")
+      .delete()
+      .eq("message_id", messageId);
+
+    if (contactDeleteError) {
+      console.error("Error deleting message_contacts row:", contactDeleteError);
+      throw contactDeleteError;
     }
   }
 

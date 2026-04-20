@@ -89,7 +89,7 @@ app.openapi(getMessageAnalyticsRoute, async (c) => {
 
     const analytics = await db.getMessageAnalyticsDaily(daysBack);
 
-    return c.json({ analytics });
+    return c.json({ analytics }, 200);
   } catch (error) {
     console.error("Error fetching message analytics:", error);
     return c.json(

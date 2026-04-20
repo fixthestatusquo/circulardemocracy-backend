@@ -101,7 +101,7 @@ async function main() {
   const supporters = Array.from(supportersMap.values());
   if (supporters.length === 0) {
     console.log(
-      "No eligible supporter rows found from messages + sender_emails join.",
+      "No eligible supporter rows derived from messages.",
     );
     return;
   }

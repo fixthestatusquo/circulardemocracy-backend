@@ -178,9 +178,9 @@ export async function processMessage(
     if (activeTemplate) {
       replySchedule = calculateReplySchedule(
         activeTemplate.send_timing as
-          | "immediate"
-          | "office_hours"
-          | "scheduled",
+        | "immediate"
+        | "office_hours"
+        | "scheduled",
         activeTemplate.scheduled_for,
         data.timestamp,
       );

@@ -474,7 +474,8 @@ describe("Message Processor Auto-Reply", () => {
     insertMessage: vi.fn(),
     updateMessageFields: vi.fn(),
     getActiveTemplateForCampaign: vi.fn(),
-    storeSenderEmail: vi.fn(),
+    upsertSupporter: vi.fn(),
+    storeMessageContact: vi.fn(),
     assignMessageToCluster: vi.fn(),
   } as unknown as DatabaseClient;
 
@@ -484,6 +485,8 @@ describe("Message Processor Auto-Reply", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(mockDb.upsertSupporter).mockResolvedValue(1);
+    vi.mocked(mockDb.storeMessageContact).mockResolvedValue(undefined);
   });
 
   const validInput: MessageInput = {
@@ -525,7 +528,6 @@ describe("Message Processor Auto-Reply", () => {
     });
     vi.spyOn(mockDb, "insertMessage").mockResolvedValue(100);
     vi.spyOn(mockDb, "assignMessageToCluster").mockResolvedValue(1);
-    vi.spyOn(mockDb, "storeSenderEmail").mockResolvedValue(undefined);
 
     const result = await processMessage(
       mockDb,
@@ -538,10 +540,19 @@ describe("Message Processor Auto-Reply", () => {
     expect(result.reply_status).toBe("pending");
     expect(result.reply_scheduled_at).toBeNull();
     expect(result.send_immediately).toBe(true);
-    expect(mockDb.storeSenderEmail).toHaveBeenCalledWith(
-      100,
+    expect(mockDb.storeMessageContact).toHaveBeenCalledWith(
+      expect.objectContaining({
+        messageId: 100,
+        senderEmail: "john@example.com",
+        senderName: "John Doe",
+        capturedAt: validInput.timestamp,
+      }),
+    );
+    expect(mockDb.upsertSupporter).toHaveBeenCalledWith(
+      10,
+      1,
       expect.any(String),
-      "john@example.com",
+      validInput.timestamp,
     );
     expect(immediateReplyHandler).toHaveBeenCalledWith(100);
   });
@@ -560,7 +571,6 @@ describe("Message Processor Auto-Reply", () => {
     vi.spyOn(mockDb, "getDuplicateRank").mockResolvedValue(1);
     vi.spyOn(mockDb, "insertMessage").mockResolvedValue(100);
     vi.spyOn(mockDb, "assignMessageToCluster").mockResolvedValue(1);
-    vi.spyOn(mockDb, "storeSenderEmail").mockResolvedValue(undefined);
 
     const result = await processMessage(mockDb, mockAi as any, validInput);
 
@@ -568,7 +578,8 @@ describe("Message Processor Auto-Reply", () => {
     expect(result.duplicate_rank).toBe(1);
     expect(result.reply_status).toBeNull();
     expect(mockDb.getActiveTemplateForCampaign).not.toHaveBeenCalled();
-    expect(mockDb.storeSenderEmail).not.toHaveBeenCalled();
+    expect(mockDb.upsertSupporter).toHaveBeenCalled();
+    expect(mockDb.storeMessageContact).toHaveBeenCalled();
   });
 
   it("should not schedule reply if no active template exists", async () => {
@@ -587,7 +598,6 @@ describe("Message Processor Auto-Reply", () => {
     vi.spyOn(mockDb, "getActiveTemplateForCampaign").mockResolvedValue(null);
     vi.spyOn(mockDb, "insertMessage").mockResolvedValue(100);
     vi.spyOn(mockDb, "assignMessageToCluster").mockResolvedValue(1);
-    vi.spyOn(mockDb, "storeSenderEmail").mockResolvedValue(undefined);
 
     const result = await processMessage(
       mockDb,
@@ -599,7 +609,8 @@ describe("Message Processor Auto-Reply", () => {
     expect(result.success).toBe(true);
     expect(result.reply_status).toBeNull();
     expect(result.reply_scheduled_at).toBeNull();
-    expect(mockDb.storeSenderEmail).not.toHaveBeenCalled();
+    expect(mockDb.upsertSupporter).toHaveBeenCalled();
+    expect(mockDb.storeMessageContact).toHaveBeenCalled();
     expect(immediateReplyHandler).not.toHaveBeenCalled();
   });
 });

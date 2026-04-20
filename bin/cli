@@ -10,7 +10,7 @@ import * as os from 'os';
 import { generateEmbedding } from '../src/embedding_service.js';
 import https from 'https';
 import http from 'http';
-import {config as dotenv} from "dotenv";
+import { config as dotenv } from "dotenv";
 dotenv();
 
 const CACHE_DIR = path.join(os.homedir(), '.cache', 'circulardemocracy-cli');
@@ -502,6 +502,125 @@ async function syncClusters() {
   }
 }
 
+async function setPoliticianJmap() {
+  const {
+    id,
+    'jmap-endpoint': jmapEndpoint,
+    'jmap-account-id': jmapAccountId,
+    'jmap-username': jmapUsername,
+    'password-secret-name': passwordSecretName,
+    'stalwart-jmap-endpoint': stalwartJmapEndpoint,
+    'stalwart-jmap-account-id': stalwartJmapAccountId,
+    'stalwart-username': stalwartUsername,
+    'stalwart-app-password': stalwartAppPassword,
+  } = argv;
+
+  if (!id) {
+    console.error('Error: --id is required');
+    console.log('\nUsage: ./cli set-politician-jmap --id <politician-id> --jmap-endpoint <url> --jmap-account-id <id> --jmap-username <username> --password-secret-name <secret-name>');
+    process.exit(1);
+  }
+
+  const resolvedEndpoint = stalwartJmapEndpoint ?? jmapEndpoint;
+  const resolvedAccountId = stalwartJmapAccountId ?? jmapAccountId;
+  const resolvedUsername = stalwartUsername ?? jmapUsername;
+  const resolvedPassword = stalwartAppPassword;
+  const resolvedSecretName =
+    passwordSecretName || `POL_${Number(id)}_STALWART_APP_PASSWORD`;
+
+  const updateData = {};
+
+  if (resolvedEndpoint !== undefined) {
+    updateData.stalwart_jmap_endpoint = String(resolvedEndpoint).trim() || null;
+  }
+  if (resolvedAccountId !== undefined) {
+    updateData.stalwart_jmap_account_id = String(resolvedAccountId).trim() || null;
+  }
+  if (resolvedUsername !== undefined) {
+    updateData.stalwart_username = String(resolvedUsername).trim() || null;
+  }
+  if (resolvedSecretName !== undefined) {
+    updateData.stalwart_app_password_secret_name =
+      String(resolvedSecretName).trim() || null;
+  }
+
+  const hasCoreInput =
+    resolvedEndpoint !== undefined ||
+    resolvedAccountId !== undefined ||
+    resolvedUsername !== undefined ||
+    resolvedPassword !== undefined;
+
+  if (!hasCoreInput) {
+    console.error(
+      'Error: provide politician JMAP credentials using STALWART-style flags',
+    );
+    console.log(
+      'Required inputs: --id, --stalwart-jmap-endpoint, --stalwart-jmap-account-id, --stalwart-username, --stalwart-app-password',
+    );
+    process.exit(1);
+  }
+
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const supabaseKey = process.env.SUPABASE_KEY;
+
+  if (!supabaseUrl || !supabaseKey) {
+    console.error('Error: SUPABASE_URL and SUPABASE_KEY environment variables must be set');
+    process.exit(1);
+  }
+
+  const supabase = createClient(supabaseUrl, supabaseKey);
+
+  const { data, error } = await supabase
+    .from('politicians')
+    .update(updateData)
+    .eq('id', Number(id))
+    .select(
+      'id,name,email,stalwart_jmap_endpoint,stalwart_jmap_account_id,stalwart_username,stalwart_app_password_secret_name',
+    )
+    .single();
+
+  if (error) {
+    console.error('Error updating politician JMAP credentials:', error.message);
+    process.exit(1);
+  }
+
+  if (resolvedPassword !== undefined) {
+    upsertEnvVar('.env', String(resolvedSecretName), String(resolvedPassword));
+  }
+
+  console.log('✅ Politician JMAP configuration updated');
+  if (resolvedPassword !== undefined) {
+    console.log(
+      `✅ Stored app password in .env as ${resolvedSecretName} (used at runtime)`,
+    );
+  }
+  console.log(JSON.stringify(data, null, 2));
+}
+
+function upsertEnvVar(filePath, key, value) {
+  const quotedValue = JSON.stringify(value);
+  let content = '';
+
+  if (fs.existsSync(filePath)) {
+    content = fs.readFileSync(filePath, 'utf8');
+  }
+
+  const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const matcher = new RegExp(`^${escapedKey}=.*$`, 'm');
+  const line = `${key}=${quotedValue}`;
+
+  if (matcher.test(content)) {
+    content = content.replace(matcher, line);
+  } else {
+    if (content.length > 0 && !content.endsWith('\n')) {
+      content += '\n';
+    }
+    content += `${line}\n`;
+  }
+
+  fs.writeFileSync(filePath, content);
+}
+
 async function listClosestCampaigns() {
   const url = argv.url;
   let text = argv.message || argv.text;
@@ -915,6 +1034,7 @@ Commands:
   logout                Clear authentication session
   add-campaign          Create a new campaign with embedding
   update-campaign       Update campaign embedding
+  set-politician-jmap   Create/update per-politician reply sender credentials
   closest-campaigns     Find closest campaigns for a message
   assign-cluster        Assign campaign to cluster
   sync-clusters         Sync campaign IDs from clusters to messages
@@ -940,6 +1060,10 @@ Cluster Management:
     
   sync-clusters
     Sync campaign IDs from clusters to all messages (bulk update)
+
+Politician JMAP Credentials:
+  set-politician-jmap --id <id> --stalwart-jmap-endpoint <url> --stalwart-jmap-account-id <id> --stalwart-username <username> --stalwart-app-password <password> [--password-secret-name <secret-name>]
+    Set/update per-politician JMAP sending credentials and store password as .env secret variable
 
 Closest Campaign Lookup:
   closest-campaigns --message-id <id> [--limit <n>]
@@ -978,6 +1102,7 @@ Examples:
   ./cli add-campaign --url "https://climate.example.com/action"
   ./cli update-campaign --id 5 --text "Updated representative text"
   ./cli update-campaign --id 5 --url "https://climate.example.com/new-page"
+  ./cli set-politician-jmap --id 3 --stalwart-jmap-endpoint "https://mail.circulardemocracy.org/.well-known/jmap" --stalwart-jmap-account-id "7" --stalwart-username "politician-1@circulardemocracy.org" --stalwart-app-password "caeke yroa ldhq uscy ghb"
   ./cli closest-campaigns --message-id "ieaaaacb" --limit 5
   ./cli closest-campaigns --message "I support GMO demeter policy" --limit 5
   ./cli reprocess-messages --process-all
@@ -1069,6 +1194,11 @@ if (command === 'sync-clusters') {
 
 if (command === 'closest-campaigns') {
   await listClosestCampaigns();
+  process.exit(0);
+}
+
+if (command === 'set-politician-jmap') {
+  await setPoliticianJmap();
   process.exit(0);
 }
 

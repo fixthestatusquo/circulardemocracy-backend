@@ -9,15 +9,18 @@ vi.mock("../src/embedding_service", () => ({
     .mockReturnValue("# Test Subject\n\nTest message body"),
 }));
 
-// --- Create a singleton mock instance ---
-const mockDbInstance = {
-  request: vi.fn(),
-  getMessageAnalyticsDaily: vi.fn(),
-};
+const { mockDbInstance } = vi.hoisted(() => ({
+  mockDbInstance: {
+    request: vi.fn(),
+    getMessageAnalyticsDaily: vi.fn(),
+  },
+}));
 
 // --- Mock the entire database module ---
 vi.mock("../src/database", () => ({
-  DatabaseClient: vi.fn(() => mockDbInstance),
+  DatabaseClient: vi.fn(function MockDatabaseClient() {
+    return mockDbInstance;
+  }),
 }));
 
 // Mock Supabase client for auth
@@ -46,11 +49,18 @@ describe("Analytics API Integration", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    process.env.SUPABASE_URL = env.SUPABASE_URL;
+    process.env.SUPABASE_KEY = env.SUPABASE_KEY;
     // Default: mock failed auth
     mockGetUser.mockResolvedValue({
       data: { user: null },
       error: { message: "Invalid token" },
     });
+  });
+
+  afterEach(() => {
+    delete process.env.SUPABASE_URL;
+    delete process.env.SUPABASE_KEY;
   });
 
   it("should return 401 if bearer token is missing", async () => {

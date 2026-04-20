@@ -391,6 +391,7 @@ ENVIRONMENT VARIABLES:
   SUPABASE_KEY           Required Supabase key
   STALWART_APP_PASSWORD  Required JMAP app password for fetching message content
   STALWART_USERNAME      Optional JMAP username
+  STALWART_JMAP_ACCOUNT_ID Optional; if unset, taken from session primaryAccounts (mail)
 
 EXAMPLES:
   reprocess-messages --process-all
@@ -495,7 +496,9 @@ async function reprocessMessages(
 
     console.log(`Connecting to Stalwart JMAP at ${endpoint}...`);
     jmapSession = await fetchJmapSession(endpoint, jmapAuthHeader);
-    jmapAccountId = resolveAccountId(jmapSession);
+    jmapAccountId =
+      process.env.STALWART_JMAP_ACCOUNT_ID?.trim() ||
+      resolveAccountId(jmapSession);
     console.log("Connected to Stalwart\n");
   }
 
