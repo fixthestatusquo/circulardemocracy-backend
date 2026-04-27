@@ -14,6 +14,11 @@ export interface Politician {
   email: string;
   additional_emails: string[];
   active: boolean;
+  stalwart_jmap_endpoint?: string | null;
+  stalwart_jmap_account_id?: string | null;
+  stalwart_username?: string | null;
+  stalwart_app_password?: string | null;
+  stalwart_app_password_secret_name?: string | null;
 }
 
 export interface Campaign {
@@ -68,7 +73,7 @@ export interface ClassificationResult {
 }
 
 export class DatabaseClient {
-  private supabase: SupabaseClient;
+  public supabase: SupabaseClient;
 
   constructor(config: SupabaseConfig) {
     this.supabase = createClient(config.url, config.key, {
@@ -832,7 +837,10 @@ export class DatabaseClient {
       if (error) {
         throw error;
       }
-      return data.length > 0 ? (data[0] as MessageInsert & { id: number; campaigns: Campaign }) : null;
+      if (!data || data.length === 0) {
+        return null;
+      }
+      return data[0] as MessageInsert & { id: number; campaigns: Campaign };
     } catch (error) {
       console.error("Error getting message by external ID:", error);
       return null;
@@ -1012,57 +1020,14 @@ export class DatabaseClient {
   }
 
   // =============================================================================
-  // SENDER EMAIL OPERATIONS (for auto-reply)
+  // Reply pipeline: supporters (hash), message_contacts (PII), send logs
   // =============================================================================
-
-  async storeSenderEmail(
-    messageId: number,
-    senderHash: string,
-    senderEmail: string,
-  ): Promise<void> {
-    try {
-      const { error } = await this.supabase.from("sender_emails").insert({
-        message_id: messageId,
-        sender_hash: senderHash,
-        email: senderEmail,
-      });
-
-      if (error) {
-        throw error;
-      }
-    } catch (error) {
-      console.error("Error storing sender email:", error);
-      throw new Error("Failed to store sender email");
-    }
-  }
-
-  async getSenderEmailByMessageId(messageId: number): Promise<string | null> {
-    try {
-      const { data, error } = await this.supabase
-        .from("sender_emails")
-        .select("email")
-        .eq("message_id", messageId)
-        .eq("reply_sent", false)
-        .is("purged_at", null)
-        .limit(1);
-
-      if (error) {
-        throw error;
-      }
-
-      return data && data.length > 0 ? data[0].email : null;
-    } catch (error) {
-      console.error("Error getting sender email:", error);
-      return null;
-    }
-  }
 
   async upsertSupporter(
     campaignId: number,
     politicianId: number,
     senderHash: string,
-    email: string,
-    name?: string,
+    firstMessageAt?: string,
   ): Promise<number | null> {
     try {
       const { data, error } = await this.supabase
@@ -1072,8 +1037,7 @@ export class DatabaseClient {
             campaign_id: campaignId,
             politician_id: politicianId,
             sender_hash: senderHash,
-            email,
-            name: name || null,
+            first_message_at: firstMessageAt || new Date().toISOString(),
             last_message_at: new Date().toISOString(),
           },
           { onConflict: "campaign_id,politician_id,sender_hash" },
@@ -1089,6 +1053,155 @@ export class DatabaseClient {
     } catch (error) {
       console.error("Error upserting supporter:", error);
       return null;
+    }
+  }
+
+  /** Supporter aggregate rows for a campaign (hashes only; email lives in message_contacts). */
+  async getSupportersForCampaign(
+    campaignId: number,
+  ): Promise<
+    Array<{
+      id: number;
+      campaign_id: number;
+      politician_id: number;
+      sender_hash: string;
+    }>
+  > {
+    try {
+      const { data, error } = await this.supabase
+        .from("supporters")
+        .select("id,campaign_id,politician_id,sender_hash")
+        .eq("campaign_id", campaignId);
+
+      if (error) {
+        throw error;
+      }
+
+      return (data || []) as Array<{
+        id: number;
+        campaign_id: number;
+        politician_id: number;
+        sender_hash: string;
+      }>;
+    } catch (error) {
+      console.error("Error fetching supporters for campaign:", error);
+      return [];
+    }
+  }
+
+  async storeMessageContact(params: {
+    messageId: number;
+    senderHash: string;
+    senderEmail: string;
+    senderName?: string;
+    capturedAt?: string;
+  }): Promise<void> {
+    try {
+      const { error } = await this.supabase.from("message_contacts").upsert(
+        {
+          message_id: params.messageId,
+          sender_hash: params.senderHash,
+          sender_email: params.senderEmail,
+          sender_name: params.senderName || null,
+          contact_captured_at: params.capturedAt || new Date().toISOString(),
+        },
+        { onConflict: "message_id" },
+      );
+
+      if (error) {
+        throw error;
+      }
+    } catch (error) {
+      console.error("Error storing message contact:", error);
+      throw new Error("Failed to store short-term message contact");
+    }
+  }
+
+  async getMessageContactEmail(messageId: number): Promise<string | null> {
+    try {
+      const { data, error } = await this.supabase
+        .from("message_contacts")
+        .select("sender_email")
+        .eq("message_id", messageId)
+        .is("purged_at", null)
+        .limit(1);
+
+      if (error) {
+        throw error;
+      }
+
+      return data && data.length > 0 ? (data[0].sender_email as string) : null;
+    } catch (error) {
+      console.error("Error fetching message contact email:", error);
+      return null;
+    }
+  }
+
+  async getCampaignBroadcastRecipients(campaignId: number): Promise<
+    Array<{
+      sender_hash: string;
+      politician_id: number;
+      email: string;
+    }>
+  > {
+    try {
+      const supporters = await this.getSupportersForCampaign(campaignId);
+      if (supporters.length === 0) {
+        return [];
+      }
+
+      const { data: contacts, error } = await this.supabase
+        .from("message_contacts")
+        .select(
+          "sender_hash,sender_email,contact_captured_at,messages!inner(campaign_id,politician_id)",
+        )
+        .is("purged_at", null);
+
+      if (error) {
+        throw error;
+      }
+
+      const byKey = new Map<
+        string,
+        { email: string; capturedAt: string; sender_hash: string; politician_id: number }
+      >();
+
+      for (const row of (contacts || []) as any[]) {
+        const msg = Array.isArray(row.messages) ? row.messages[0] : row.messages;
+        if (!msg || msg.campaign_id !== campaignId) {
+          continue;
+        }
+        const key = `${campaignId}:${msg.politician_id}:${row.sender_hash}`;
+        const existing = byKey.get(key);
+        if (
+          !existing ||
+          new Date(row.contact_captured_at) > new Date(existing.capturedAt)
+        ) {
+          byKey.set(key, {
+            email: row.sender_email,
+            capturedAt: row.contact_captured_at,
+            sender_hash: row.sender_hash,
+            politician_id: msg.politician_id,
+          });
+        }
+      }
+
+      const supporterKeys = new Set(
+        supporters.map(
+          (s) => `${s.campaign_id}:${s.politician_id}:${s.sender_hash}`,
+        ),
+      );
+
+      return Array.from(byKey.entries())
+        .filter(([key]) => supporterKeys.has(key))
+        .map(([, value]) => ({
+          sender_hash: value.sender_hash,
+          politician_id: value.politician_id,
+          email: value.email,
+        }));
+    } catch (error) {
+      console.error("Error building campaign broadcast recipients:", error);
+      return [];
     }
   }
 
@@ -1118,8 +1231,6 @@ export class DatabaseClient {
     campaign_id: number;
     politician_id: number;
     supporter_id?: number | null;
-    sender_email: string;
-    recipient_email: string;
     subject: string;
     status: "sent" | "failed";
     provider?: string;
@@ -1127,7 +1238,7 @@ export class DatabaseClient {
     error_message?: string;
   }): Promise<void> {
     try {
-      const { error } = await this.supabase.from("email_logs").insert({
+      const { error } = await this.supabase.from("reply_send_logs").insert({
         ...data,
         provider: data.provider || "jmap",
       });
@@ -1136,6 +1247,87 @@ export class DatabaseClient {
       }
     } catch (error) {
       console.error("Error logging email event:", error);
+    }
+  }
+
+
+  /**
+   * Creates a minimal broadcast message for a supporter without storing any PII in the messages table.
+   */
+  async createBroadcastMessageForSupporter(params: {
+    campaignId: number;
+    politicianId: number;
+    senderHash: string;
+    replyStatus?: "pending" | "scheduled";
+    replyScheduledAt?: string | null;
+  }): Promise<number | null> {
+    const {
+      campaignId,
+      politicianId,
+      senderHash,
+      replyStatus = "pending",
+      replyScheduledAt = null,
+    } = params;
+
+    try {
+      const externalId = `broadcast:${campaignId}:${senderHash}:${Date.now()}`;
+
+      const { data, error } = await this.supabase
+        .from("messages")
+        .insert({
+          external_id: externalId,
+          channel: "broadcast",
+          channel_source: "broadcast",
+          politician_id: politicianId,
+          sender_hash: senderHash,
+          campaign_id: campaignId,
+          classification_confidence: 0,
+          language: "auto",
+          received_at: new Date().toISOString(),
+          duplicate_rank: 0,
+          processing_status: "processed",
+          reply_status: replyStatus,
+          reply_scheduled_at: replyScheduledAt,
+        })
+        .select("id")
+        .single();
+
+      if (error) {
+        throw error;
+      }
+
+      return data?.id ?? null;
+    } catch (error) {
+      console.error("Error creating broadcast message for supporter:", error);
+      return null;
+    }
+  }
+
+  /** Sets message reply fields and removes short-term contact row. */
+  async markMessageReplyDelivered(messageId: number): Promise<void> {
+    const replySentAt = new Date().toISOString();
+
+    const { error: msgError } = await this.supabase
+      .from("messages")
+      .update({
+        reply_status: "sent",
+        reply_sent_at: replySentAt,
+      })
+      .eq("id", messageId);
+
+    if (msgError) {
+      console.error("Error marking message reply sent:", msgError);
+      throw msgError;
+    }
+
+    const { error: contactDeleteError } = await this.supabase
+      .from("message_contacts")
+      .delete()
+      .eq("message_id", messageId);
+
+    if (contactDeleteError) {
+      console.error("Error deleting message_contacts row:", contactDeleteError);
+      throw contactDeleteError;
     }
   }
 
@@ -1300,10 +1492,16 @@ export class DatabaseClient {
     id: number;
     email: string;
     name: string;
+    stalwart_jmap_endpoint: string | null;
+    stalwart_jmap_account_id: string | null;
+    stalwart_username: string | null;
+    stalwart_app_password_secret_name: string | null;
   } | null> {
     const { data, error } = await this.supabase
       .from("politicians")
-      .select("id, email, name")
+      .select(
+        "id, email, name, stalwart_jmap_endpoint, stalwart_jmap_account_id, stalwart_username, stalwart_app_password_secret_name",
+      )
       .eq("id", politicianId)
       .limit(1);
 

@@ -45,7 +45,9 @@ For performance reasons, it should be noted that it's quite common that the same
 - **Template Management**: Politicians can create custom reply templates for different campaigns
 - **Scheduled Responses**: Flexible timing options (immediate, office hours, before votes)
 - **Personalization**: Support for headers, contact details, and politician branding
-- **Delivery Tracking**: Monitor when and what was sent to each supporter
+- **Delivery Tracking**: Each send is recorded in `reply_send_logs`; successful sends set `messages.reply_sent_at` and `messages.reply_status = sent` so the worker does not pick the same message again
+- **Inbound auto-reply once per supporter/campaign**: Only the first classified message for a given sender hash + politician + campaign (`duplicate_rank === 0`) is scheduled for an automatic template reply; later messages from the same supporter in that campaign are not auto-replied by this path
+- **Campaign broadcast**: Each broadcast creates new outbound rows per supporter; running broadcast again can send again (by design) unless you add higher-level product rules
 
 ### 🛡️ Privacy-First Architecture
 
@@ -221,6 +223,9 @@ export SUPABASE_KEY="your-supabase-key"
 # Required for JMAP commands (`jmap-fetch`, `reprocess-messages`)
 export STALWART_APP_PASSWORD="your-stalwart-app-password"
 export STALWART_USERNAME="your-stalwart-username"
+
+# Required for API broadcast / reply worker (from JMAP session: primaryAccounts mail urn → id, e.g. "7")
+export STALWART_JMAP_ACCOUNT_ID="your-jmap-mail-account-id"
 
 # Optional
 export STALWART_JMAP_ENDPOINT="https://mail.circulardemocracy.org/.well-known/jmap"
@@ -602,13 +607,15 @@ This API is designed to be deployed as a Cloudflare Worker. The `wrangler` CLI, 
 
 2.  **Set Up Secrets**
 
-    The worker needs access to your Supabase credentials. These should be stored as encrypted secrets in your Cloudflare account, not in version control. Your code requires two secrets: `SUPABASE_URL` and `SUPABASE_KEY`.
+    The worker needs Supabase credentials. For outbound JMAP replies, credentials are resolved per politician from database fields and a per-politician secret name.
 
-    Run the following commands, pasting your actual Supabase URL and Key when prompted:
+    Run the following commands, pasting values when prompted:
 
     ```bash
     npx wrangler secret put SUPABASE_URL
     npx wrangler secret put SUPABASE_KEY
+    # Per-politician secrets referenced by name from DB, for example:
+    npx wrangler secret put POL_42_STALWART_APP_PASSWORD
     ```
 
 3.  **Deploy the Worker**
@@ -644,10 +651,71 @@ This API is designed to be deployed as a Cloudflare Worker. The `wrangler` CLI, 
 
 The platform is designed with privacy-by-design principles:
 
-- **Minimal Data Retention**: Personal information deleted after response sent
+- **Minimal Data Retention**: Short-term contact rows are deleted after successful response send
 - **Anonymized Analytics**: Long-term storage contains only hashed identifiers
 - **Secure Processing**: All personal data handling follows GDPR principles
 - **Transparent Tracking**: Citizens know when and how their messages are processed
+
+## Outbound JMAP Credential Resolution
+
+Reply sending requires per-politician credentials on `politicians`:
+
+- `stalwart_jmap_endpoint`
+- `stalwart_jmap_account_id`
+- `stalwart_username`
+- `stalwart_app_password_secret_name` (resolves to runtime secret value)
+
+Configure credentials via CLI:
+
+```bash
+npx tsx bin/cli set-politician-jmap \
+  --id 3 \
+  --stalwart-jmap-endpoint "https://mail.circulardemocracy.org/.well-known/jmap" \
+  --stalwart-jmap-account-id "7" \
+  --stalwart-username "politician-1@circulardemocracy.org" \
+  --stalwart-app-password "caeke yroa ldhq uscy ghb"
+```
+
+This command stores endpoint/account/username on `politicians`, generates a secret name (`POL_<id>_STALWART_APP_PASSWORD` by default), and writes the password to `.env` under that key. The same command can be used later to update any subset of fields.
+
+At **runtime**, the reply worker resolves the password from Worker bindings (`c.env`) first, then from `process.env` (so local `.env` loaded by `wrangler dev` / Node still works). **Production** must define the same key as a Cloudflare secret, for example:
+
+```bash
+npx wrangler secret put POL_3_STALWART_APP_PASSWORD
+```
+
+For local-only, matching `.env` line:
+
+```bash
+POL_3_STALWART_APP_PASSWORD="your-politician-app-password"
+```
+
+## Reply deduplication and persistence
+
+**Persisted “sent” state (per `messages` row)**
+
+After a successful JMAP send, `markMessageReplyDelivered()` in the database layer:
+
+- Sets `messages.reply_status` to `sent` and `messages.reply_sent_at` to the send timestamp
+- Deletes the short-term `message_contacts` row for that message (PII removed after send)
+
+The reply worker only loads rows where `reply_sent_at` is null and `reply_status` is `pending` or `scheduled`, so **the same message row is never sent twice** by the worker.
+
+**Audit trail**
+
+Each attempt is logged to `reply_send_logs` (`sent` or `failed`, optional provider id and error text).
+
+**Inbound automatic reply (not twice for the same supporter thread)**
+
+In `processMessage()`, an active template reply is only scheduled when `duplicate_rank === 0` for that sender hash, politician, and campaign. Additional inbound messages from the same supporter in the same campaign get a higher `duplicate_rank` and **do not** get the automatic reply scheduling path.
+
+**Duplicate ingest**
+
+The same `external_id` + `channel_source` cannot create two rows; duplicates return early and never get a second reply pipeline for that ingest id.
+
+**Broadcast**
+
+`/api/v1/campaigns/:id/replies/broadcast` creates **new** synthetic `messages` rows per supporter each time it runs. There is no built-in “only if never broadcast” guard; repeated broadcasts mean repeated sends unless you change product rules.
 
 ## Related Projects
 

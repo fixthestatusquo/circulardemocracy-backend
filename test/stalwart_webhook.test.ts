@@ -29,7 +29,8 @@ const mockDb = {
   updateMessageFields: vi.fn(),
   checkExternalIdExists: vi.fn(),
   getActiveTemplateForCampaign: vi.fn(),
-  storeSenderEmail: vi.fn(),
+  upsertSupporter: vi.fn(),
+  storeMessageContact: vi.fn(),
   assignMessageToCluster: vi.fn(),
 } as unknown as DatabaseClient;
 
@@ -47,26 +48,29 @@ const mockEnv = {
 };
 
 vi.mock("../src/database", () => ({
-  DatabaseClient: vi.fn().mockImplementation(() => ({
-    getMessageByExternalId: vi.fn().mockResolvedValue(null),
-    findPoliticianByEmail: vi.fn().mockResolvedValue({
-      id: 1,
-      name: "Test Politician",
-    }),
-    findCampaignByHint: vi.fn().mockResolvedValue(null),
-    findSimilarCampaigns: vi.fn().mockResolvedValue([
-      {
-        id: 5,
-        name: "Climate Action",
-        distance: 0.05,
-      },
-    ]),
-    getDuplicateRank: vi.fn().mockResolvedValue(0),
-    insertMessage: vi.fn().mockResolvedValue(100),
-    assignMessageToCluster: vi.fn().mockResolvedValue(1),
-    getActiveTemplateForCampaign: vi.fn().mockResolvedValue(null),
-    storeSenderEmail: vi.fn().mockResolvedValue(undefined),
-  })),
+  DatabaseClient: vi.fn(function MockDatabaseClient() {
+    return {
+      getMessageByExternalId: vi.fn().mockResolvedValue(null),
+      findPoliticianByEmail: vi.fn().mockResolvedValue({
+        id: 1,
+        name: "Test Politician",
+      }),
+      findCampaignByHint: vi.fn().mockResolvedValue(null),
+      findSimilarCampaigns: vi.fn().mockResolvedValue([
+        {
+          id: 5,
+          name: "Climate Action",
+          distance: 0.05,
+        },
+      ]),
+      getDuplicateRank: vi.fn().mockResolvedValue(0),
+      insertMessage: vi.fn().mockResolvedValue(100),
+      assignMessageToCluster: vi.fn().mockResolvedValue(1),
+      getActiveTemplateForCampaign: vi.fn().mockResolvedValue(null),
+      upsertSupporter: vi.fn().mockResolvedValue(1),
+      storeMessageContact: vi.fn().mockResolvedValue(undefined),
+    };
+  }),
   hashEmail: vi.fn().mockResolvedValue("hashed-email"),
 }));
 
@@ -761,6 +765,11 @@ describe("Stalwart Webhook", () => {
   });
 
   describe("Integration Tests", () => {
+    beforeEach(() => {
+      vi.mocked(mockDb.upsertSupporter).mockResolvedValue(1);
+      vi.mocked(mockDb.storeMessageContact).mockResolvedValue(undefined);
+    });
+
     it("should process a complete Stalwart hook payload successfully", async () => {
       const payload: StalwartHookPayload = {
         envelope: {

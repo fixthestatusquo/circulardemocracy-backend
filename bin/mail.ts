@@ -97,9 +97,11 @@ export function parseArgs(): MessageInput | null {
   } catch (error) {
     console.error('Validation error:');
     if (error instanceof z.ZodError) {
-      error.issues.forEach(err => {
-        console.error(`  ${err.path.join('.')}: ${err.message}`);
-      });
+      const issues = error.issues;
+      for (const err of issues) {
+        const path = Array.isArray(err.path) ? err.path.join(".") : String(err.path);
+        console.error(`  ${path}: ${err.message}`);
+      }
     } else {
       console.error(error instanceof Error ? error.message : 'Unknown validation error');
     }

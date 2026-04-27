@@ -23,14 +23,237 @@ export interface JMAPSendResult {
   error?: string;
 }
 
+interface JmapSessionResponse {
+  apiUrl: string;
+  primaryAccounts?: Record<string, string>;
+}
+
 /**
  * JMAP Client for sending emails
  */
 export class JMAPClient {
   private config: JMAPConfig;
+  /** Cached POST endpoint (from session when config uses `.well-known/jmap`). */
+  private resolvedPostApiUrl: string | null = null;
+  /** Cached Sent mailbox id (JMAP requires opaque ids, not the label "Sent"). */
+  private sentMailboxId: string | null = null;
+  /** Cached Identity/get id keyed by From address (lowercase). */
+  private readonly identityIdByFromEmail = new Map<string, string>();
 
   constructor(config: JMAPConfig) {
     this.config = config;
+  }
+
+  private basicAuthHeader(): string {
+    const raw = `${this.config.username}:${this.config.password}`;
+    if (typeof Buffer !== "undefined") {
+      return `Basic ${Buffer.from(raw, "utf8").toString("base64")}`;
+    }
+    return `Basic ${btoa(raw)}`;
+  }
+
+  /**
+   * Stalwart (and most servers) expose a session URL at `/.well-known/jmap`;
+   * JSON `apiUrl` must be used for method calls.
+   */
+  private async resolvePostApiUrl(): Promise<string> {
+    if (this.resolvedPostApiUrl) {
+      return this.resolvedPostApiUrl;
+    }
+    const configured = this.config.apiUrl.trim();
+    if (!configured.includes(".well-known/jmap")) {
+      this.resolvedPostApiUrl = configured;
+      return this.resolvedPostApiUrl;
+    }
+    const authHeader = this.basicAuthHeader();
+    const response = await fetch(configured, {
+      method: "GET",
+      headers: {
+        Authorization: authHeader,
+        Accept: "application/json",
+      },
+    });
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(
+        `JMAP session GET failed (${response.status}): ${body || "no body"}`,
+      );
+    }
+    const session = (await response.json()) as JmapSessionResponse;
+    if (!session?.apiUrl) {
+      throw new Error("JMAP session response missing apiUrl");
+    }
+    this.resolvedPostApiUrl = session.apiUrl;
+    return this.resolvedPostApiUrl;
+  }
+
+  private async jmapPost(
+    apiUrl: string,
+    authHeader: string,
+    methodCalls: unknown[],
+  ): Promise<{ methodResponses?: unknown[][] }> {
+    const response = await fetch(apiUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: authHeader,
+      },
+      body: JSON.stringify({
+        using: [
+          "urn:ietf:params:jmap:core",
+          "urn:ietf:params:jmap:mail",
+          "urn:ietf:params:jmap:submission",
+        ],
+        methodCalls,
+      }),
+    });
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(
+        `JMAP API request failed (${response.status}): ${errorText || "no body"}`,
+      );
+    }
+    return (await response.json()) as { methodResponses?: unknown[][] };
+  }
+
+  private getMethodResponse(
+    methodResponses: unknown[][],
+    methodName: string,
+    callId: string,
+  ): unknown {
+    const row = methodResponses.find(
+      (entry) =>
+        Array.isArray(entry) && entry[0] === methodName && entry[2] === callId,
+    );
+    if (!row) {
+      throw new Error(
+        `JMAP response missing ${methodName} for callId=${callId}`,
+      );
+    }
+    return row[1];
+  }
+
+  /** Resolve the mailbox id for role `sent` (e.g. Stalwart "Sent Items"). */
+  private async resolveSentMailboxId(
+    apiUrl: string,
+    authHeader: string,
+  ): Promise<string> {
+    if (this.sentMailboxId) {
+      return this.sentMailboxId;
+    }
+    const json = await this.jmapPost(apiUrl, authHeader, [
+      [
+        "Mailbox/query",
+        {
+          accountId: this.config.accountId,
+          filter: { role: "sent" },
+          limit: 5,
+        },
+        "sentQuery",
+      ],
+    ]);
+    const responses = json.methodResponses;
+    if (!responses) {
+      throw new Error("Invalid JMAP response: missing methodResponses");
+    }
+    let queryResult = this.getMethodResponse(
+      responses,
+      "Mailbox/query",
+      "sentQuery",
+    ) as { ids?: string[] };
+    let id = queryResult.ids?.[0];
+    if (!id) {
+      const json2 = await this.jmapPost(apiUrl, authHeader, [
+        [
+          "Mailbox/query",
+          {
+            accountId: this.config.accountId,
+            filter: { name: "Sent Items" },
+            limit: 5,
+          },
+          "sentByName",
+        ],
+      ]);
+      const responses2 = json2.methodResponses;
+      if (!responses2) {
+        throw new Error("Invalid JMAP response: missing methodResponses");
+      }
+      queryResult = this.getMethodResponse(
+        responses2,
+        "Mailbox/query",
+        "sentByName",
+      ) as { ids?: string[] };
+      id = queryResult.ids?.[0];
+    }
+    if (!id) {
+      throw new Error(
+        'No Sent mailbox found (tried role "sent" and name "Sent Items").',
+      );
+    }
+    this.sentMailboxId = id;
+    return id;
+  }
+
+  /** Identity id for EmailSubmission/set (Identity/get, match From or *@domain). */
+  private async resolveIdentityId(
+    apiUrl: string,
+    authHeader: string,
+    fromEmail: string,
+  ): Promise<string> {
+    const normalized = fromEmail.trim().toLowerCase();
+    const hit = this.identityIdByFromEmail.get(normalized);
+    if (hit) {
+      return hit;
+    }
+
+    const json = await this.jmapPost(apiUrl, authHeader, [
+      [
+        "Identity/get",
+        {
+          accountId: this.config.accountId,
+          ids: null,
+        },
+        "identityGet",
+      ],
+    ]);
+    const responses = json.methodResponses;
+    if (!responses) {
+      throw new Error("Invalid JMAP response: missing methodResponses");
+    }
+    const body = this.getMethodResponse(
+      responses,
+      "Identity/get",
+      "identityGet",
+    ) as { list?: Array<{ id: string; email?: string | null }> };
+
+    const list = body.list ?? [];
+    let chosen: string | undefined;
+    for (const row of list) {
+      if (!row.email) {
+        continue;
+      }
+      const ident = row.email.trim().toLowerCase();
+      if (ident === normalized) {
+        chosen = row.id;
+        break;
+      }
+      if (ident.startsWith("*@")) {
+        const domain = ident.slice(2);
+        if (normalized.endsWith(`@${domain}`)) {
+          chosen = row.id;
+          break;
+        }
+      }
+    }
+
+    if (!chosen) {
+      throw new Error(
+        `No JMAP Identity matches From "${fromEmail}". Add this address (or *@domain) as a send identity in Stalwart.`,
+      );
+    }
+
+    this.identityIdByFromEmail.set(normalized, chosen);
+    return chosen;
   }
 
   /**
@@ -38,95 +261,103 @@ export class JMAPClient {
    */
   async sendEmail(email: EmailMessage): Promise<JMAPSendResult> {
     try {
-      // JMAP requires authentication
-      const authHeader = `Basic ${btoa(`${this.config.username}:${this.config.password}`)}`;
+      const authHeader = this.basicAuthHeader();
+      const apiUrl = await this.resolvePostApiUrl();
+      const sentMailboxId = await this.resolveSentMailboxId(apiUrl, authHeader);
+      const identityId = await this.resolveIdentityId(
+        apiUrl,
+        authHeader,
+        email.from,
+      );
 
-      // Step 1: Create the email object
-      const emailObject = this.buildEmailObject(email);
+      const emailObject = this.buildEmailObject(email, sentMailboxId);
 
-      // Step 2: Send via JMAP Email/set method
-      const response = await fetch(this.config.apiUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: authHeader,
-        },
-        body: JSON.stringify({
-          using: ["urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail"],
-          methodCalls: [
-            [
-              "Email/set",
-              {
-                accountId: this.config.accountId,
-                create: {
-                  draft: emailObject,
-                },
-              },
-              "0",
-            ],
-            [
-              "EmailSubmission/set",
-              {
-                accountId: this.config.accountId,
-                create: {
-                  submission: {
-                    emailId: "#draft",
-                    envelope: {
-                      mailFrom: {
-                        email: email.from,
-                      },
-                      rcptTo: email.to.map((addr) => ({ email: addr })),
-                    },
-                  },
-                },
-              },
-              "1",
-            ],
-          ],
-        }),
-      });
+      // Two HTTP calls: batched result references are rejected by some JMAP servers (e.g. Stalwart).
+      const createResult = await this.jmapPost(apiUrl, authHeader, [
+        [
+          "Email/set",
+          {
+            accountId: this.config.accountId,
+            create: {
+              outbound: emailObject,
+            },
+          },
+          "createEmail",
+        ],
+      ]);
 
-      if (!response.ok) {
-        const errorText = await response.text();
+      if (!createResult.methodResponses?.[0]) {
+        throw new Error("Unexpected JMAP response format");
+      }
+      const emailSetResponse = createResult.methodResponses[0];
+      if (emailSetResponse[0] !== "Email/set") {
+        throw new Error("Unexpected JMAP response format");
+      }
+      const notCreated = (
+        emailSetResponse[1] as {
+          notCreated?: Record<string, { type?: string; description?: string }>;
+        }
+      ).notCreated;
+      if (notCreated) {
+        const errorKey = Object.keys(notCreated)[0];
+        const err = notCreated[errorKey];
         throw new Error(
-          `JMAP request failed: ${response.status} - ${errorText}`,
+          `JMAP Email/set failed: ${err?.type ?? "unknown"} - ${err?.description ?? errorKey}`,
         );
       }
+      const created = (
+        emailSetResponse[1] as { created?: { outbound?: { id: string } } }
+      ).created;
+      if (!created?.outbound?.id) {
+        throw new Error("Unexpected JMAP response format");
+      }
+      const messageId = created.outbound.id;
 
-      const result = await response.json();
+      const submitResult = await this.jmapPost(apiUrl, authHeader, [
+        [
+          "EmailSubmission/set",
+          {
+            accountId: this.config.accountId,
+            create: {
+              sendIt: {
+                identityId,
+                emailId: messageId,
+                envelope: {
+                  mailFrom: {
+                    email: email.from,
+                  },
+                  rcptTo: email.to.map((addr) => ({ email: addr })),
+                },
+              },
+            },
+          },
+          "submitEmail",
+        ],
+      ]);
 
-      // Check for errors in JMAP response
-      if (result.methodResponses) {
-        const emailSetResponse = result.methodResponses[0];
-        const submissionResponse = result.methodResponses[1];
-
-        if (emailSetResponse[0] === "Email/set") {
-          const created = emailSetResponse[1].created;
-          if (created?.draft) {
-            const messageId = created.draft.id;
-
-            // Check submission success
-            if (submissionResponse[0] === "EmailSubmission/set") {
-              const submissionCreated = submissionResponse[1].created;
-              if (submissionCreated?.submission) {
-                return {
-                  success: true,
-                  messageId: messageId,
-                };
-              }
-            }
-          }
-        }
-
-        // Check for errors
-        const notCreated = emailSetResponse[1].notCreated;
-        if (notCreated) {
-          const errorKey = Object.keys(notCreated)[0];
-          const error = notCreated[errorKey];
-          throw new Error(
-            `JMAP Email/set failed: ${error.type} - ${error.description}`,
-          );
-        }
+      if (!submitResult.methodResponses?.[0]) {
+        throw new Error("Unexpected JMAP response format");
+      }
+      const submissionResponse = submitResult.methodResponses[0];
+      if (submissionResponse[0] !== "EmailSubmission/set") {
+        throw new Error("Unexpected JMAP response format");
+      }
+      const subBody = submissionResponse[1] as {
+        created?: { sendIt?: unknown };
+        notCreated?: Record<string, { type?: string; description?: string }>;
+      };
+      if (subBody.notCreated) {
+        const sk = Object.keys(subBody.notCreated)[0];
+        const err = subBody.notCreated[sk];
+        throw new Error(
+          `JMAP EmailSubmission/set failed: ${err?.type ?? "unknown"} - ${err?.description ?? sk}`,
+        );
+      }
+      if (subBody.created?.sendIt) {
+        return {
+          success: true,
+          messageId,
+        };
       }
 
       throw new Error("Unexpected JMAP response format");
@@ -142,10 +373,10 @@ export class JMAPClient {
   /**
    * Builds a JMAP email object from our simplified EmailMessage format
    */
-  private buildEmailObject(email: EmailMessage): any {
+  private buildEmailObject(email: EmailMessage, sentMailboxId: string): any {
     const emailObj: any = {
       mailboxIds: {
-        Sent: true, // Store in Sent folder
+        [sentMailboxId]: true,
       },
       from: [{ email: email.from }],
       to: email.to.map((addr) => ({ email: addr })),
@@ -164,7 +395,6 @@ export class JMAPClient {
     if (email.textBody) {
       bodyParts.push({
         type: "text/plain",
-        charset: "utf-8",
         partId: "text",
       });
     }
@@ -173,7 +403,6 @@ export class JMAPClient {
     if (email.htmlBody) {
       bodyParts.push({
         type: "text/html",
-        charset: "utf-8",
         partId: "html",
       });
     }
@@ -216,9 +445,9 @@ export class JMAPClient {
    */
   async testConnection(): Promise<boolean> {
     try {
-      const authHeader = `Basic ${btoa(`${this.config.username}:${this.config.password}`)}`;
-
-      const response = await fetch(this.config.apiUrl, {
+      const authHeader = this.basicAuthHeader();
+      const apiUrl = await this.resolvePostApiUrl();
+      const response = await fetch(apiUrl, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

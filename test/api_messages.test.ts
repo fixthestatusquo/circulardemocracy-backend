@@ -8,22 +8,24 @@ vi.mock("../src/embedding_service.ts", () => ({
     .mockReturnValue("# Test Subject\n\nTest message body"),
 }));
 
-// --- Create a singleton mock instance ---
-const mockDbInstance = {
-  request: vi.fn(),
-  getMessageByExternalId: vi.fn(),
-  findPoliticianByEmail: vi.fn(),
-  classifyAndAssignToCluster: vi.fn(),
-  getDuplicateRank: vi.fn(),
-  insertMessage: vi.fn(),
-  updateMessageFields: vi.fn(),
-  getActiveTemplateForCampaign: vi.fn(),
-  storeSenderEmail: vi.fn(),
-  assignMessageToCluster: vi.fn(),
-};
+const { mockDbInstance } = vi.hoisted(() => ({
+  mockDbInstance: {
+    request: vi.fn(),
+    getMessageByExternalId: vi.fn(),
+    findPoliticianByEmail: vi.fn(),
+    classifyAndAssignToCluster: vi.fn(),
+    getDuplicateRank: vi.fn(),
+    insertMessage: vi.fn(),
+    updateMessageFields: vi.fn(),
+    getActiveTemplateForCampaign: vi.fn(),
+    upsertSupporter: vi.fn(),
+    storeMessageContact: vi.fn(),
+    assignMessageToCluster: vi.fn(),
+  },
+}));
 
 // --- Mock the entire database module ---
-vi.mock("../src/database.ts", () => ({
+vi.mock("../src/database", () => ({
   DatabaseClient: vi.fn(function MockDatabaseClient() {
     return mockDbInstance;
   }),
@@ -44,6 +46,11 @@ describe("Messages API Integration", () => {
     JMAP_PASSWORD: "pass",
   };
 
+  afterEach(() => {
+    delete process.env.SUPABASE_URL;
+    delete process.env.SUPABASE_KEY;
+  });
+
   const validMessage = {
     external_id: "msg123",
     sender_name: "Jane Doe",
@@ -58,7 +65,11 @@ describe("Messages API Integration", () => {
   beforeEach(async () => {
     vi.resetModules();
     vi.clearAllMocks();
-    const apiModule = await import("../src/api.ts");
+    process.env.SUPABASE_URL = env.SUPABASE_URL;
+    process.env.SUPABASE_KEY = env.SUPABASE_KEY;
+    mockDbInstance.upsertSupporter.mockResolvedValue(1);
+    mockDbInstance.storeMessageContact.mockResolvedValue(undefined);
+    const apiModule = await import("../src/api");
     app = apiModule.default;
   });
 
@@ -101,8 +112,7 @@ describe("Messages API Integration", () => {
     });
     const res = await app.fetch(req, env);
     expect(res.status).toBe(404);
-    const body = await res.json();
-    // @ts-expect-error
+    const body = (await res.json()) as { status: string };
     expect(body.status).toBe("politician_not_found");
   });
 
@@ -126,8 +136,7 @@ describe("Messages API Integration", () => {
     });
     const res = await app.fetch(req, env);
     expect(res.status).toBe(409);
-    const body = await res.json();
-    // @ts-expect-error
+    const body = (await res.json()) as { status: string };
     expect(body.status).toBe("duplicate");
   });
 
@@ -157,9 +166,10 @@ describe("Messages API Integration", () => {
     mockDbInstance.getActiveTemplateForCampaign.mockResolvedValue(null);
     mockDbInstance.insertMessage.mockResolvedValue(100);
     mockDbInstance.assignMessageToCluster.mockResolvedValue(1);
-    mockDbInstance.storeSenderEmail.mockResolvedValue(undefined);
-    // @ts-expect-error
-    env.AI.run.mockResolvedValue({ data: [[0.1, 0.2]] });
+    mockDbInstance.storeMessageContact.mockResolvedValue(undefined);
+    (env.AI.run as ReturnType<typeof vi.fn>).mockResolvedValue({
+      data: [[0.1, 0.2]],
+    });
 
     const req = new Request("http://localhost/api/v1/messages", {
       method: "POST",
@@ -171,10 +181,8 @@ describe("Messages API Integration", () => {
     });
     const res = await app.fetch(req, env);
     expect(res.status).toBe(200);
-    const body = await res.json();
-    // @ts-expect-error
+    const body = (await res.json()) as { status: string; message_id: number };
     expect(body.status).toBe("processed");
-    // @ts-expect-error
     expect(body.message_id).toBe(100);
   });
 });

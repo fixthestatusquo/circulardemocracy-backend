@@ -22,12 +22,8 @@ Create a `.env` file in the root directory with the following variables:
 SUPABASE_URL=your-supabase-url
 SUPABASE_KEY=your-supabase-key
 
-# Required for JMAP and email processing
-STALWART_APP_PASSWORD=your-stalwart-app-password
-STALWART_USERNAME=your-stalwart-username
-
-# Optional
-STALWART_JMAP_ENDPOINT=https://mail.circulardemocracy.org/.well-known/jmap
+# Per-politician secret example (preferred):
+POL_42_STALWART_APP_PASSWORD=your-politician-app-password
 ```
 
 ### 2. Database Migration Setup
@@ -49,12 +45,36 @@ npm run db:push
 
 - `SUPABASE_URL`: Your Supabase project URL
 - `SUPABASE_KEY`: Your Supabase service key
-- `STALWART_APP_PASSWORD`: App password for Stalwart mail server
-- `STALWART_USERNAME`: Username for Stalwart
+
+Per-politician JMAP credentials are stored on `politicians` and resolved at send time:
+
+- `stalwart_jmap_endpoint`
+- `stalwart_jmap_account_id`
+- `stalwart_username`
+- `stalwart_app_password_secret_name` (references runtime secret; required for password)
 
 ### Optional Variables
 
-- `STALWART_JMAP_ENDPOINT`: JMAP endpoint URL
+- `POL_<politician_id>_STALWART_APP_PASSWORD`: per-politician app password secret values referenced from `politicians.stalwart_app_password_secret_name` (reply worker reads `c.env` then `process.env`)
+
+### Configure Per-Politician Credentials
+
+From the `circulardemocracy-backend` directory (see main README):
+
+```bash
+npx tsx bin/cli set-politician-jmap --id <politician-id> \
+  --stalwart-jmap-endpoint "<jmap-session-url>" \
+  --stalwart-jmap-account-id "<account-id>" \
+  --stalwart-username "<jmap-username>" \
+  --stalwart-app-password "<app-password>"
+```
+
+Then ensure the generated secret name exists in the **same** runtime as the API (local `.env` or `wrangler secret put POL_<id>_STALWART_APP_PASSWORD` in production).
+
+### Reply sends (brief)
+
+- Each `messages` row is sent at most once by the worker: after success, `reply_sent_at` is set and `reply_status` is `sent`.
+- Inbound auto-replies are only scheduled for the first message per supporter + campaign (`duplicate_rank === 0`); see README “Reply deduplication and persistence” for full detail.
 
 ## Production Deployment
 
@@ -69,7 +89,8 @@ npx wrangler login
 # 2. Set up secrets (required for production)
 npx wrangler secret put SUPABASE_URL
 npx wrangler secret put SUPABASE_KEY
-npx wrangler secret put STALWART_APP_PASSWORD
+# Per-politician password secret example:
+npx wrangler secret put POL_42_STALWART_APP_PASSWORD
 
 # 3. Deploy the worker
 npm run deploy

@@ -24,14 +24,16 @@ const UserSchema = z.object({
   email: z.string().email(),
 });
 
-const SessionSchema = z.object({
-  access_token: z.string(),
-  token_type: z.string(),
-  expires_in: z.number(),
-  expires_at: z.number(),
-  refresh_token: z.string(),
-  user: UserSchema,
-});
+const SessionSchema = z
+  .object({
+    access_token: z.string(),
+    token_type: z.string(),
+    expires_in: z.number(),
+    expires_at: z.number().optional(),
+    refresh_token: z.string(),
+    user: UserSchema,
+  })
+  .passthrough();
 
 // =============================================================================
 // ROUTE
