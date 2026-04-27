@@ -12,6 +12,12 @@ export interface WorkerConfig {
   jmapPassword: string;
 }
 
+type RuntimeSecretBindings = Record<string, string | undefined>;
+const processEnv: Record<string, string | undefined> | undefined =
+  typeof process !== "undefined" && process.env
+    ? (process.env as Record<string, string | undefined>)
+    : undefined;
+
 export interface MessageToProcess {
   id: number;
   external_id: string;
@@ -41,7 +47,7 @@ interface SendContext {
  */
 export async function processScheduledReplies(
   db: DatabaseClient,
-  config: WorkerConfig,
+  runtimeSecrets?: RuntimeSecretBindings,
 ): Promise<ProcessingResult> {
   const result: ProcessingResult = {
     total: 0,
@@ -61,18 +67,10 @@ export async function processScheduledReplies(
       return result;
     }
 
-    // 2. Initialize JMAP client
-    const jmapClient = new JMAPClient({
-      apiUrl: config.jmapApiUrl,
-      accountId: config.jmapAccountId,
-      username: config.jmapUsername,
-      password: config.jmapPassword,
-    });
-
-    // 3. Process each message
+    // 2. Process each message
     for (const message of messages) {
       try {
-        await processSingleMessage(db, jmapClient, message);
+        await processSingleMessage(db, message, runtimeSecrets);
         result.sent++;
         console.log(`[Reply Worker] ✓ Sent reply for message ${message.id}`);
       } catch (error) {
@@ -103,26 +101,19 @@ export async function processScheduledReplies(
 
 export async function processReplyImmediately(
   db: DatabaseClient,
-  config: WorkerConfig,
   messageId: number,
+  runtimeSecrets?: RuntimeSecretBindings,
 ): Promise<void> {
   const message = await getMessageById(db, messageId);
   if (!message) {
     throw new Error(`Message ${messageId} not eligible for immediate reply`);
   }
 
-  const jmapClient = new JMAPClient({
-    apiUrl: config.jmapApiUrl,
-    accountId: config.jmapAccountId,
-    username: config.jmapUsername,
-    password: config.jmapPassword,
-  });
-
-  await processSingleMessage(db, jmapClient, message);
+  await processSingleMessage(db, message, runtimeSecrets);
 }
 
 // Maximum number of retry attempts before giving up
-const MAX_RETRY_ATTEMPTS = 3;
+const MAX_RETRY_ATTEMPTS = 10;
 const RETRY_DELAYS_MINUTES = [5, 15, 60];
 
 /**
@@ -178,8 +169,8 @@ async function getMessageById(
  */
 async function processSingleMessage(
   db: DatabaseClient,
-  jmapClient: JMAPClient,
   message: MessageToProcess,
+  runtimeSecrets?: RuntimeSecretBindings,
 ): Promise<void> {
   // 1. Get the active reply template for this campaign
   const template = await db.getActiveTemplateForCampaign(message.campaign_id);
@@ -198,26 +189,56 @@ async function processSingleMessage(
     throw new Error(errorMsg);
   }
 
-  // 3. Get original sender email from sender_emails table
-  const senderEmail = await db.getSenderEmailByMessageId(message.id);
+  const jmapResolve = resolveJmapConfigForPolitician(
+    politician,
+    runtimeSecrets,
+  );
+  if (!jmapResolve.ok) {
+    const errorMsg = jmapResolve.reason;
+    await handleSendFailure(db, message, errorMsg);
+    throw new Error(errorMsg);
+  }
+  const jmapConfig = jmapResolve.config;
+
+  const jmapClient = new JMAPClient({
+    apiUrl: jmapConfig.jmapApiUrl,
+    accountId: jmapConfig.jmapAccountId,
+    username: jmapConfig.jmapUsername,
+    password: jmapConfig.jmapPassword,
+  });
+
+  // 3. Resolve recipient email from short-term contact storage
+  const senderEmail = await db.getMessageContactEmail(message.id);
   if (!senderEmail) {
-    const errorMsg = `Sender email not found for message ${message.id}`;
+    const errorMsg = `Short-term contact email not found for message ${message.id}`;
     await handleSendFailure(db, message, errorMsg);
     throw new Error(errorMsg);
   }
 
   // 4. Get campaign details for header and sender address
   const campaign = await getCampaignById(db, message.campaign_id);
-  if (!campaign?.technical_email) {
-    const errorMsg = `Campaign technical email missing for campaign ${message.campaign_id}`;
+  if (!campaign) {
+    const errorMsg = `Campaign ${message.campaign_id} not found`;
     await handleSendFailure(db, message, errorMsg);
     throw new Error(errorMsg);
   }
+
+  const fromAddress = (
+    campaign.technical_email?.trim() ||
+    politician.email?.trim() ||
+    ""
+  );
+  if (!fromAddress) {
+    const errorMsg = `No From address: set campaigns.technical_email for campaign ${message.campaign_id} or politicians.email for politician ${message.politician_id}`;
+    await handleSendFailure(db, message, errorMsg);
+    throw new Error(errorMsg);
+  }
+
   const sendContext = await buildSendContext(
     db,
     message,
     senderEmail,
-    campaign.technical_email,
+    fromAddress,
   );
 
   // 5. Render email content based on layout type
@@ -250,8 +271,6 @@ async function processSingleMessage(
       campaign_id: message.campaign_id,
       politician_id: message.politician_id,
       supporter_id: sendContext.supporterId,
-      sender_email: sendContext.senderAddress,
-      recipient_email: senderEmail,
       subject: emailContent.subject,
       status: "failed",
       provider: "jmap",
@@ -266,16 +285,14 @@ async function processSingleMessage(
     campaign_id: message.campaign_id,
     politician_id: message.politician_id,
     supporter_id: sendContext.supporterId,
-    sender_email: sendContext.senderAddress,
-    recipient_email: senderEmail,
     subject: emailContent.subject,
     status: "sent",
     provider: "jmap",
     provider_message_id: sendResult.messageId,
   });
 
-  // 8. Update message status
-  await markMessageAsSent(db, message.id);
+  // 8. Mark message and contact row as sent
+  await db.markMessageReplyDelivered(message.id);
 }
 
 /**
@@ -316,7 +333,7 @@ async function handleSendFailure(
 async function buildSendContext(
   db: DatabaseClient,
   message: MessageToProcess,
-  senderEmail: string,
+  _senderEmail: string,
   campaignTechnicalEmail: string,
 ): Promise<SendContext> {
   const senderAddress = campaignTechnicalEmail;
@@ -324,7 +341,7 @@ async function buildSendContext(
     message.campaign_id,
     message.politician_id,
     message.sender_hash,
-    senderEmail,
+    message.received_at,
   );
   return {
     senderAddress,
@@ -358,7 +375,15 @@ async function getCampaignById(
 async function getPoliticianById(
   db: DatabaseClient,
   politicianId: number,
-): Promise<{ id: number; email: string; name: string } | null> {
+): Promise<{
+  id: number;
+  email: string;
+  name: string;
+  stalwart_jmap_endpoint: string | null;
+  stalwart_jmap_account_id: string | null;
+  stalwart_username: string | null;
+  stalwart_app_password_secret_name: string | null;
+} | null> {
   try {
     return await db.getPoliticianById(politicianId);
   } catch (error) {
@@ -367,17 +392,90 @@ async function getPoliticianById(
   }
 }
 
-/**
- * Marks a message as sent
- */
-async function markMessageAsSent(
-  db: DatabaseClient,
-  messageId: number,
-): Promise<void> {
-  try {
-    await db.markMessageAsSent(messageId);
-  } catch (error) {
-    console.error("Error marking message as sent:", error);
-    throw error;
+type JmapResolveResult =
+  | { ok: true; config: WorkerConfig }
+  | { ok: false; reason: string };
+
+function resolveJmapConfigForPolitician(
+  politician: {
+    id: number;
+    email: string;
+    stalwart_jmap_endpoint: string | null;
+    stalwart_jmap_account_id: string | null;
+    stalwart_username: string | null;
+    stalwart_app_password_secret_name: string | null;
+  },
+  runtimeSecrets?: RuntimeSecretBindings,
+): JmapResolveResult {
+  const secretName = politician.stalwart_app_password_secret_name?.trim() || "";
+  const secretPassword = secretName
+    ? resolveRuntimeSecret(secretName, runtimeSecrets)
+    : "";
+  const jmapApiUrl = String(politician.stalwart_jmap_endpoint ?? "").trim();
+  const accountRaw = politician.stalwart_jmap_account_id;
+  const jmapAccountId =
+    (accountRaw != null && String(accountRaw).trim()) ||
+    politician.email?.trim() ||
+    "";
+  const jmapUsername = String(politician.stalwart_username ?? "").trim();
+  const jmapPassword = secretPassword;
+
+  if (!jmapApiUrl) {
+    return {
+      ok: false,
+      reason: `Politician ${politician.id}: stalwart_jmap_endpoint is missing in DB`,
+    };
   }
+  if (!jmapAccountId) {
+    return {
+      ok: false,
+      reason: `Politician ${politician.id}: stalwart_jmap_account_id (or email) is missing in DB`,
+    };
+  }
+  if (!jmapUsername) {
+    return {
+      ok: false,
+      reason: `Politician ${politician.id}: stalwart_username is missing in DB`,
+    };
+  }
+  if (!secretName) {
+    return {
+      ok: false,
+      reason: `Politician ${politician.id}: stalwart_app_password_secret_name is missing in DB`,
+    };
+  }
+  if (!jmapPassword) {
+    return {
+      ok: false,
+      reason: `Politician ${politician.id}: app password not found in runtime for secret name "${secretName}". Add it to the Worker (wrangler secret put ${secretName}) or local .env for dev.`,
+    };
+  }
+
+  return {
+    ok: true,
+    config: {
+      jmapApiUrl,
+      jmapAccountId,
+      jmapUsername,
+      jmapPassword,
+    },
+  };
 }
+
+function resolveRuntimeSecret(
+  key: string,
+  runtimeSecrets?: RuntimeSecretBindings,
+): string {
+  const fromBindings = String(runtimeSecrets?.[key] ?? "").trim();
+  if (fromBindings) {
+    return fromBindings;
+  }
+
+  const fromProcessEnv = String(processEnv?.[key] ?? "").trim();
+  if (fromProcessEnv) {
+    return fromProcessEnv;
+  }
+
+  return "";
+}
+

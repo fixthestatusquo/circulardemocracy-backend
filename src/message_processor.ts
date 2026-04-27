@@ -148,6 +148,23 @@ export async function processMessage(
       duplicate_rank: duplicateRank,
       classification_confidence: classification.confidence,
     });
+
+    // Ensure supporter audience is built from inbound messages,
+    // so broadcast sends can target campaign supporters even before any reply send.
+    await db.upsertSupporter(
+      classification.campaign_id,
+      politician.id,
+      senderHash,
+      data.timestamp,
+    );
+
+    await db.storeMessageContact({
+      messageId,
+      senderHash,
+      senderEmail: data.sender_email,
+      senderName: data.sender_name,
+      capturedAt: data.timestamp,
+    });
   }
 
   // 7. Determine reply scheduling (only for first message from sender with campaign)
@@ -161,9 +178,9 @@ export async function processMessage(
     if (activeTemplate) {
       replySchedule = calculateReplySchedule(
         activeTemplate.send_timing as
-          | "immediate"
-          | "office_hours"
-          | "scheduled",
+        | "immediate"
+        | "office_hours"
+        | "scheduled",
         activeTemplate.scheduled_for,
         data.timestamp,
       );
@@ -172,17 +189,6 @@ export async function processMessage(
         reply_status: replySchedule.reply_status,
         reply_scheduled_at: replySchedule.reply_scheduled_at,
       });
-    }
-  }
-
-  // Store sender email if auto-reply is scheduled (only for first message from sender)
-  if (replySchedule && duplicateRank === 0) {
-    try {
-      await db.storeSenderEmail(messageId, senderHash, data.sender_email);
-    } catch (error) {
-      console.error("Failed to store sender email for auto-reply:", error);
-      // Don't fail the entire message processing if email storage fails
-      // The message is still processed, just auto-reply won't work
     }
   }
 

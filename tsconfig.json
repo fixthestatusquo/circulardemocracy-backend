@@ -5,15 +5,9 @@
     "moduleResolution": "bundler",
     "strict": true,
     "skipLibCheck": true,
-    "outDir": "dist",
-    "rootDir": "src"
+    "noEmit": true,
+    "types": ["node", "vitest/globals"]
   },
-  "include": [
-    "src/**/*"
-  ],
-  "exclude": [
-    "node_modules",
-    "supabase/functions/**/*",
-    "test/**/*"
-  ]
+  "include": ["src/**/*", "test/**/*", "bin/**/*.ts", "vitest.config.ts"],
+  "exclude": ["node_modules", "dist", "supabase/functions/**/*"]
 }

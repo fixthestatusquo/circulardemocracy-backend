@@ -5,18 +5,15 @@ import {
   PoliticianNotFoundError,
   processMessage,
 } from "./message_processor";
-import { processReplyImmediately, type WorkerConfig } from "./reply_worker";
+import { processReplyImmediately } from "./reply_worker";
+import { type MailSendBindings } from "./stalwart_jmap_env";
 
 // Define types for env and app
-interface Env {
+interface Env extends MailSendBindings {
   AI: Ai; // Cloudflare Workers AI
   SUPABASE_URL: string;
   SUPABASE_KEY: string;
   API_KEY: string;
-  JMAP_API_URL: string;
-  JMAP_ACCOUNT_ID: string;
-  JMAP_USERNAME: string;
-  JMAP_PASSWORD: string;
 }
 
 interface Variables {
@@ -172,18 +169,18 @@ app.openapi(messageRoute, async (c) => {
 
   try {
     const data = c.req.valid("json");
-    const workerConfig: WorkerConfig = {
-      jmapApiUrl: c.env.JMAP_API_URL,
-      jmapAccountId: c.env.JMAP_ACCOUNT_ID,
-      jmapUsername: c.env.JMAP_USERNAME,
-      jmapPassword: c.env.JMAP_PASSWORD,
-    };
+    const runtimeSecrets =
+      c.env as unknown as Record<string, string | undefined>;
     const result = await processMessage(
       db,
       c.env.AI,
       data,
       async (messageId: number) => {
-        await processReplyImmediately(db, workerConfig, messageId);
+        await processReplyImmediately(
+          db,
+          messageId,
+          runtimeSecrets,
+        );
       },
     );
 
@@ -195,8 +192,8 @@ app.openapi(messageRoute, async (c) => {
       return c.json(
         {
           success: false,
-          error: "Message processing failed",
-          details: (result.errors || []).join(", ") || "Unknown processing failure",
+          error: result.errors?.[0] ?? "Message processing failed",
+          details: result.errors?.slice(1).join("; ") || undefined,
         },
         500,
       );

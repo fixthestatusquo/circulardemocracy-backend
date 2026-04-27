@@ -8,18 +8,15 @@ import type { Ai } from "./message_processor";
 import messagesApp from "./messages";
 import politiciansApp from "./politicians";
 import replyTemplatesApp from "./reply_templates";
-import { processScheduledReplies, type WorkerConfig } from "./reply_worker";
+import { processScheduledReplies } from "./reply_worker";
+import { type MailSendBindings } from "./stalwart_jmap_env";
 
 // Define types for env and app
-interface Env {
+interface Env extends MailSendBindings {
   AI: Ai;
   SUPABASE_URL: string;
   SUPABASE_KEY: string;
   API_KEY: string;
-  JMAP_API_URL: string;
-  JMAP_ACCOUNT_ID: string;
-  JMAP_USERNAME: string;
-  JMAP_PASSWORD: string;
 }
 
 interface Variables {
@@ -69,14 +66,11 @@ app.post("/api/v1/worker/process-replies", async (c) => {
   try {
     const db = c.get("db") as DatabaseClient;
 
-    const workerConfig: WorkerConfig = {
-      jmapApiUrl: c.env.JMAP_API_URL,
-      jmapAccountId: c.env.JMAP_ACCOUNT_ID,
-      jmapUsername: c.env.JMAP_USERNAME,
-      jmapPassword: c.env.JMAP_PASSWORD,
-    };
-
-    const result = await processScheduledReplies(db, workerConfig);
+    const runtimeSecrets = c.env as unknown as Record<string, string | undefined>;
+    const result = await processScheduledReplies(
+      db,
+      runtimeSecrets,
+    );
 
     return c.json({
       success: true,
@@ -123,14 +117,12 @@ export async function handleScheduledEvent(env: Env): Promise<void> {
       key: env.SUPABASE_KEY,
     });
 
-    const workerConfig: WorkerConfig = {
-      jmapApiUrl: env.JMAP_API_URL,
-      jmapAccountId: env.JMAP_ACCOUNT_ID,
-      jmapUsername: env.JMAP_USERNAME,
-      jmapPassword: env.JMAP_PASSWORD,
-    };
-
-    const result = await processScheduledReplies(db, workerConfig);
+    const runtimeSecrets =
+      env as unknown as Record<string, string | undefined>;
+    const result = await processScheduledReplies(
+      db,
+      runtimeSecrets,
+    );
 
     console.log("[Reply Worker] Processing complete:", {
       total: result.total,

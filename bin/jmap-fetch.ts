@@ -182,6 +182,7 @@ ENVIRONMENT VARIABLES:
   STALWART_APP_PASSWORD  Required app password for JMAP auth
   STALWART_USERNAME      Required unless passed with --user
   STALWART_JMAP_ENDPOINT Optional, default: "${STALWART_JMAP_ENDPOINT}"
+  STALWART_JMAP_ACCOUNT_ID Optional; if unset, taken from session primaryAccounts (mail)
   SUPABASE_URL           Required Supabase URL
   SUPABASE_KEY           Required Supabase key
 
@@ -866,7 +867,8 @@ async function runStalwartIngestion(
 
   console.log(`Connecting to Stalwart JMAP at ${endpoint}...`);
   const session = await fetchJmapSession(endpoint, authHeader);
-  const accountId = resolveAccountId(session);
+  const accountId =
+    process.env.STALWART_JMAP_ACCOUNT_ID?.trim() || resolveAccountId(session);
   const mailboxCache = new Map<string, string>();
 
   let rawEmails: JmapEmail[] = [];

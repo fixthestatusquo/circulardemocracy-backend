@@ -2,17 +2,14 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import apiApp, { handleScheduledEvent } from "./api";
 import { type AuthEnv, apiKeyAuthMiddleware } from "./auth_middleware";
+import type { MailSendBindings } from "./stalwart_jmap_env";
 import stalwartApp from "./stalwart";
 
 // Combine Envs if necessary, or just use a generic Env that includes API_KEY
-interface Env extends AuthEnv {
+interface Env extends AuthEnv, MailSendBindings {
   AI: any; // Cloudflare AI binding
   SUPABASE_URL: string;
   SUPABASE_KEY: string;
-  JMAP_API_URL: string;
-  JMAP_ACCOUNT_ID: string;
-  JMAP_USERNAME: string;
-  JMAP_PASSWORD: string;
 }
 
 const app = new Hono<{ Bindings: Env }>();
