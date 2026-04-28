@@ -217,9 +217,17 @@ The platform provides several command-line tools for message ingestion, campaign
 All CLI entrypoints load `.env` via `dotenv`, so set these once and reuse across commands:
 
 ```bash
-# Required for all CLI commands
 export SUPABASE_URL="your-supabase-url"
-export SUPABASE_KEY="your-supabase-key"
+
+# Service key (or any key your Supabase project allows for these operations):
+# Used by add-campaign (insert), create-campaign-from-cluster, closest-campaigns
+# (same pattern as DatabaseClient in code).
+export SUPABASE_KEY="your-supabase-service-or-backend-key"
+
+# Anon key: used by login/logout (session + refresh) and by update-campaign
+# (the CLI builds a Supabase client with SUPABASE_ANON_KEY for that command).
+export SUPABASE_ANON_KEY="your-supabase-anon-key"
+
 # Required for JMAP commands (`jmap-fetch`, `reprocess-messages`)
 export STALWART_APP_PASSWORD="your-stalwart-app-password"
 export STALWART_USERNAME="your-stalwart-username"
@@ -229,6 +237,7 @@ export STALWART_JMAP_ACCOUNT_ID="your-jmap-mail-account-id"
 
 # Optional
 export STALWART_JMAP_ENDPOINT="https://mail.circulardemocracy.org/.well-known/jmap"
+export API_URL="http://localhost:3000"   # optional; login / generic API calls
 ```
 
 #### 1. Main CLI Interface (`./bin/cli`)
@@ -248,12 +257,18 @@ npx tsx bin/cli <command> [options]
 
 **Campaign Management:**
 
-- `add-campaign`: Create a new campaign with embedding
-- `update-campaign`: Update campaign embedding and/or name
-- `assign-cluster`: Assign a campaign to one inferred message cluster
-- `sync-clusters`: Bulk sync all already-assigned clusters into messages (useful after backfills/imports)
+- `add-campaign`: Insert a new row into `campaigns` via Supabase (`--text` optional; with `--text`, stores `reference_vector`)
+- `update-campaign`: Update an existing campaign via Supabase (anon client); embedding and/or name
+- `create-campaign-from-cluster`: Single cluster workflow — try to match an existing campaign by **hint** (`findCampaignByHint`), then either **merge** centroids and update that row, or **create** a new campaign when nothing matches, then set `messages.campaign_id` for that cluster.
 
-Use `assign-cluster` for one manual decision. Use `sync-clusters` after many assignments or data backfills to propagate cluster campaign IDs to matching messages in bulk.
+**`create-campaign-from-cluster`**
+
+- **Campaign lookup**: First tries `findCampaignByHint` on `--campaign-name` (`name` or `slug` `ilike` `%hint%`, status `active` or `unconfirmed`).
+- **If a campaign matches**: Updates that campaign’s `reference_vector` — `average(campaign_centroid, cluster_centroid)` when both exist (same length required); otherwise the cluster centroid alone.
+- **If no campaign matches**: Inserts a new `campaigns` row with **`name` exactly equal to `--campaign-name`**, a slug derived from that name, and `reference_vector` set to the cluster centroid (defaults such as `status = unconfirmed` come from the database).
+- **Cluster centroid**: Reads `message_clusters.centroid_vector` for `--cluster-id`. If there is no usable centroid vector, the command exits with an error.
+- **`message_clusters`**: Sets `campaign_id` on the cluster row (`WHERE id = --cluster-id`), so it is no longer null. DB triggers can then align `messages.campaign_id` where it was null.
+- **Messages**: Updates `messages.campaign_id` for all rows with that `cluster_id`. If none match, the command still succeeds and reports **0** messages updated.
 
 **Message Processing:**
 
@@ -264,8 +279,11 @@ Use `assign-cluster` for one manual decision. Use `sync-clusters` after many ass
 **Campaign Management Examples:**
 
 ```bash
-# Create campaign with representative text used to compute the campaign embedding vector
+# Create campaign directly in Supabase (with embedding)
 npx tsx bin/cli add-campaign --name "Climate Action" --text "I urge action on climate change" --description "Environmental campaign"
+
+# Create campaign directly in Supabase (without embedding)
+npx tsx bin/cli add-campaign --name "Climate Action" --description "Environmental campaign"
 
 # Create campaign from URL (extracts subdomain as name and content as text)
 npx tsx bin/cli add-campaign --url "https://climate.example.com/action" --name "Override Name"
@@ -275,9 +293,8 @@ npx tsx bin/cli update-campaign --id 5 --text "Updated representative text used 
 npx tsx bin/cli update-campaign --id 5 --name "New Campaign Name"
 npx tsx bin/cli update-campaign --id 5 --url "https://climate.example.com/new-page"
 
-# Assign one cluster, then run bulk sync if needed
-npx tsx bin/cli assign-cluster --cluster-id 123 --campaign-name "Climate Action"
-npx tsx bin/cli sync-clusters
+# Match existing campaign by hint, merge centroid, assign messages (or create "Climate" if no match)
+npx tsx bin/cli create-campaign-from-cluster --cluster-id 123 --campaign-name "Climate"
 ```
 
 **Message Reprocessing Examples:**

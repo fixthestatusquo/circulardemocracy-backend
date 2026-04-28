@@ -263,9 +263,9 @@ async function addCampaign() {
     }
   }
 
-  if (!name || !text) {
-    console.error('Error: --name and --text are required (or provide --url)');
-    console.log('\nUsage: ./cli add-campaign --name "Campaign Name" --text "Representative text" [--description "Description"]');
+  if (!name) {
+    console.error('Error: --name is required (or provide --url)');
+    console.log('\nUsage: ./cli add-campaign --name "Campaign Name" [--text "Representative text"] [--description "Description"]');
     console.log('   Or: ./cli add-campaign --url "https://subdomain.example.com/page" [--name "Override Name"]');
     process.exit(1);
   }
@@ -273,67 +273,48 @@ async function addCampaign() {
   // Auto-generate slug from name
   const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 
-  console.log('🔄 Generating embedding for campaign...');
-
-  const embedding = await generateEmbedding(null, text);
-
-  console.log(`✅ Generated ${embedding.length}-dimensional embedding`);
-
-  const API_BASE_URL = getApiBaseUrl(argv.server);
-  const token = await getAuthToken();
-
-  if (!token) {
-    console.error('Error: Not logged in. Please run: ./cli login');
-    process.exit(1);
-  }
-
-  const client = hc(API_BASE_URL, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
-  });
-
-  console.log('💾 Creating campaign via API...');
-
   try {
-    console.log(`📝 Using slug: ${slug}`);
+    let embedding = undefined;
+    if (text) {
+      console.log('🔄 Generating embedding for campaign...');
+      embedding = await generateEmbedding(null, text);
+      console.log(`✅ Generated ${embedding.length}-dimensional embedding`);
+    } else {
+      console.log('ℹ️ No --text provided; campaign will be created without reference_vector.');
+    }
 
-    const response = await client.api.v1.campaigns.$post({
-      json: {
-        name,
-        slug,
-        description: description || undefined,
-      },
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error(`❌ Error creating campaign: ${response.status} ${response.statusText}`);
-      console.error(errorText);
+    const supabaseUrl = process.env.SUPABASE_URL;
+    const supabaseKey = process.env.SUPABASE_KEY;
+    if (!supabaseUrl || !supabaseKey) {
+      console.error('Error: SUPABASE_URL and SUPABASE_KEY environment variables must be set');
       process.exit(1);
     }
 
-    const campaign = await response.json();
-    console.log('✅ Campaign created successfully!');
+    const supabase = createClient(supabaseUrl, supabaseKey);
 
-    const supabase = getSupabase();
-    console.log('🔄 Updating campaign with embedding...');
+    console.log(`📝 Using slug: ${slug}`);
+    console.log('💾 Creating campaign directly in Supabase...');
 
-    const { data: updatedCampaign, error: updateError } = await supabase
+    const insertData = {
+      name,
+      slug,
+      description: description || null,
+      ...(embedding ? { reference_vector: embedding } : {}),
+    };
+
+    const { data: createdCampaign, error: createError } = await supabase
       .from('campaigns')
-      .update({ reference_vector: embedding })
-      .eq('id', campaign.id)
+      .insert(insertData)
       .select()
       .single();
 
-    if (updateError) {
-      console.error('⚠️  Campaign created but embedding update failed:', updateError.message);
-      console.log('Campaign data:', JSON.stringify(campaign, null, 2));
+    if (createError) {
+      console.error(`❌ Error creating campaign: ${createError.message}`);
       process.exit(1);
     }
 
-    console.log('✅ Campaign embedding set successfully!');
-    console.log(JSON.stringify(updatedCampaign, null, 2));
+    console.log('✅ Campaign created successfully!');
+    console.log(JSON.stringify(createdCampaign, null, 2));
   } catch (error) {
     console.error('❌ Failed to create campaign:', error.message);
     process.exit(1);
@@ -425,81 +406,163 @@ async function updateCampaign() {
   console.log(JSON.stringify(data, null, 2));
 }
 
-async function assignCluster() {
-  const { 'cluster-id': clusterId, 'campaign-name': campaignName } = argv;
+async function createCampaignFromCluster() {
+  const { 'cluster-id': clusterIdRaw, 'campaign-name': campaignName } = argv;
 
-  if (!clusterId) {
+  if (!clusterIdRaw) {
     console.error('Error: --cluster-id is required');
-    console.log('\nUsage: ./cli assign-cluster --cluster-id <id> --campaign-name <name>');
+    console.log('\nUsage: ./cli create-campaign-from-cluster --cluster-id <id> --campaign-name <name-or-hint>');
     process.exit(1);
   }
 
   if (!campaignName) {
-    console.error('Error: --campaign-name is required');
-    console.log('\nUsage: ./cli assign-cluster --cluster-id <id> --campaign-name <name>');
+    console.error('Error: --campaign-name is required (hint for lookup, or literal name when creating)');
+    console.log('\nUsage: ./cli create-campaign-from-cluster --cluster-id <id> --campaign-name <name-or-hint>');
+    process.exit(1);
+  }
+
+  const clusterId = Number(clusterIdRaw);
+  if (Number.isNaN(clusterId)) {
+    console.error('Error: --cluster-id must be a number');
     process.exit(1);
   }
 
   const supabaseUrl = process.env.SUPABASE_URL;
   const supabaseKey = process.env.SUPABASE_KEY;
-
   if (!supabaseUrl || !supabaseKey) {
     console.error('Error: SUPABASE_URL and SUPABASE_KEY environment variables must be set');
     process.exit(1);
   }
 
-  // Import DatabaseClient
-  const { DatabaseClient } = await import('../src/database.js');
+  const supabase = createClient(supabaseUrl, supabaseKey);
 
+  console.log(`🔍 Loading cluster ${clusterId}...`);
+  const { data: cluster, error: clusterError } = await supabase
+    .from('message_clusters')
+    .select('id, message_count, centroid_vector')
+    .eq('id', clusterId)
+    .single();
+
+  if (clusterError || !cluster) {
+    const detail = clusterError?.message ? ` — ${clusterError.message}` : '';
+    console.error(`Error: could not load cluster ${clusterId} from message_clusters${detail}`);
+    process.exit(1);
+  }
+
+  const toVector = (value) => {
+    if (!value) return null;
+    if (Array.isArray(value)) return value;
+    if (typeof value === 'string') {
+      try {
+        const parsed = JSON.parse(value);
+        return Array.isArray(parsed) ? parsed : null;
+      } catch (_error) {
+        return null;
+      }
+    }
+    return null;
+  };
+
+  const averageVectors = (a, b) => a.map((v, i) => (v + b[i]) / 2);
+
+  const centroidRaw = cluster.centroid_vector ?? cluster.centroid;
+  const clusterVector = toVector(centroidRaw);
+  if (!clusterVector || clusterVector.length === 0) {
+    console.error(`Error: cluster ${clusterId} has no centroid embedding`);
+    process.exit(1);
+  }
+
+  const { DatabaseClient } = await import('../src/database.js');
   const db = new DatabaseClient({ url: supabaseUrl, key: supabaseKey });
 
-  try {
-    console.log(`Finding campaign: ${campaignName}`);
-    const campaign = await db.findCampaignByHint(campaignName);
+  console.log(`🔎 Finding campaign (hint): "${campaignName}"...`);
+  const campaign = await db.findCampaignByHint(campaignName);
 
-    if (!campaign) {
-      console.error(`Campaign "${campaignName}" not found`);
+  let campaignId;
+  let resolvedName;
+
+  if (!campaign) {
+    const slug = campaignName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    console.log(`No match; creating new campaign "${campaignName}" (slug: ${slug})...`);
+
+    const { data: created, error: insertError } = await supabase
+      .from('campaigns')
+      .insert({
+        name: campaignName,
+        slug,
+        reference_vector: clusterVector,
+      })
+      .select('id, name')
+      .single();
+
+    if (insertError) {
+      console.error('Error: failed to create campaign:', insertError.message);
       process.exit(1);
     }
 
-    console.log(`Found campaign: ${campaign.name} (ID: ${campaign.id})`);
+    campaignId = created.id;
+    resolvedName = created.name;
+    console.log(`Created campaign: ${resolvedName} (ID: ${campaignId})`);
+  } else {
+    campaignId = campaign.id;
+    resolvedName = campaign.name;
+    console.log(`Found campaign: ${resolvedName} (ID: ${campaignId})`);
 
-    console.log(`Assigning campaign to cluster ${clusterId}...`);
-    await db.assignCampaignToCluster(Number(clusterId), campaign.id);
+    const campaignVector = toVector(campaign.reference_vector);
 
-    console.log('Successfully assigned campaign to cluster!');
-    console.log(`All messages in cluster ${clusterId} will be automatically updated with campaign ID ${campaign.id} via database triggers`);
+    let mergedVector = clusterVector;
+    if (campaignVector && campaignVector.length > 0) {
+      if (campaignVector.length !== clusterVector.length) {
+        console.error(
+          `Error: centroid dimension mismatch (campaign=${campaignVector.length}, cluster=${clusterVector.length})`,
+        );
+        process.exit(1);
+      }
+      mergedVector = averageVectors(campaignVector, clusterVector);
+      console.log('Using average of campaign centroid and cluster centroid.');
+    } else {
+      console.log('Campaign has no centroid; using cluster centroid.');
+    }
 
-  } catch (error) {
-    console.error('Error assigning campaign to cluster:', error instanceof Error ? error.message : 'Unknown error');
+    const { error: embeddingUpdateError } = await supabase
+      .from('campaigns')
+      .update({ reference_vector: mergedVector })
+      .eq('id', campaignId);
+
+    if (embeddingUpdateError) {
+      console.error('Error: failed to update campaign centroid:', embeddingUpdateError.message);
+      process.exit(1);
+    }
+  }
+
+  const { error: clusterRowError } = await supabase
+    .from('message_clusters')
+    .update({ campaign_id: campaignId })
+    .eq('id', clusterId);
+
+  if (clusterRowError) {
+    console.error('Error: failed to set message_clusters.campaign_id:', clusterRowError.message);
     process.exit(1);
   }
-}
 
-async function syncClusters() {
-  const supabaseUrl = process.env.SUPABASE_URL;
-  const supabaseKey = process.env.SUPABASE_KEY;
+  const { data: updatedMessages, error: assignError } = await supabase
+    .from('messages')
+    .update({ campaign_id: campaignId })
+    .eq('cluster_id', clusterId)
+    .select('id');
 
-  if (!supabaseUrl || !supabaseKey) {
-    console.error('Error: SUPABASE_URL and SUPABASE_KEY environment variables must be set');
+  if (assignError) {
+    console.error('Error: failed to assign messages:', assignError.message);
     process.exit(1);
   }
 
-  // Import DatabaseClient
-  const { DatabaseClient } = await import('../src/database.js');
-
-  const db = new DatabaseClient({ url: supabaseUrl, key: supabaseKey });
-
-  try {
-    console.log('Syncing campaign IDs from clusters to messages...');
-    const updatedCount = await db.syncCampaignFromClusters();
-
-    console.log(`Successfully synced ${updatedCount} messages with campaign IDs from their clusters`);
-
-  } catch (error) {
-    console.error('Error syncing clusters:', error instanceof Error ? error.message : 'Unknown error');
-    process.exit(1);
-  }
+  console.log('✅ Cluster linked to campaign successfully!');
+  console.log(`Campaign: ${resolvedName}`);
+  console.log(`Campaign ID: ${campaignId}`);
+  console.log(`Cluster ID: ${clusterId}`);
+  console.log(`message_clusters.campaign_id set to ${campaignId}`);
+  console.log(`Cluster message count: ${cluster.message_count}`);
+  console.log(`Messages assigned: ${updatedMessages?.length || 0}`);
 }
 
 async function setPoliticianJmap() {
@@ -1032,18 +1095,18 @@ Usage: ./cli <command> [options]
 Commands:
   login                 Authenticate with the API
   logout                Clear authentication session
-  add-campaign          Create a new campaign with embedding
+  add-campaign          Create a new campaign (text optional)
   update-campaign       Update campaign embedding
   set-politician-jmap   Create/update per-politician reply sender credentials
+  create-campaign-from-cluster  Assign cluster to campaign (match, merge, or create + messages)
   closest-campaigns     Find closest campaigns for a message
-  assign-cluster        Assign campaign to cluster
-  sync-clusters         Sync campaign IDs from clusters to messages
   reprocess-messages    Reprocess and reclassify existing messages
   <endpoint>            API endpoint path (e.g., campaigns, users/:id)
 
 Campaign Management:
-  add-campaign --name <name> --text <text> [--description <desc>]
-    Create a new campaign with vector embedding (slug auto-generated from name)
+  add-campaign --name <name> [--text <text>] [--description <desc>]
+    Create campaign directly in Supabase (slug auto-generated from name)
+    If --text is provided, generate and store reference_vector; otherwise create without it
     
   add-campaign --url <url> [--name <override-name>] [--description <desc>]
     Create campaign from URL (extracts subdomain as name and content as text)
@@ -1055,11 +1118,9 @@ Campaign Management:
     Update campaign from URL (extracts subdomain as name and content as text)
 
 Cluster Management:
-  assign-cluster --cluster-id <id> --campaign-name <name>
-    Assign a campaign to a cluster (updates all messages in cluster)
-    
-  sync-clusters
-    Sync campaign IDs from clusters to all messages (bulk update)
+  create-campaign-from-cluster --cluster-id <id> --campaign-name <name-or-hint>
+    findCampaignByHint, merge centroid on match, else create campaign named exactly as
+    --campaign-name; set message_clusters.campaign_id and messages.campaign_id for that cluster.
 
 Politician JMAP Credentials:
   set-politician-jmap --id <id> --stalwart-jmap-endpoint <url> --stalwart-jmap-account-id <id> --stalwart-username <username> --stalwart-app-password <password> [--password-secret-name <secret-name>]
@@ -1103,6 +1164,7 @@ Examples:
   ./cli update-campaign --id 5 --text "Updated representative text"
   ./cli update-campaign --id 5 --url "https://climate.example.com/new-page"
   ./cli set-politician-jmap --id 3 --stalwart-jmap-endpoint "https://mail.circulardemocracy.org/.well-known/jmap" --stalwart-jmap-account-id "7" --stalwart-username "politician-1@circulardemocracy.org" --stalwart-app-password "caeke yroa ldhq uscy ghb"
+  ./cli create-campaign-from-cluster --cluster-id 123 --campaign-name "Climate Action"
   ./cli closest-campaigns --message-id "ieaaaacb" --limit 5
   ./cli closest-campaigns --message "I support GMO demeter policy" --limit 5
   ./cli reprocess-messages --process-all
@@ -1144,6 +1206,7 @@ Note: Run 'node doc-generator.js help' for endpoint-specific help
   });
 }
 
+if (argv._[0] === 'assign-cluster') argv._[0] = 'create-campaign-from-cluster';
 const command = argv._[0];
 
 if (argv['list-servers']) {
@@ -1182,13 +1245,8 @@ if (command === 'update-campaign') {
   process.exit(0);
 }
 
-if (command === 'assign-cluster') {
-  await assignCluster();
-  process.exit(0);
-}
-
-if (command === 'sync-clusters') {
-  await syncClusters();
+if (command === 'create-campaign-from-cluster') {
+  await createCampaignFromCluster();
   process.exit(0);
 }
 
@@ -1250,6 +1308,19 @@ Object.keys(params).forEach(key => {
     }
   }
 });
+
+const openApiRoots = getOpenApiV1RootSegments();
+const endpointRoot = String(command || '')
+  .split('/')
+  .filter((s) => s && !s.startsWith(':'))
+  .map((s) => s.replace(/^:+/, ''))[0];
+if (openApiRoots.size > 0 && endpointRoot && !openApiRoots.has(endpointRoot)) {
+  console.error(`Unknown command "${command}".`);
+  console.error(
+    'Run with --help for built-in commands. API passthrough only accepts /api/v1 route roots from doc/openapi.json.',
+  );
+  process.exit(1);
+}
 
 // Make the API call
 makeApiCall(endpoint, method.toUpperCase(), params);
