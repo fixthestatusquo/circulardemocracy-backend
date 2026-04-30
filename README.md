@@ -707,6 +707,58 @@ For local-only, matching `.env` line:
 POL_3_STALWART_APP_PASSWORD="your-politician-app-password"
 ```
 
+## Stalwart Master Account Setup (Supabase IdP)
+
+Use this when one **master/service account** sends outbound emails on behalf of **all politician mailboxes** via impersonation.
+
+### 1) Read the official Stalwart auth docs
+
+- Permissions: <https://stalw.art/docs/auth/authorization/permissions/>
+- Roles: <https://stalw.art/docs/auth/authorization/roles>
+- Administrators + impersonation: <https://stalw.art/docs/auth/authorization/administrator>
+
+### 2) Create a dedicated role for impersonation
+
+In Stalwart WebUI: `Management -> Directory -> Roles`, create a role (example: `cd-impersonation-sender`) and assign:
+
+- `impersonate` (required): allows acting on behalf of another account.
+- `email-send` (required for SMTP/JMAP sending).
+- `jmap-email-submission-set` (required for JMAP submission API).
+- `jmap-email-get` and `jmap-mailbox-get` (recommended for troubleshooting/validation in JMAP flows).
+
+Authentication permission depends on how the master account signs in:
+
+- `authenticate-oauth` (required when using Supabase as IdP / OAuth login flow).
+
+Keep this role minimal (least privilege). Do not assign full `admin` unless you explicitly need server-wide administration.
+
+### 3) Assign role to the service/master account
+
+Create (or select) one non-human Stalwart master account used by the backend worker and attach the impersonation role to it. This single account is the sender identity that impersonates each politician mailbox at send time.
+
+### 4) Impersonation login format
+
+Stalwart impersonation uses a composite login:
+
+- `<target_mailbox>%<impersonator_account>`
+
+Example:
+
+- `politician-1@circulardemocracy.org%mailer-service@circulardemocracy.org`
+
+Use the credential type that matches your auth flow:
+
+- OAuth/IdP flow: use the master account OAuth token/session.
+- Password flow: use the impersonator account password.
+
+### 5) Supabase as IdP notes
+
+- Keep Supabase as the identity source for user authentication.
+- Use one dedicated Stalwart master/service account for backend mailbox impersonation across all politicians.
+- Do not reuse politician personal credentials in backend automation.
+- Grant only the minimum permissions above; avoid broad admin permissions.
+- Store service account secrets/tokens in runtime secrets (`wrangler secret put ...`), not in source control.
+
 ## Reply deduplication and persistence
 
 **Persisted “sent” state (per `messages` row)**
