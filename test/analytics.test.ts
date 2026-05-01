@@ -12,6 +12,7 @@ const { mockDbInstance } = vi.hoisted(() => ({
   mockDbInstance: {
     request: vi.fn(),
     getMessageAnalyticsDaily: vi.fn(),
+    getUserPoliticianIds: vi.fn(),
   },
 }));
 
@@ -55,6 +56,7 @@ describe("Analytics API Integration", () => {
     process.env.SUPABASE_KEY = env.SUPABASE_KEY;
     const apiModule = await import("../src/api");
     app = apiModule.default;
+    mockDbInstance.getUserPoliticianIds.mockResolvedValue([1]);
     // Default: mock failed auth
     mockGetUser.mockResolvedValue({
       data: { user: null },

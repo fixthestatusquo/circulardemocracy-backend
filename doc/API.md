@@ -18,11 +18,11 @@ Retrieve message analytics showing daily message counts grouped by campaign for 
 
 | Name | Type | In | Required | Description |
 |------|------|----|---------|--------------|
-| days | string | query |  |  |
+| days | string | query |  | Number of days to look back (default: 7) |
 
 **Responses:**
 
-- **200**: Message analytics grouped by hour and campaign
+- **200**: Message analytics grouped by day and campaign
 - **500**: Internal server error
 
 **CLI Example:**
@@ -63,7 +63,8 @@ Content-Type: `application/json`
 
 - **200**: Message processed successfully
 - **400**: Invalid input data
-- **401**: Unauthorized - Invalid API Key
+- **401**: Unauthorized - Invalid or missing Supabase JWT
+- **403**: Forbidden
 - **404**: Politician not found
 - **409**: Duplicate message
 - **500**: Internal server error
@@ -125,6 +126,7 @@ Content-Type: `application/json`
 **Responses:**
 
 - **200**: Campaign statistics
+- **500**: Failed to fetch statistics
 
 **CLI Example:**
 
@@ -153,6 +155,33 @@ Content-Type: `application/json`
 
 ```bash
 ./cli /api/v1/campaigns/--id=123
+```
+
+---
+
+### /api/v1/campaigns/{id}/replies/broadcast
+
+#### POST
+
+**Summary:** /api/v1/campaigns/{id}/replies/broadcast
+
+**Parameters:**
+
+| Name | Type | In | Required | Description |
+|------|------|----|---------|--------------|
+| id | string | path | ✓ |  |
+
+**Responses:**
+
+- **200**: Creates broadcast reply rows and sends immediately when JMAP is configured; otherwise leaves messages pending for the scheduled worker.
+- **400**: Bad request (e.g. no active template or no supporters)
+- **401**: Unauthorized
+- **403**: Forbidden
+
+**CLI Example:**
+
+```bash
+./cli /api/v1/campaigns/--id=123/replies/broadcast --method=POST
 ```
 
 ---
@@ -231,11 +260,11 @@ Content-Type: `application/json`
 | campaign_id | number | ✓ |  |
 | name | string | ✓ |  |
 | subject | string | ✓ |  |
-| message_body | string | ✓ |  |
-| layout_type | string | ✓ |  |
-| send_timing | string | ✓ |  |
+| body | string | ✓ |  |
+| layout_type | string |  |  |
+| send_timing | string |  |  |
 | scheduled_for | string |  |  |
-| active | boolean | ✓ |  |
+| active | boolean |  |  |
 
 **Responses:**
 
@@ -262,7 +291,7 @@ Retrieve detailed information about a specific campaign auto-reply template.
 
 | Name | Type | In | Required | Description |
 |------|------|----|---------|--------------|
-| id | string | path | ✓ |  |
+| id | string | path | ✓ | Template ID |
 
 **Responses:**
 
@@ -287,7 +316,7 @@ Update an existing auto-reply template. You can modify the subject, message body
 
 | Name | Type | In | Required | Description |
 |------|------|----|---------|--------------|
-| id | string | path | ✓ |  |
+| id | string | path | ✓ | Template ID |
 
 **Request Body:**
 
@@ -297,7 +326,7 @@ Content-Type: `application/json`
 |----------|------|----------|--------------|
 | name | string |  |  |
 | subject | string |  |  |
-| message_body | string |  |  |
+| body | string |  |  |
 | layout_type | string |  |  |
 | send_timing | string |  |  |
 | scheduled_for | string |  |  |
@@ -328,7 +357,7 @@ Permanently delete an auto-reply template. This action cannot be undone.
 
 | Name | Type | In | Required | Description |
 |------|------|----|---------|--------------|
-| id | string | path | ✓ |  |
+| id | string | path | ✓ | Template ID |
 
 **Responses:**
 
@@ -356,7 +385,7 @@ Activate or deactivate an auto-reply template. Only one template can be active p
 
 | Name | Type | In | Required | Description |
 |------|------|----|---------|--------------|
-| id | string | path | ✓ |  |
+| id | string | path | ✓ | Template ID |
 
 **Request Body:**
 
@@ -396,11 +425,73 @@ Content-Type: `application/json`
 
 - **200**: Successful login, returns session object
 - **401**: Unauthorized, invalid credentials
+- **500**: Invalid auth provider response
 
 **CLI Example:**
 
 ```bash
 ./cli /api/v1/login --method=POST --name=example --param=value
+```
+
+---
+
+### /health
+
+#### GET
+
+**Summary:** /health
+
+Check health status of the Stalwart hook service
+
+**Responses:**
+
+- **200**: Stalwart hook service health check
+
+**CLI Example:**
+
+```bash
+./cli /health
+```
+
+---
+
+### /api/v1/worker/process-replies
+
+#### POST
+
+**Summary:** /api/v1/worker/process-replies
+
+Manually trigger scheduled reply processing for admin use
+
+**Responses:**
+
+- **200**: Scheduled replies processed
+- **500**: Worker processing failed
+
+**CLI Example:**
+
+```bash
+./cli /api/v1/worker/process-replies --method=POST
+```
+
+---
+
+### /api/v1/worker/health
+
+#### GET
+
+**Summary:** /api/v1/worker/health
+
+Check health status of the reply worker service
+
+**Responses:**
+
+- **200**: Worker service health check
+
+**CLI Example:**
+
+```bash
+./cli /api/v1/worker/health
 ```
 
 ---
@@ -435,6 +526,7 @@ Content-Type: `application/json`
 **Responses:**
 
 - **200**: Instructions for message handling
+- **401**: Unauthorized: invalid API key
 - **500**: Error - default to accept
 
 **CLI Example:**

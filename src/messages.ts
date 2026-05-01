@@ -113,7 +113,7 @@ const messageRoute = createRoute({
   },
   security: [
     {
-      bearerAuth: [],
+      Bearer: [],
     },
   ],
   responses: {

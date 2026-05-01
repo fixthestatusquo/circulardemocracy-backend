@@ -1,4 +1,4 @@
-import { OpenAPIHono } from "@hono/zod-openapi";
+import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
 import analyticsApp from "./analytics";
 import { authMiddleware, requireAppRole } from "./auth";
 import campaignsApp from "./campaigns";
@@ -25,6 +25,41 @@ interface Variables {
 }
 
 const app = new OpenAPIHono<{ Bindings: Env; Variables: Variables }>();
+const WorkerHealthResponseSchema = z.object({
+  status: z.literal("ok"),
+  service: z.literal("reply-worker"),
+  timestamp: z.string(),
+});
+
+const WorkerProcessResultSchema = z.object({
+  total: z.number(),
+  sent: z.number(),
+  failed: z.number(),
+  errors: z.array(
+    z.object({
+      message_id: z.number(),
+      error: z.string(),
+    }),
+  ),
+});
+
+const WorkerProcessSuccessSchema = z.object({
+  success: z.literal(true),
+  result: WorkerProcessResultSchema,
+});
+
+const WorkerProcessErrorSchema = z.object({
+  success: z.literal(false),
+  error: z.string(),
+});
+
+const MainHealthResponseSchema = z.object({
+  status: z.literal("ok"),
+  service: z.literal("main-api"),
+  timestamp: z.string(),
+  version: z.string(),
+});
+
 
 app.use("/api/*", async (c, next) => {
   c.set(
@@ -45,8 +80,25 @@ app.route("/", politiciansApp);
 app.route("/", replyTemplatesApp);
 app.route("/", loginApp);
 
-// Health check for the entire API
-app.get("/health", (c) => {
+const mainHealthRoute = createRoute({
+  method: "get",
+  path: "/health",
+  responses: {
+    200: {
+      content: {
+        "application/json": {
+          schema: MainHealthResponseSchema,
+        },
+      },
+      description: "Main API service health check",
+    },
+  },
+  tags: ["System"],
+  summary: "/health",
+  description: "Check health status of the main API service",
+});
+
+app.openapi(mainHealthRoute, (c) => {
   return c.json({
     status: "ok",
     service: "main-api",
@@ -62,11 +114,34 @@ app.get("/health", (c) => {
 app.use("/api/v1/worker/*", authMiddleware);
 app.use("/api/v1/worker/*", requireAppRole("admin"));
 
-/**
- * Manual trigger endpoint for reply worker (testing/admin)
- * POST /api/v1/worker/process-replies
- */
-app.post("/api/v1/worker/process-replies", async (c) => {
+const workerProcessRepliesRoute = createRoute({
+  method: "post",
+  path: "/api/v1/worker/process-replies",
+  security: [{ Bearer: [] }],
+  responses: {
+    200: {
+      content: {
+        "application/json": {
+          schema: WorkerProcessSuccessSchema,
+        },
+      },
+      description: "Scheduled replies processed",
+    },
+    500: {
+      content: {
+        "application/json": {
+          schema: WorkerProcessErrorSchema,
+        },
+      },
+      description: "Worker processing failed",
+    },
+  },
+  tags: ["Worker"],
+  summary: "/api/v1/worker/process-replies",
+  description: "Manually trigger scheduled reply processing for admin use",
+});
+
+app.openapi(workerProcessRepliesRoute, async (c) => {
   try {
     const db = c.get("db") as DatabaseClient;
 
@@ -76,10 +151,13 @@ app.post("/api/v1/worker/process-replies", async (c) => {
       runtimeSecrets,
     );
 
-    return c.json({
-      success: true,
-      result,
-    });
+    return c.json(
+      {
+        success: true,
+        result,
+      },
+      200,
+    );
   } catch (error) {
     console.error("Manual worker trigger error:", error);
     return c.json(
@@ -92,11 +170,26 @@ app.post("/api/v1/worker/process-replies", async (c) => {
   }
 });
 
-/**
- * Health check for worker
- * GET /api/v1/worker/health
- */
-app.get("/api/v1/worker/health", (c) => {
+const workerHealthRoute = createRoute({
+  method: "get",
+  path: "/api/v1/worker/health",
+  security: [{ Bearer: [] }],
+  responses: {
+    200: {
+      content: {
+        "application/json": {
+          schema: WorkerHealthResponseSchema,
+        },
+      },
+      description: "Worker service health check",
+    },
+  },
+  tags: ["Worker"],
+  summary: "/api/v1/worker/health",
+  description: "Check health status of the reply worker service",
+});
+
+app.openapi(workerHealthRoute, (c) => {
   return c.json({
     status: "ok",
     service: "reply-worker",
@@ -143,7 +236,7 @@ export async function handleScheduledEvent(env: Env): Promise<void> {
   }
 }
 
-app.openAPIRegistry.registerComponent("securitySchemes", "bearerAuth", {
+app.openAPIRegistry.registerComponent("securitySchemes", "Bearer", {
   type: "http",
   scheme: "bearer",
 });

@@ -108,6 +108,12 @@ const StalwartResponseSchema = z.object({
 
 type StalwartResponse = z.infer<typeof StalwartResponseSchema>;
 
+const StalwartHealthResponseSchema = z.object({
+  status: z.literal("ok"),
+  service: z.literal("stalwart-hook"),
+  timestamp: z.string(),
+});
+
 // =============================================================================
 // STALWART WORKER APP
 // =============================================================================
@@ -278,8 +284,25 @@ app.openapi(mtaHookRoute, async (c) => {
   }
 });
 
-// Health check
-app.get("/health", (c) => {
+const healthRoute = createRoute({
+  method: "get",
+  path: "/health",
+  responses: {
+    200: {
+      content: {
+        "application/json": {
+          schema: StalwartHealthResponseSchema,
+        },
+      },
+      description: "Stalwart hook service health check",
+    },
+  },
+  tags: ["Stalwart"],
+  summary: "/health",
+  description: "Check health status of the Stalwart hook service",
+});
+
+app.openapi(healthRoute, (c) => {
   return c.json({
     status: "ok",
     service: "stalwart-hook",

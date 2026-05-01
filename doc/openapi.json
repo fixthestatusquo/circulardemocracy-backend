@@ -17,7 +17,7 @@
   ],
   "components": {
     "securitySchemes": {
-      "bearerAuth": {
+      "Bearer": {
         "type": "http",
         "scheme": "bearer"
       }
@@ -47,13 +47,14 @@
               "description": "Number of days to look back (default: 7)"
             },
             "required": false,
+            "description": "Number of days to look back (default: 7)",
             "name": "days",
             "in": "query"
           }
         ],
         "responses": {
           "200": {
-            "description": "Message analytics grouped by hour and campaign",
+            "description": "Message analytics grouped by day and campaign",
             "content": {
               "application/json": {
                 "schema": {
@@ -64,7 +65,7 @@
                       "items": {
                         "type": "object",
                         "properties": {
-                          "hour": {
+                          "date": {
                             "type": "string",
                             "format": "date-time"
                           },
@@ -79,7 +80,7 @@
                           }
                         },
                         "required": [
-                          "hour",
+                          "date",
                           "campaign_id",
                           "campaign_name",
                           "message_count"
@@ -110,7 +111,6 @@
                     }
                   },
                   "required": [
-                    "success",
                     "error"
                   ]
                 }
@@ -124,7 +124,7 @@
       "post": {
         "security": [
           {
-            "bearerAuth": []
+            "Bearer": []
           }
         ],
         "tags": [
@@ -283,7 +283,6 @@
                     }
                   },
                   "required": [
-                    "success",
                     "error"
                   ]
                 }
@@ -291,7 +290,7 @@
             }
           },
           "401": {
-            "description": "Unauthorized - Invalid API Key",
+            "description": "Unauthorized - Invalid or missing Supabase JWT",
             "content": {
               "application/json": {
                 "schema": {
@@ -309,7 +308,31 @@
                     }
                   },
                   "required": [
-                    "success",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "default": false
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
                     "error"
                   ]
                 }
@@ -437,7 +460,6 @@
                     }
                   },
                   "required": [
-                    "success",
                     "error"
                   ]
                 }
@@ -637,6 +659,28 @@
                 }
               }
             }
+          },
+          "500": {
+            "description": "Failed to fetch statistics",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "error"
+                  ]
+                }
+              }
+            }
           }
         }
       }
@@ -704,6 +748,93 @@
           },
           "404": {
             "description": "Campaign not found"
+          }
+        }
+      }
+    },
+    "/api/v1/campaigns/{id}/replies/broadcast": {
+      "post": {
+        "security": [
+          {
+            "Bearer": []
+          }
+        ],
+        "tags": [
+          "Campaigns"
+        ],
+        "summary": "/api/v1/campaigns/{id}/replies/broadcast",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d+$"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Creates broadcast reply rows and sends immediately when JMAP is configured; otherwise leaves messages pending for the scheduled worker.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "campaign_id": {
+                      "type": "number"
+                    },
+                    "supporter_count": {
+                      "type": "number"
+                    },
+                    "recipient_count": {
+                      "type": "number"
+                    },
+                    "messages_created": {
+                      "type": "number"
+                    },
+                    "failures": {
+                      "type": "number"
+                    },
+                    "replies_sent": {
+                      "type": "number"
+                    },
+                    "replies_failed": {
+                      "type": "number"
+                    },
+                    "jmap_ready": {
+                      "type": "boolean"
+                    },
+                    "first_send_error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "campaign_id",
+                    "supporter_count",
+                    "messages_created",
+                    "failures",
+                    "replies_sent",
+                    "replies_failed",
+                    "jmap_ready"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request (e.g. no active template or no supporters)"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
           }
         }
       }
@@ -889,7 +1020,7 @@
                       "subject": {
                         "type": "string"
                       },
-                      "message_body": {
+                      "body": {
                         "type": "string",
                         "description": "Markdown formatted email body"
                       },
@@ -930,7 +1061,7 @@
                       "campaign_id",
                       "name",
                       "subject",
-                      "message_body",
+                      "body",
                       "active",
                       "layout_type",
                       "send_timing",
@@ -974,7 +1105,7 @@
                     "minLength": 1,
                     "maxLength": 255
                   },
-                  "message_body": {
+                  "body": {
                     "type": "string",
                     "minLength": 10
                   },
@@ -1008,10 +1139,7 @@
                   "campaign_id",
                   "name",
                   "subject",
-                  "message_body",
-                  "layout_type",
-                  "send_timing",
-                  "active"
+                  "body"
                 ]
               }
             }
@@ -1037,7 +1165,7 @@
                     "subject": {
                       "type": "string"
                     },
-                    "message_body": {
+                    "body": {
                       "type": "string",
                       "description": "Markdown formatted email body"
                     },
@@ -1078,7 +1206,7 @@
                     "campaign_id",
                     "name",
                     "subject",
-                    "message_body",
+                    "body",
                     "active",
                     "layout_type",
                     "send_timing",
@@ -1111,10 +1239,11 @@
           {
             "schema": {
               "type": "string",
-              "pattern": "^\\\\d+$",
+              "pattern": "^\\d+$",
               "description": "Template ID"
             },
             "required": true,
+            "description": "Template ID",
             "name": "id",
             "in": "path"
           }
@@ -1139,7 +1268,7 @@
                     "subject": {
                       "type": "string"
                     },
-                    "message_body": {
+                    "body": {
                       "type": "string",
                       "description": "Markdown formatted email body"
                     },
@@ -1180,7 +1309,7 @@
                     "campaign_id",
                     "name",
                     "subject",
-                    "message_body",
+                    "body",
                     "active",
                     "layout_type",
                     "send_timing",
@@ -1215,6 +1344,7 @@
               "description": "Template ID"
             },
             "required": true,
+            "description": "Template ID",
             "name": "id",
             "in": "path"
           }
@@ -1235,7 +1365,7 @@
                     "minLength": 1,
                     "maxLength": 255
                   },
-                  "message_body": {
+                  "body": {
                     "type": "string",
                     "minLength": 10
                   },
@@ -1286,7 +1416,7 @@
                     "subject": {
                       "type": "string"
                     },
-                    "message_body": {
+                    "body": {
                       "type": "string",
                       "description": "Markdown formatted email body"
                     },
@@ -1327,7 +1457,7 @@
                     "campaign_id",
                     "name",
                     "subject",
-                    "message_body",
+                    "body",
                     "active",
                     "layout_type",
                     "send_timing",
@@ -1368,6 +1498,7 @@
               "description": "Template ID"
             },
             "required": true,
+            "description": "Template ID",
             "name": "id",
             "in": "path"
           }
@@ -1405,6 +1536,7 @@
               "description": "Template ID"
             },
             "required": true,
+            "description": "Template ID",
             "name": "id",
             "in": "path"
           }
@@ -1448,7 +1580,7 @@
                     "subject": {
                       "type": "string"
                     },
-                    "message_body": {
+                    "body": {
                       "type": "string",
                       "description": "Markdown formatted email body"
                     },
@@ -1489,7 +1621,7 @@
                     "campaign_id",
                     "name",
                     "subject",
-                    "message_body",
+                    "body",
                     "active",
                     "layout_type",
                     "send_timing",
@@ -1577,10 +1709,12 @@
                     "access_token",
                     "token_type",
                     "expires_in",
-                    "expires_at",
                     "refresh_token",
                     "user"
-                  ]
+                  ],
+                  "additionalProperties": {
+                    "nullable": true
+                  }
                 }
               }
             }
@@ -1598,6 +1732,216 @@
                   },
                   "required": [
                     "error"
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Invalid auth provider response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "tags": [
+          "Stalwart"
+        ],
+        "summary": "/health",
+        "description": "Check health status of the Stalwart hook service",
+        "responses": {
+          "200": {
+            "description": "Stalwart hook service health check",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "ok"
+                      ]
+                    },
+                    "service": {
+                      "type": "string",
+                      "enum": [
+                        "stalwart-hook"
+                      ]
+                    },
+                    "timestamp": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "service",
+                    "timestamp"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/worker/process-replies": {
+      "post": {
+        "security": [
+          {
+            "Bearer": []
+          }
+        ],
+        "tags": [
+          "Worker"
+        ],
+        "summary": "/api/v1/worker/process-replies",
+        "description": "Manually trigger scheduled reply processing for admin use",
+        "responses": {
+          "200": {
+            "description": "Scheduled replies processed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "result": {
+                      "type": "object",
+                      "properties": {
+                        "total": {
+                          "type": "number"
+                        },
+                        "sent": {
+                          "type": "number"
+                        },
+                        "failed": {
+                          "type": "number"
+                        },
+                        "errors": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "message_id": {
+                                "type": "number"
+                              },
+                              "error": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "message_id",
+                              "error"
+                            ]
+                          }
+                        }
+                      },
+                      "required": [
+                        "total",
+                        "sent",
+                        "failed",
+                        "errors"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "result"
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Worker processing failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/worker/health": {
+      "get": {
+        "security": [
+          {
+            "Bearer": []
+          }
+        ],
+        "tags": [
+          "Worker"
+        ],
+        "summary": "/api/v1/worker/health",
+        "description": "Check health status of the reply worker service",
+        "responses": {
+          "200": {
+            "description": "Worker service health check",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "ok"
+                      ]
+                    },
+                    "service": {
+                      "type": "string",
+                      "enum": [
+                        "reply-worker"
+                      ]
+                    },
+                    "timestamp": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "service",
+                    "timestamp"
                   ]
                 }
               }
@@ -1817,6 +2161,31 @@
                   },
                   "required": [
                     "action"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized: invalid API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "action": {
+                      "type": "string",
+                      "enum": [
+                        "reject"
+                      ]
+                    },
+                    "reject_reason": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "action",
+                    "reject_reason"
                   ]
                 }
               }

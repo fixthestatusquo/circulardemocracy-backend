@@ -15,6 +15,7 @@ interface Env {
 
 interface Variables {
   db: DatabaseClient;
+  auth: AuthContext;
 }
 
 const app = new OpenAPIHono<{ Bindings: Env; Variables: Variables }>();
