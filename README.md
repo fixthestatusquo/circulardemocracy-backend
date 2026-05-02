@@ -719,3 +719,72 @@ The same `external_id` + `channel_source` cannot create two rows; duplicates ret
 
 Proca: Campaign action processing infrastructure (shared message queue)
 Fix the Status Quo: Parent organization's civic engagement tools
+
+## Stalwart Integration (Supabase + Master Account Impersonation)
+
+### High-level
+
+Stalwart authentication is enabled so only trusted backend-issued requests can execute mail actions.  
+Supabase JWT is used because user identity is already managed there, and the backend can validate the token and enforce its own role/impersonation rules.
+
+### Architecture Overview
+
+Flow:
+
+`User -> Supabase -> Backend -> Stalwart (JMAP) -> Email sent`
+
+Responsibilities:
+
+- **Supabase**: authenticates users and issues JWTs.
+- **Backend**: validates JWT, applies authorization, selects allowed sender identity, and calls Stalwart.
+- **Stalwart**: executes email send via JMAP using the authenticated master mailbox.
+
+### Stalwart Configuration (Step-by-step)
+
+1. Enable authentication in Stalwart.
+2. Configure JWT trust:
+   - Set Supabase issuer URL (`iss`).
+   - Set Supabase JWKS URL (public signing keys).
+3. Enable Bearer token authentication for JMAP.
+4. Restart Stalwart to apply config changes.
+5. Verify by calling a JMAP endpoint with a valid Supabase JWT.
+
+Minimal `config.toml` example:
+
+```toml
+[authentication]
+enabled = true
+
+[authentication.jwt]
+enabled = true
+issuer = "https://YOUR_PROJECT_REF.supabase.co/auth/v1"
+jwks_url = "https://YOUR_PROJECT_REF.supabase.co/auth/v1/.well-known/jwks.json"
+
+[authentication.bearer]
+enabled = true
+```
+
+### Backend Responsibilities
+
+- Validate Supabase JWT on every mail request.
+- Resolve user identity and assign backend roles.
+- Map roles to allowed sender identities (`From` addresses).
+- Enforce identity permission checks before sending.
+- Send all JMAP requests using the Stalwart master account credentials/token.
+
+### Impersonation Model
+
+- Users can send emails with different `From` addresses.
+- Backend decides which `From` addresses each user may use.
+- Stalwart does not enforce business-level identity permissions; it only sends what backend submits.
+
+### What Is Not Needed
+
+- No per-user mailbox creation in Stalwart.
+- No relay account mapping logic inside Stalwart.
+- No SMTP in backend mail flow (JMAP only).
+
+### Security Notes
+
+- Backend must strictly enforce allowed sender identities per user/role.
+- If identity validation is weak, users could impersonate unauthorized senders.
