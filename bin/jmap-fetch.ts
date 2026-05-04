@@ -85,6 +85,7 @@ interface JmapEmail {
   id: string;
   messageId?: string[];
   receivedAt?: string;
+  mailboxIds?: Record<string, boolean>;
   subject?: string;
   from?: JmapAddress[];
   to?: JmapAddress[];
@@ -497,6 +498,48 @@ async function moveEmailToMailbox(
   ]);
 }
 
+async function resolveInboxMailboxId(
+  apiUrl: string,
+  authHeader: string,
+  accountId: string,
+): Promise<string> {
+  const queryResponses = await jmapCall(apiUrl, authHeader, [
+    [
+      "Mailbox/query",
+      {
+        accountId,
+        filter: { role: "inbox" },
+        position: 0,
+        limit: 1,
+      },
+      "queryInboxMailbox",
+    ],
+    [
+      "Mailbox/get",
+      {
+        accountId,
+        "#ids": {
+          resultOf: "queryInboxMailbox",
+          name: "Mailbox/query",
+          path: "/ids",
+        },
+      },
+      "getInboxMailbox",
+    ],
+  ]);
+
+  const getData = getMethodResponse(
+    queryResponses,
+    "Mailbox/get",
+    "getInboxMailbox",
+  );
+  if (Array.isArray(getData.list) && getData.list.length > 0 && getData.list[0]?.id) {
+    return getData.list[0].id as string;
+  }
+
+  throw new Error("Inbox mailbox not found for JMAP account");
+}
+
 async function fetchEmailPage(
   apiUrl: string,
   authHeader: string,
@@ -532,6 +575,7 @@ async function fetchEmailPage(
           "id",
           "messageId",
           "receivedAt",
+          "mailboxIds",
           "subject",
           "from",
           "to",
@@ -601,6 +645,7 @@ async function fetchEmailById(
   apiUrl: string,
   authHeader: string,
   accountId: string,
+  inboxMailboxId: string,
   messageId: string,
 ): Promise<JmapEmail[]> {
   const directGetResponses = await jmapCall(apiUrl, authHeader, [
@@ -613,6 +658,7 @@ async function fetchEmailById(
           "id",
           "messageId",
           "receivedAt",
+          "mailboxIds",
           "subject",
           "from",
           "to",
@@ -636,7 +682,12 @@ async function fetchEmailById(
     "getById",
   );
   if (Array.isArray(directGet.list) && directGet.list.length > 0) {
-    return directGet.list as JmapEmail[];
+    const inboxDirectHits = (directGet.list as JmapEmail[]).filter(
+      (email) => email.mailboxIds?.[inboxMailboxId] === true,
+    );
+    if (inboxDirectHits.length > 0) {
+      return inboxDirectHits;
+    }
   }
 
   const queryResponses = await jmapCall(apiUrl, authHeader, [
@@ -645,7 +696,11 @@ async function fetchEmailById(
       {
         accountId,
         filter: {
-          header: ["Message-ID", messageId],
+          operator: "AND",
+          conditions: [
+            { inMailbox: inboxMailboxId },
+            { header: ["Message-ID", messageId] },
+          ],
         },
         position: 0,
         limit: 1,
@@ -665,6 +720,7 @@ async function fetchEmailById(
           "id",
           "messageId",
           "receivedAt",
+          "mailboxIds",
           "subject",
           "from",
           "to",
@@ -683,7 +739,11 @@ async function fetchEmailById(
   ]);
 
   const byHeader = getMethodResponse(queryResponses, "Email/get", "getByHeader");
-  return Array.isArray(byHeader.list) ? (byHeader.list as JmapEmail[]) : [];
+  return Array.isArray(byHeader.list)
+    ? (byHeader.list as JmapEmail[]).filter(
+      (email) => email.mailboxIds?.[inboxMailboxId] === true,
+    )
+    : [];
 }
 
 function printStalwartDryRun(messages: MessageInput[]): void {
@@ -869,6 +929,11 @@ async function runStalwartIngestion(
   console.log(`Connecting to Stalwart JMAP at ${jmapWellKnownUrl}...`);
   const session = await fetchJmapSession(jmapWellKnownUrl, authHeader);
   const accountId = resolveAccountId(session);
+  const inboxMailboxId = await resolveInboxMailboxId(
+    session.apiUrl,
+    authHeader,
+    accountId,
+  );
   const mailboxCache = new Map<string, string>();
 
   let rawEmails: JmapEmail[] = [];
@@ -878,6 +943,7 @@ async function runStalwartIngestion(
       session.apiUrl,
       authHeader,
       accountId,
+      inboxMailboxId,
       options.messageId,
     );
   } else if (options.since) {
@@ -887,15 +953,21 @@ async function runStalwartIngestion(
       session.apiUrl,
       authHeader,
       accountId,
-      { after: sinceIso },
+      {
+        operator: "AND",
+        conditions: [
+          { inMailbox: inboxMailboxId },
+          { after: sinceIso },
+        ],
+      },
     );
   } else if (options.processAll) {
-    console.log("Fetching all messages from Stalwart...");
+    console.log("Fetching inbound inbox messages from Stalwart...");
     rawEmails = await fetchAllEmails(
       session.apiUrl,
       authHeader,
       accountId,
-      null,
+      { inMailbox: inboxMailboxId },
     );
   }
 
