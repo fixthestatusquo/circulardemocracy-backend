@@ -232,11 +232,13 @@ export SUPABASE_ANON_KEY="your-supabase-anon-key"
 export STALWART_APP_PASSWORD="your-stalwart-app-password"
 export STALWART_USERNAME="your-stalwart-username"
 
-# Required for API broadcast / reply worker (from JMAP session: primaryAccounts mail urn → id, e.g. "7")
-export STALWART_JMAP_ACCOUNT_ID="your-jmap-mail-account-id"
+# Reply worker / broadcast JMAP (see "Outbound JMAP Credential Resolution" below)
+export STALWART_JMAP_ENDPOINT="https://mail.circulardemocracy.org/.well-known/jmap"
+export STALWART_JMAP_ACCOUNT_ID="your-jmap-mail-account-id"  # JMAP session: primaryAccounts mail urn → id, e.g. "7"
+export STALWART_SUPABASE_RELAY_EMAIL="relay-service@yourdomain.com"
+export STALWART_SUPABASE_RELAY_PASSWORD="relay-user-password"
 
 # Optional
-export STALWART_JMAP_ENDPOINT="https://mail.circulardemocracy.org/.well-known/jmap"
 export API_URL="http://localhost:3000"   # optional; login / generic API calls
 ```
 
@@ -678,15 +680,22 @@ The platform is designed with privacy-by-design principles:
 
 ## Outbound JMAP Credential Resolution
 
-Reply sending uses one service account for JMAP authentication across all politicians:
+Scheduled replies, immediate replies, and campaign broadcast sends use **one shared relay**: the backend obtains a **Supabase JWT** (password grant) for a dedicated Supabase user, then uses that token as the **JMAP bearer** against Stalwart. Stalwart must be configured to accept that identity for JMAP (for example via your IdP integration). **From / Reply-To** for “send as politician” are taken from the database (`campaign` / `politician` rows), not from extra environment variables.
 
-- `STALWART_JMAP_ENDPOINT`
-- `STALWART_JMAP_ACCOUNT_ID`
-- `SUPABASE_ANON_KEY`
-- `STALWART_SUPABASE_RELAY_EMAIL`
-- `STALWART_SUPABASE_RELAY_PASSWORD`
+The reply worker and related code require **all** of the following (see `resolveSingleServiceAccountConfig` in `src/reply_worker.ts` and `getSupabaseRelayAccessToken` in `src/supabase_relay_token.ts`):
 
-At runtime, the reply worker resolves these values from Worker bindings (`c.env`) and local `.env` (`process.env`) for development.
+| Variable | Purpose |
+| --- | --- |
+| `STALWART_JMAP_ENDPOINT` | JMAP session/API base URL (for example `https://mail.example.org/.well-known/jmap`). Used to open a JMAP session and send mail. |
+| `STALWART_JMAP_ACCOUNT_ID` | JMAP **mail** `accountId` used for outbound calls (the opaque id from the session’s primary mail account, not an email address). |
+| `SUPABASE_URL` | Supabase project URL. Used to call `{SUPABASE_URL}/auth/v1/token?grant_type=password` and obtain a JWT `access_token` for the relay user. |
+| `SUPABASE_ANON_KEY` | Supabase **anon** key. Sent as the `apikey` header on the password-grant token request (required by the Auth API). |
+| `STALWART_SUPABASE_RELAY_EMAIL` | Email of the **dedicated Supabase user** (relay account) whose password grant produces the JWT Stalwart accepts for JMAP. |
+| `STALWART_SUPABASE_RELAY_PASSWORD` | Password for that relay Supabase user (store as a secret in production). |
+
+Per-politician JMAP credentials in environment variables are **not** supported on this path; do not set `POLITICIAN_JMAP_*` or legacy `STALWART_JMAP_PASSWORD` / `STALWART_JMAP_TOKEN` style overrides for outbound send—the worker rejects them.
+
+At runtime, the reply worker reads these values from **Cloudflare Worker** bindings (`c.env`) or from **local** `.env` (`process.env`) when running under `serve.ts` or tests. For deployed workers, set the same names with `wrangler secret put` (see [Set Up Secrets](#deployment) above).
 
 ## Reply deduplication and persistence
 
