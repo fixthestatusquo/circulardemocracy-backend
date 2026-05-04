@@ -505,15 +505,18 @@ async function fetchEmailPage(
   position: number,
   limit: number,
 ): Promise<JmapEmail[]> {
+  const queryArgs: Record<string, unknown> = {
+    accountId,
+    position,
+    limit,
+  };
+  if (filter !== null) {
+    queryArgs.filter = filter;
+  }
   const methodResponses = await jmapCall(apiUrl, authHeader, [
     [
       "Email/query",
-      {
-        accountId,
-        filter,
-        position,
-        limit,
-      },
+      queryArgs,
       "query",
     ],
     [
