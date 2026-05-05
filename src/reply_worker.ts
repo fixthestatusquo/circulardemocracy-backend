@@ -20,7 +20,6 @@ export interface WorkerConfig {
 /** Worker / runtime bindings used for outbound JMAP + Supabase relay auth. */
 export type MailSendBindings = {
   JMAP_URL?: string;
-  STALWART_JMAP_ACCOUNT_ID?: string;
   SUPABASE_URL?: string;
   SUPABASE_ANON_KEY?: string;
   /** Supabase user (email) used for password-grant relay tokens to call JMAP as the service identity. */
@@ -35,13 +34,12 @@ function resolveStalwartJmapWorkerConfig(
     jmapWellKnownSessionUrl(
       env as Record<string, string | undefined | null>,
     )?.trim() ?? "";
-  const jmapAccountId = (env.STALWART_JMAP_ACCOUNT_ID?.trim() || "").trim();
-  if (!jmapApiUrl || !jmapAccountId) {
+  if (!jmapApiUrl) {
     return null;
   }
   return {
     jmapApiUrl,
-    jmapAccountId,
+    jmapAccountId: "",
     jmapBearerToken: "",
   };
 }
@@ -451,7 +449,7 @@ async function resolveSingleServiceAccountConfig(
     return {
       ok: false,
       reason:
-        "Single JMAP relay service account is not configured. Set JMAP_URL (base mail server URL) and STALWART_JMAP_ACCOUNT_ID.",
+        "Single JMAP relay service account is not configured. Set JMAP_URL (base mail server URL).",
     };
   }
 
@@ -467,6 +465,10 @@ async function resolveSingleServiceAccountConfig(
   }
   const config: WorkerConfig = {
     ...baseConfig,
+    jmapAccountId: await resolveMailAccountIdFromSession(
+      baseConfig.jmapApiUrl,
+      relayToken,
+    ),
     jmapBearerToken: relayToken,
   };
 
@@ -474,6 +476,36 @@ async function resolveSingleServiceAccountConfig(
     ok: true,
     config,
   };
+}
+
+async function resolveMailAccountIdFromSession(
+  sessionUrl: string,
+  bearerToken: string,
+): Promise<string> {
+  const response = await fetch(sessionUrl, {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${bearerToken}`,
+      Accept: "application/json",
+    },
+  });
+  if (!response.ok) {
+    throw new Error(`JMAP session GET failed (${response.status})`);
+  }
+  const session = (await response.json()) as {
+    primaryAccounts?: Record<string, string>;
+    accounts?: Record<string, unknown>;
+  };
+  const primaryMailAccount =
+    session.primaryAccounts?.["urn:ietf:params:jmap:mail"];
+  if (primaryMailAccount) {
+    return primaryMailAccount;
+  }
+  const firstAccountId = Object.keys(session.accounts || {})[0];
+  if (firstAccountId) {
+    return firstAccountId;
+  }
+  throw new Error("No JMAP mail account found in session response");
 }
 
 function assertNoDynamicCredentialOverrides(env: RuntimeSecretBindings): void {

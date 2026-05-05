@@ -182,7 +182,7 @@ ENVIRONMENT VARIABLES:
   JMAP_SERVICE_ACCOUNT_EMAIL      Required unless passed with --user
   JMAP_SERVICE_ACCOUNT_PASSWORD  Required app password for JMAP basic auth
   JMAP_URL               Required. Mail server base URL (no path); session URL is JMAP_URL + "/.well-known/jmap"
-  (Mail account id for this CLI comes from the JMAP session after login, not from STALWART_JMAP_ACCOUNT_ID.)
+  (Mail account id for this CLI comes from the JMAP session after login.)
   SUPABASE_URL           Required Supabase URL
   SUPABASE_KEY           Required Supabase key
 

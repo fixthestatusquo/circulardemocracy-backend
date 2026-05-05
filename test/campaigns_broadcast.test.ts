@@ -57,7 +57,6 @@ describe("Campaign broadcast replies API", () => {
   const envWithJmap = {
     ...envNoJmap,
     JMAP_URL: "https://jmap.example.com",
-    STALWART_JMAP_ACCOUNT_ID: "account-1",
     SUPABASE_ANON_KEY: "anon-test-key",
     RELAY_SERVICE_ACCOUNT_EMAIL: "relay@example.com",
     RELAY_SERVICE_ACCOUNT_PASSWORD: "relay-pass",
@@ -221,7 +220,6 @@ describe("Campaign broadcast replies API", () => {
       501,
       expect.objectContaining({
         JMAP_URL: "https://jmap.example.com",
-        STALWART_JMAP_ACCOUNT_ID: "account-1",
       }),
     );
   });

@@ -59,7 +59,6 @@ describe("Analytics API Integration", () => {
     SUPABASE_KEY: "test-key",
     API_KEY: "test-api-key",
     JMAP_URL: "https://jmap.example.com",
-    STALWART_JMAP_ACCOUNT_ID: "account-1",
   };
 
   beforeEach(async () => {

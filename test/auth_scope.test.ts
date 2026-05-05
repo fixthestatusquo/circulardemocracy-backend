@@ -33,7 +33,6 @@ describe("Auth role and scope enforcement", () => {
     SUPABASE_KEY: "test-key",
     API_KEY: "test-api-key",
     JMAP_URL: "https://jmap.example.com",
-    STALWART_JMAP_ACCOUNT_ID: "account-1",
     JMAP_SERVICE_ACCOUNT_EMAIL: "service@example.com",
     JMAP_SERVICE_ACCOUNT_PASSWORD: "password",
   };

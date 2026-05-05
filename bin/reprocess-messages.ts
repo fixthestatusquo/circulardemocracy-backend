@@ -393,7 +393,7 @@ ENVIRONMENT VARIABLES:
   JMAP_SERVICE_ACCOUNT_EMAIL      Optional JMAP mailbox email (or pass --user)
   JMAP_SERVICE_ACCOUNT_PASSWORD  Required JMAP app password for fetching message content
   JMAP_URL               Mail server base URL; session URL is JMAP_URL + "/.well-known/jmap"
-  (Mail account id comes from the JMAP session after login, not from STALWART_JMAP_ACCOUNT_ID.)
+  (Mail account id comes from the JMAP session after login.)
 
 EXAMPLES:
   reprocess-messages --process-all

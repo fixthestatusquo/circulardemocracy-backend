@@ -12,7 +12,6 @@ import {
 describe("Reply Worker", () => {
   const runtimeSecrets = {
     JMAP_URL: "https://jmap.example.com",
-    STALWART_JMAP_ACCOUNT_ID: "account-1",
     SUPABASE_URL: "https://test.supabase.co",
     SUPABASE_ANON_KEY: "anon-key",
     RELAY_SERVICE_ACCOUNT_EMAIL: "relay@example.com",
@@ -55,6 +54,17 @@ describe("Reply Worker", () => {
           JSON.stringify({
             access_token: "supabase-relay-token",
             expires_in: 3600,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      if (url.includes("/.well-known/jmap")) {
+        return new Response(
+          JSON.stringify({
+            apiUrl: "https://jmap.example.com/jmap",
+            primaryAccounts: {
+              "urn:ietf:params:jmap:mail": "account-1",
+            },
           }),
           { status: 200, headers: { "Content-Type": "application/json" } },
         );

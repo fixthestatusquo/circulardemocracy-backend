@@ -229,9 +229,6 @@ export SUPABASE_KEY="your-supabase-service-or-backend-key"
 export SUPABASE_ANON_KEY="your-supabase-anon-key"
 
 
-# Required for API broadcast / reply worker (from JMAP session: primaryAccounts mail urn → id, e.g. "7"). Name must be STALWART_JMAP_ACCOUNT_ID, not JMAP_ACCOUNT_ID.
-export STALWART_JMAP_ACCOUNT_ID="your-jmap-mail-account-id"
-
 # Mail server base URL (no path). Session URL is ${JMAP_URL%/}/.well-known/jmap
 export JMAP_URL="https://mail.example.org"
 
@@ -403,7 +400,7 @@ npm run jmap-fetch -- [--user <username>] [--password <password>] [options]
 
 **Behavior notes:**
 
-- The JMAP mail account id is taken from the session (`primaryAccounts` mail) after login. `jmap-fetch` does not read `STALWART_JMAP_ACCOUNT_ID` (that variable is for the API / reply worker only).
+- The JMAP mail account id is taken from the session (`primaryAccounts` mail) after login.
 - Normal runs automatically move each successfully processed message to a campaign folder in Stalwart.
 - If no campaign match is found, the message is stored with `campaign_id = null` and moved to the `Unclassified` folder.
 - Dry runs never move messages.
@@ -430,7 +427,7 @@ npm run jmap-fetch -- --user dibora --password mypass --process-all
 
 #### 4. Message Reprocessing (`reprocess-messages`)
 
-Recompute embeddings and classifications for existing messages. When JMAP is used, the mail account id comes from the session after login (same as `jmap-fetch`); `STALWART_JMAP_ACCOUNT_ID` is not read by this CLI.
+Recompute embeddings and classifications for existing messages. When JMAP is used, the mail account id comes from the session after login (same as `jmap-fetch`).
 
 **Usage:**
 
@@ -639,7 +636,6 @@ This API is designed to be deployed as a Cloudflare Worker. The `wrangler` CLI, 
     npx wrangler secret put SUPABASE_URL
     npx wrangler secret put SUPABASE_KEY
     npx wrangler secret put JMAP_URL
-    npx wrangler secret put STALWART_JMAP_ACCOUNT_ID
     npx wrangler secret put SUPABASE_ANON_KEY
     npx wrangler secret put RELAY_SERVICE_ACCOUNT_EMAIL
     npx wrangler secret put RELAY_SERVICE_ACCOUNT_PASSWORD
@@ -688,7 +684,6 @@ The platform is designed with privacy-by-design principles:
 Reply sending uses one service account for JMAP authentication across all politicians:
 
 - `JMAP_URL` (base mail server; session URL is `JMAP_URL` + `/.well-known/jmap`)
-- `STALWART_JMAP_ACCOUNT_ID` 
 - `SUPABASE_ANON_KEY`
 - `RELAY_SERVICE_ACCOUNT_EMAIL`
 - `RELAY_SERVICE_ACCOUNT_PASSWORD`
