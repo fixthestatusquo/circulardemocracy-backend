@@ -8,6 +8,7 @@ import {
   type EmailMessage,
   jmapWellKnownSessionUrl,
   JMAPClient,
+  resolveMailAccountIdFromSession,
 } from "./jmap_client";
 import { getSupabaseRelayAccessToken } from "./supabase_relay_token";
 
@@ -465,7 +466,7 @@ async function resolveSingleServiceAccountConfig(
   }
   const config: WorkerConfig = {
     ...baseConfig,
-    jmapAccountId: await resolveMailAccountIdFromSession(
+    jmapAccountId: await fetchAndResolveMailAccountIdFromSession(
       baseConfig.jmapApiUrl,
       relayToken,
     ),
@@ -478,7 +479,7 @@ async function resolveSingleServiceAccountConfig(
   };
 }
 
-async function resolveMailAccountIdFromSession(
+async function fetchAndResolveMailAccountIdFromSession(
   sessionUrl: string,
   bearerToken: string,
 ): Promise<string> {
@@ -496,16 +497,7 @@ async function resolveMailAccountIdFromSession(
     primaryAccounts?: Record<string, string>;
     accounts?: Record<string, unknown>;
   };
-  const primaryMailAccount =
-    session.primaryAccounts?.["urn:ietf:params:jmap:mail"];
-  if (primaryMailAccount) {
-    return primaryMailAccount;
-  }
-  const firstAccountId = Object.keys(session.accounts || {})[0];
-  if (firstAccountId) {
-    return firstAccountId;
-  }
-  throw new Error("No JMAP mail account found in session response");
+  return resolveMailAccountIdFromSession(session);
 }
 
 function assertNoDynamicCredentialOverrides(env: RuntimeSecretBindings): void {

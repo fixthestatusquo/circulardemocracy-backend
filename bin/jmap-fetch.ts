@@ -6,7 +6,10 @@ import { z } from "zod";
 import Turndown from "turndown";
 import { config as dotenv } from "dotenv";
 import { pipeline, type FeatureExtractionPipeline } from "@xenova/transformers";
-import { jmapWellKnownSessionUrl } from "../src/jmap_client.js";
+import {
+  jmapWellKnownSessionUrl,
+  resolveMailAccountIdFromSession,
+} from "../src/jmap_client.js";
 
 dotenv();
 
@@ -390,21 +393,6 @@ function getMethodResponse(
   }
 
   return response[1];
-}
-
-function resolveAccountId(session: JmapSessionResponse): string {
-  const primaryMailAccount =
-    session.primaryAccounts?.["urn:ietf:params:jmap:mail"];
-  if (primaryMailAccount) {
-    return primaryMailAccount;
-  }
-
-  const accountId = Object.keys(session.accounts || {})[0];
-  if (accountId) {
-    return accountId;
-  }
-
-  throw new Error("No JMAP mail account found in session response");
 }
 
 function generateFolderPath(campaignName?: string | null): string {
@@ -928,7 +916,7 @@ async function runStalwartIngestion(
 
   console.log(`Connecting to Stalwart JMAP at ${jmapWellKnownUrl}...`);
   const session = await fetchJmapSession(jmapWellKnownUrl, authHeader);
-  const accountId = resolveAccountId(session);
+  const accountId = resolveMailAccountIdFromSession(session);
   const inboxMailboxId = await resolveInboxMailboxId(
     session.apiUrl,
     authHeader,

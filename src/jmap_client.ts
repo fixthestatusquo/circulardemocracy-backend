@@ -40,10 +40,27 @@ export interface JMAPSendResult {
 interface JmapSessionResponse {
   apiUrl: string;
   primaryAccounts?: Record<string, string>;
+  accounts?: Record<string, unknown>;
 }
 
 interface IdentityGetResponse {
   list?: Array<{ id: string; email?: string | null }>;
+}
+
+export function resolveMailAccountIdFromSession(session: {
+  primaryAccounts?: Record<string, string>;
+  accounts?: Record<string, unknown>;
+}): string {
+  const primaryMailAccount =
+    session.primaryAccounts?.["urn:ietf:params:jmap:mail"];
+  if (primaryMailAccount) {
+    return primaryMailAccount;
+  }
+  const firstAccountId = Object.keys(session.accounts || {})[0];
+  if (firstAccountId) {
+    return firstAccountId;
+  }
+  throw new Error("No JMAP mail account found in session response");
 }
 
 /**
