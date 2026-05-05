@@ -58,10 +58,7 @@ describe("Analytics API Integration", () => {
     SUPABASE_URL: "https://test.supabase.co",
     SUPABASE_KEY: "test-key",
     API_KEY: "test-api-key",
-    JMAP_API_URL: "https://jmap.example.com",
-    JMAP_ACCOUNT_ID: "account-1",
-    JMAP_USERNAME: "user",
-    JMAP_PASSWORD: "pass",
+    JMAP_URL: "https://jmap.example.com",
   };
 
   beforeEach(async () => {

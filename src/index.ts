@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import apiApp, { handleScheduledEvent } from "./api";
 import { type AuthEnv, apiKeyAuthMiddleware } from "./auth_middleware";
-import type { MailSendBindings } from "./stalwart_jmap_env";
+import type { MailSendBindings } from "./reply_worker";
 import stalwartApp from "./stalwart";
 
 // Combine Envs if necessary, or just use a generic Env that includes API_KEY

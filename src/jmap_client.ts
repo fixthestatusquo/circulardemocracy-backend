@@ -1,6 +1,19 @@
 // JMAP Client for sending emails via Stalwart mail server
 // JMAP (JSON Meta Application Protocol) is a modern email protocol
 
+/**
+ * JMAP session document URL from `JMAP_URL` (trimmed, no trailing slash) + `/.well-known/jmap`.
+ */
+export function jmapWellKnownSessionUrl(
+  env: Record<string, string | undefined | null>,
+): string | null {
+  const base = String(env.JMAP_URL ?? "").trim().replace(/\/+$/, "");
+  if (!base) {
+    return null;
+  }
+  return `${base}/.well-known/jmap`;
+}
+
 export interface JMAPConfig {
   apiUrl: string;
   accountId: string;
@@ -27,10 +40,27 @@ export interface JMAPSendResult {
 interface JmapSessionResponse {
   apiUrl: string;
   primaryAccounts?: Record<string, string>;
+  accounts?: Record<string, unknown>;
 }
 
 interface IdentityGetResponse {
   list?: Array<{ id: string; email?: string | null }>;
+}
+
+export function resolveMailAccountIdFromSession(session: {
+  primaryAccounts?: Record<string, string>;
+  accounts?: Record<string, unknown>;
+}): string {
+  const primaryMailAccount =
+    session.primaryAccounts?.["urn:ietf:params:jmap:mail"];
+  if (primaryMailAccount) {
+    return primaryMailAccount;
+  }
+  const firstAccountId = Object.keys(session.accounts || {})[0];
+  if (firstAccountId) {
+    return firstAccountId;
+  }
+  throw new Error("No JMAP mail account found in session response");
 }
 
 /**

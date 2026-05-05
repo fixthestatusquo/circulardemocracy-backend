@@ -9,8 +9,10 @@ import type { Ai } from "./message_processor";
 import messagesApp from "./messages";
 import politiciansApp from "./politicians";
 import replyTemplatesApp from "./reply_templates";
-import { processScheduledReplies } from "./reply_worker";
-import { type MailSendBindings } from "./stalwart_jmap_env";
+import {
+  type MailSendBindings,
+  processScheduledReplies,
+} from "./reply_worker";
 
 // Define types for env and app
 interface Env extends MailSendBindings {

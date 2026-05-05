@@ -11,8 +11,10 @@ import {
   PoliticianNotFoundError,
   processMessage,
 } from "./message_processor";
-import { processReplyImmediately } from "./reply_worker";
-import { type MailSendBindings } from "./stalwart_jmap_env";
+import {
+  type MailSendBindings,
+  processReplyImmediately,
+} from "./reply_worker";
 
 // Define types for env and app
 interface Env extends MailSendBindings {

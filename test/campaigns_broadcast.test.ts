@@ -56,10 +56,10 @@ describe("Campaign broadcast replies API", () => {
 
   const envWithJmap = {
     ...envNoJmap,
-    JMAP_API_URL: "https://jmap.example.com",
-    JMAP_ACCOUNT_ID: "account-1",
-    JMAP_USERNAME: "user",
-    JMAP_PASSWORD: "pass",
+    JMAP_URL: "https://jmap.example.com",
+    SUPABASE_ANON_KEY: "anon-test-key",
+    RELAY_SERVICE_ACCOUNT_EMAIL: "relay@example.com",
+    RELAY_SERVICE_ACCOUNT_PASSWORD: "relay-pass",
   };
 
   beforeEach(() => {
@@ -219,7 +219,7 @@ describe("Campaign broadcast replies API", () => {
       mockDbInstance,
       501,
       expect.objectContaining({
-        JMAP_API_URL: "https://jmap.example.com",
+        JMAP_URL: "https://jmap.example.com",
       }),
     );
   });

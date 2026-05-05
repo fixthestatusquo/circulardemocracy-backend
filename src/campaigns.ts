@@ -6,9 +6,11 @@ import {
   requireAppRole,
 } from "./auth";
 import type { DatabaseClient } from "./database";
-import { processReplyImmediately } from "./reply_worker";
+import {
+  type MailSendBindings,
+  processReplyImmediately,
+} from "./reply_worker";
 import { calculateReplySchedule } from "./scheduling";
-import { type MailSendBindings } from "./stalwart_jmap_env";
 
 // Define types for env and app
 interface Env extends MailSendBindings {

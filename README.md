@@ -228,15 +228,18 @@ export SUPABASE_KEY="your-supabase-service-or-backend-key"
 # (the CLI builds a Supabase client with SUPABASE_ANON_KEY for that command).
 export SUPABASE_ANON_KEY="your-supabase-anon-key"
 
-# Required for JMAP commands (`jmap-fetch`, `reprocess-messages`)
-export STALWART_APP_PASSWORD="your-stalwart-app-password"
-export STALWART_USERNAME="your-stalwart-username"
 
-# Required for API broadcast / reply worker (from JMAP session: primaryAccounts mail urn → id, e.g. "7")
-export STALWART_JMAP_ACCOUNT_ID="your-jmap-mail-account-id"
+# Mail server base URL (no path). Session URL is ${JMAP_URL%/}/.well-known/jmap
+export JMAP_URL="https://mail.example.org"
 
-# Optional
-export STALWART_JMAP_ENDPOINT="https://mail.circulardemocracy.org/.well-known/jmap"
+# Supabase relay identity (password grant) used by the reply worker to obtain a JWT for JMAP send
+export RELAY_SERVICE_ACCOUNT_EMAIL="relay-service@yourdomain.com"
+export RELAY_SERVICE_ACCOUNT_PASSWORD="relay-user-password"
+
+# For JMAP CLIs only (`jmap-fetch`, `reprocess-messages`): mailbox basic auth
+export JMAP_SERVICE_ACCOUNT_EMAIL="mailbox@yourdomain.com"
+export JMAP_SERVICE_ACCOUNT_PASSWORD="your-jmap-app-password"
+
 export API_URL="http://localhost:3000"   # optional; login / generic API calls
 ```
 
@@ -387,8 +390,8 @@ npm run jmap-fetch -- [--user <username>] [--password <password>] [options]
 
 **Options:**
 
-- `--user <username>`: JMAP username (default: `STALWART_USERNAME` env)
-- `--password <password>`: JMAP app password (default: `STALWART_APP_PASSWORD` env)
+- `--user <username>`: JMAP mailbox email (default: `JMAP_SERVICE_ACCOUNT_EMAIL` env)
+- `--password <password>`: JMAP app password (default: `JMAP_SERVICE_ACCOUNT_PASSWORD` env)
 - `--process-all`: Fetch all available messages (default when no filter provided)
 - `--since <date>`: Fetch messages received after a date (ISO 8601)
 - `--message-id <id>`: Fetch one specific message (JMAP ID or Message-ID header)
@@ -397,6 +400,7 @@ npm run jmap-fetch -- [--user <username>] [--password <password>] [options]
 
 **Behavior notes:**
 
+- The JMAP mail account id is taken from the session (`primaryAccounts` mail) after login.
 - Normal runs automatically move each successfully processed message to a campaign folder in Stalwart.
 - If no campaign match is found, the message is stored with `campaign_id = null` and moved to the `Unclassified` folder.
 - Dry runs never move messages.
@@ -423,7 +427,7 @@ npm run jmap-fetch -- --user dibora --password mypass --process-all
 
 #### 4. Message Reprocessing (`reprocess-messages`)
 
-Recompute embeddings and classifications for existing messages.
+Recompute embeddings and classifications for existing messages. When JMAP is used, the mail account id comes from the session after login (same as `jmap-fetch`).
 
 **Usage:**
 
@@ -437,8 +441,8 @@ npx tsx bin/reprocess-messages.ts [options]
 
 **Options:**
 
-- `--user <username>`: JMAP username (default: `STALWART_USERNAME` env)
-- `--password <password>`: JMAP app password (default: `STALWART_APP_PASSWORD` env)
+- `--user <username>`: JMAP mailbox email (default: `JMAP_SERVICE_ACCOUNT_EMAIL` env)
+- `--password <password>`: JMAP app password (default: `JMAP_SERVICE_ACCOUNT_PASSWORD` env)
 - `--process-all`: Reprocess uncategorized messages from Stalwart inbox (`campaign_id` is null)
 - `--campaign-id <id>`: Only reprocess messages for a specific campaign
 - `--since <date>`: Only reprocess messages received after a date (ISO 8601)
@@ -631,11 +635,10 @@ This API is designed to be deployed as a Cloudflare Worker. The `wrangler` CLI, 
     ```bash
     npx wrangler secret put SUPABASE_URL
     npx wrangler secret put SUPABASE_KEY
-    npx wrangler secret put STALWART_JMAP_ENDPOINT
-    npx wrangler secret put STALWART_JMAP_ACCOUNT_ID
+    npx wrangler secret put JMAP_URL
     npx wrangler secret put SUPABASE_ANON_KEY
-    npx wrangler secret put STALWART_SUPABASE_RELAY_EMAIL
-    npx wrangler secret put STALWART_SUPABASE_RELAY_PASSWORD
+    npx wrangler secret put RELAY_SERVICE_ACCOUNT_EMAIL
+    npx wrangler secret put RELAY_SERVICE_ACCOUNT_PASSWORD
     ```
 
 3.  **Deploy the Worker**
@@ -680,11 +683,10 @@ The platform is designed with privacy-by-design principles:
 
 Reply sending uses one service account for JMAP authentication across all politicians:
 
-- `STALWART_JMAP_ENDPOINT`
-- `STALWART_JMAP_ACCOUNT_ID`
+- `JMAP_URL` (base mail server; session URL is `JMAP_URL` + `/.well-known/jmap`)
 - `SUPABASE_ANON_KEY`
-- `STALWART_SUPABASE_RELAY_EMAIL`
-- `STALWART_SUPABASE_RELAY_PASSWORD`
+- `RELAY_SERVICE_ACCOUNT_EMAIL`
+- `RELAY_SERVICE_ACCOUNT_PASSWORD`
 
 At runtime, the reply worker resolves these values from Worker bindings (`c.env`) and local `.env` (`process.env`) for development.
 

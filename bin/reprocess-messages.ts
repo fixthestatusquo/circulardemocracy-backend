@@ -4,7 +4,9 @@ import { DatabaseClient } from "../src/database.js";
 import { generateEmbedding, formatEmailContentForEmbedding } from "../src/embedding_service.js";
 import { z } from "zod";
 import Turndown from "turndown";
-import {config as dotenv} from "dotenv";
+import { config as dotenv } from "dotenv";
+import { jmapWellKnownSessionUrl } from "../src/jmap_client.js";
+
 dotenv();
 
 interface ReprocessOptions {
@@ -44,7 +46,6 @@ interface JmapEmail {
   bodyValues?: Record<string, JmapBodyValue>;
 }
 
-const STALWART_JMAP_ENDPOINT = "https://mail.circulardemocracy.org/.well-known/jmap";
 const turndownService = new Turndown({
   headingStyle: "atx",
   bulletListMarker: "-",
@@ -376,8 +377,8 @@ USAGE:
   reprocess-messages [options]
 
 OPTIONS:
-  --user <username>      JMAP username (default: STALWART_USERNAME env)
-  --password <password>  JMAP app password (default: STALWART_APP_PASSWORD env)
+  --user <username>      JMAP mailbox email (default: JMAP_SERVICE_ACCOUNT_EMAIL env)
+  --password <password>  JMAP app password (default: JMAP_SERVICE_ACCOUNT_PASSWORD env)
   --process-all          Reprocess uncategorized messages from Stalwart inbox (campaign_id is null)
   --campaign-id <id>     Only reprocess messages for a specific campaign
   --since <date>         Only reprocess messages received after date (ISO 8601)
@@ -389,9 +390,10 @@ OPTIONS:
 ENVIRONMENT VARIABLES:
   SUPABASE_URL           Required Supabase URL
   SUPABASE_KEY           Required Supabase key
-  STALWART_APP_PASSWORD  Required JMAP app password for fetching message content
-  STALWART_USERNAME      Optional JMAP username
-  STALWART_JMAP_ACCOUNT_ID Optional; if unset, taken from session primaryAccounts (mail)
+  JMAP_SERVICE_ACCOUNT_EMAIL      Optional JMAP mailbox email (or pass --user)
+  JMAP_SERVICE_ACCOUNT_PASSWORD  Required JMAP app password for fetching message content
+  JMAP_URL               Mail server base URL; session URL is JMAP_URL + "/.well-known/jmap"
+  (Mail account id comes from the JMAP session after login.)
 
 EXAMPLES:
   reprocess-messages --process-all
@@ -480,25 +482,33 @@ async function reprocessMessages(
   const needsJmap = messages.some((msg: any) => msg.stalwart_message_id) || options.moveToFolders;
 
   if (needsJmap) {
-    const username = options.username || process.env.STALWART_USERNAME;
-    const password = options.password || process.env.STALWART_APP_PASSWORD || process.env.STALWART_PASSWORD;
+    const username = options.username || process.env.JMAP_SERVICE_ACCOUNT_EMAIL;
+    const password =
+      options.password || process.env.JMAP_SERVICE_ACCOUNT_PASSWORD;
 
     if (!username) {
-      throw new Error("STALWART_USERNAME environment variable or --user must be set for JMAP access");
+      throw new Error(
+        "JMAP_SERVICE_ACCOUNT_EMAIL environment variable or --user must be set for JMAP access",
+      );
     }
 
     if (!password) {
-      throw new Error("STALWART_APP_PASSWORD environment variable or --password must be set to fetch content from Stalwart");
+      throw new Error(
+        "JMAP_SERVICE_ACCOUNT_PASSWORD environment variable or --password must be set to fetch content from Stalwart",
+      );
     }
 
-    const endpoint = process.env.STALWART_JMAP_ENDPOINT || STALWART_JMAP_ENDPOINT;
+    const endpoint = jmapWellKnownSessionUrl(process.env);
+    if (!endpoint) {
+      throw new Error(
+        "Set JMAP_URL (mail server base URL) for JMAP access.",
+      );
+    }
     jmapAuthHeader = encodeBasicAuth(username, password);
 
     console.log(`Connecting to Stalwart JMAP at ${endpoint}...`);
     jmapSession = await fetchJmapSession(endpoint, jmapAuthHeader);
-    jmapAccountId =
-      process.env.STALWART_JMAP_ACCOUNT_ID?.trim() ||
-      resolveAccountId(jmapSession);
+    jmapAccountId = resolveAccountId(jmapSession);
     console.log("Connected to Stalwart\n");
   }
 
