@@ -748,7 +748,7 @@ Example:
 
 Use the credential type that matches your auth flow:
 
-- OAuth/IdP flow: use the master account OAuth token/session.
+- OAuth/IdP flow: use the master account OAuth token/session. If a password is required for that master/service account, use its **service account password**—**not** a Stalwart **app password**. 
 - Password flow: use the impersonator account password.
 
 ### 5) Supabase as IdP notes
