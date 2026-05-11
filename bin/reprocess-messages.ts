@@ -379,7 +379,7 @@ USAGE:
 OPTIONS:
   --user <username>      JMAP mailbox email (default: JMAP_SERVICE_ACCOUNT_EMAIL env)
   --password <password>  JMAP app password (default: JMAP_SERVICE_ACCOUNT_PASSWORD env)
-  --process-all          Reprocess uncategorized messages from Stalwart inbox (campaign_id is null)
+  --process-all          Reprocess messages with no campaign from Stalwart inbox (campaign_id is null)
   --campaign-id <id>     Only reprocess messages for a specific campaign
   --since <date>         Only reprocess messages received after date (ISO 8601)
   --limit <number>       Maximum number of messages to reprocess
@@ -438,7 +438,7 @@ async function reprocessMessages(
     query = query.eq("campaign_id", options.campaignId);
   }
 
-  // When using --process-all, only process uncategorized messages (campaign_id is null)
+  // When using --process-all, only process messages with no campaign (campaign_id is null)
   if (options.processAll) {
     query = query.is("campaign_id", null);
   }
@@ -579,7 +579,7 @@ async function reprocessMessages(
         throw updateError;
       }
 
-      // Only re-assign to cluster if confidence is low (uncategorized or poorly classified)
+      // Only re-assign to cluster if confidence is low (no campaign or poorly classified)
       if (classification.confidence < 0.5) {
         try {
           await db.assignMessageToCluster(message.id, embedding, message.politician_id);

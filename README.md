@@ -443,7 +443,7 @@ npx tsx bin/reprocess-messages.ts [options]
 
 - `--user <username>`: JMAP mailbox email (default: `JMAP_SERVICE_ACCOUNT_EMAIL` env)
 - `--password <password>`: JMAP app password (default: `JMAP_SERVICE_ACCOUNT_PASSWORD` env)
-- `--process-all`: Reprocess uncategorized messages from Stalwart inbox (`campaign_id` is null)
+- `--process-all`: Reprocess messages with no campaign from Stalwart inbox (`campaign_id` is null)
 - `--campaign-id <id>`: Only reprocess messages for a specific campaign
 - `--since <date>`: Only reprocess messages received after a date (ISO 8601)
 - `--limit <number>`: Maximum number of messages to reprocess
