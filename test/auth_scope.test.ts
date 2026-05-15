@@ -32,10 +32,9 @@ describe("Auth role and scope enforcement", () => {
     SUPABASE_URL: "https://test.supabase.co",
     SUPABASE_KEY: "test-key",
     API_KEY: "test-api-key",
-    STALWART_JMAP_ENDPOINT: "https://jmap.example.com/.well-known/jmap",
-    STALWART_JMAP_ACCOUNT_ID: "account-1",
-    STALWART_USERNAME: "service@example.com",
-    STALWART_APP_PASSWORD: "password",
+    JMAP_URL: "https://jmap.example.com",
+    JMAP_SERVICE_ACCOUNT_EMAIL: "service@example.com",
+    JMAP_SERVICE_ACCOUNT_PASSWORD: "password",
   };
 
   beforeEach(async () => {

@@ -1023,8 +1023,8 @@ Message Reprocessing:
       --process-all         Process all messages (default if no filter)
       --dry-run             Preview without making changes
       --no-move-to-folders  Disable moving messages to campaign folders (enabled unless --dry-run)
-      --username <user>     JMAP username (default: STALWART_USERNAME env, no hardcoded fallback)
-      --password <pass>     JMAP password (default: STALWART_APP_PASSWORD env)
+      --username <user>     JMAP mailbox email (default: JMAP_SERVICE_ACCOUNT_EMAIL env)
+      --password <pass>     JMAP app password (default: JMAP_SERVICE_ACCOUNT_PASSWORD env)
 
 API Options:
   -m, --method     HTTP method (GET, POST, PUT, DELETE) [default: GET]
@@ -1040,7 +1040,7 @@ Examples:
   ./cli add-campaign --url "https://climate.example.com/action"
   ./cli update-campaign --id 5 --text "Updated representative text"
   ./cli update-campaign --id 5 --url "https://climate.example.com/new-page"
-  ./cli set-politician-jmap --id 3 --stalwart-jmap-endpoint "https://mail.circulardemocracy.org/.well-known/jmap" --stalwart-jmap-account-id "7" --stalwart-username "politician-1@circulardemocracy.org" --stalwart-app-password "caeke yroa ldhq uscy ghb"
+  ./cli set-politician-jmap --id 3 --jmap-url "https://mail.example.org" --stalwart-jmap-account-id "<account-id>" --stalwart-username "user@example.org" --stalwart-app-password "<app-password>"
   ./cli create-campaign-from-cluster --cluster-id 123 --campaign-name "Climate Action"
   ./cli closest-campaigns --message-id "ieaaaacb" --limit 5
   ./cli closest-campaigns --message "I support GMO demeter policy" --limit 5

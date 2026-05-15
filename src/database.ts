@@ -283,42 +283,6 @@ export class DatabaseClient {
     }
   }
 
-  async getUncategorizedCampaign(): Promise<Campaign> {
-    try {
-      const { data: campaigns, error } = await this.supabase
-        .from("campaigns")
-        .select("id,name,slug,status")
-        .eq("slug", "uncategorized");
-
-      if (error) {
-        throw error;
-      }
-      if (campaigns.length > 0) {
-        return campaigns[0];
-      }
-
-      // Create uncategorized campaign
-      const { data: newCampaigns, error: createError } = await this.supabase
-        .from("campaigns")
-        .insert({
-          name: "Uncategorized",
-          slug: "uncategorized",
-          description: "Messages that could not be automatically categorized",
-          status: "active",
-          created_by: "system",
-        })
-        .select();
-
-      if (createError) {
-        throw createError;
-      }
-      return newCampaigns[0];
-    } catch (error) {
-      console.error("Error getting uncategorized campaign:", error);
-      throw new Error("Failed to get or create uncategorized campaign");
-    }
-  }
-
   // =============================================================================
   // MESSAGE CLUSTERING
   // =============================================================================
@@ -1365,7 +1329,7 @@ export class DatabaseClient {
   async updateMessageFields(
     messageId: number,
     fields: Partial<{
-      campaign_id: number;
+      campaign_id: number | null;
       classification_confidence: number;
       duplicate_rank: number;
       reply_status: "pending" | "scheduled" | null;
@@ -1570,7 +1534,7 @@ export class DatabaseClient {
 
     // Step 2: Update message with campaign classification
     await this.updateMessageFields(messageId, {
-      campaign_id: classification.campaign_id ?? undefined,
+      campaign_id: classification.campaign_id,
       classification_confidence: classification.confidence,
     });
 
@@ -1613,12 +1577,10 @@ export class DatabaseClient {
       }
     }
 
-    // Step 3: Fall back to uncategorized
-    const uncategorized = await this.getUncategorizedCampaign();
-
+    // No confident match: no campaign assigned (campaign_id null)
     return {
-      campaign_id: uncategorized.id,
-      campaign_name: uncategorized.name,
+      campaign_id: null,
+      campaign_name: null,
       confidence: 0.1,
     };
   }

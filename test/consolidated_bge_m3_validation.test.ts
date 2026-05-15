@@ -7,7 +7,7 @@
  * - Using actual BGE-M3 model for embeddings (no mocking)
  * - Storing messages in the real database
  * - Verifying classification accuracy and confidence scores
- * - Analyzing uncategorized message rates
+ * - Analyzing messages with no campaign assigned (null campaign_id)
  */
 
 import * as path from "node:path";
@@ -72,7 +72,7 @@ interface TestResult {
   response: any;
   dbRecord?: any;
   success: boolean;
-  actualCampaign?: string;
+  actualCampaign?: string | null;
   confidence?: number;
   embeddingDimensions?: number;
   error?: string;
@@ -81,7 +81,7 @@ interface TestResult {
 interface ValidationMetrics {
   totalTests: number;
   successfulClassifications: number;
-  uncategorizedCount: number;
+  noCampaignCount: number;
   averageConfidence: number;
   confidenceDistribution: {
     high: number; // > 0.7
@@ -996,14 +996,12 @@ class ConsolidatedBGE_M3_Test {
       );
 
       // Extract campaign name
-      const campaignName = dbRecord.campaigns?.name || "Unknown";
-
       return {
         testMessage: testMsg,
         response,
         dbRecord,
         success: true,
-        actualCampaign: campaignName,
+        actualCampaign: dbRecord.campaigns?.name ?? null,
         confidence: dbRecord.classification_confidence,
         embeddingDimensions,
       };
@@ -1048,7 +1046,7 @@ class ConsolidatedBGE_M3_Test {
     const metrics: ValidationMetrics = {
       totalTests: this.classificationResults.length,
       successfulClassifications: 0,
-      uncategorizedCount: 0,
+      noCampaignCount: 0,
       averageConfidence: 0,
       confidenceDistribution: {
         high: 0,
@@ -1072,9 +1070,8 @@ class ConsolidatedBGE_M3_Test {
 
       metrics.successfulClassifications++;
 
-      // Check if uncategorized
-      if (result.actualCampaign?.toLowerCase().includes("uncategorized")) {
-        metrics.uncategorizedCount++;
+      if (result.dbRecord != null && result.dbRecord.campaign_id == null) {
+        metrics.noCampaignCount++;
       }
 
       // Confidence distribution
@@ -1145,7 +1142,7 @@ class ConsolidatedBGE_M3_Test {
       `Failed:                   ${metrics.totalTests - metrics.successfulClassifications}`,
     );
     console.log(
-      `Uncategorized:            ${metrics.uncategorizedCount} (${((metrics.uncategorizedCount / metrics.successfulClassifications) * 100).toFixed(1)}%)`,
+      `No campaign assigned:     ${metrics.noCampaignCount} (${((metrics.noCampaignCount / metrics.successfulClassifications) * 100).toFixed(1)}%)`,
     );
     console.log(
       `Average Confidence:       ${metrics.averageConfidence.toFixed(3)}`,
@@ -1193,8 +1190,8 @@ class ConsolidatedBGE_M3_Test {
     console.log(`\n💡 CLASSIFICATION RECOMMENDATIONS`);
     console.log("-".repeat(80));
 
-    if (metrics.uncategorizedCount / metrics.successfulClassifications > 0.3) {
-      console.log("⚠️  High uncategorized rate (>30%). Consider:");
+    if (metrics.noCampaignCount / metrics.successfulClassifications > 0.3) {
+      console.log("⚠️  High rate of messages with no campaign (>30%). Consider:");
       console.log("   - Adding more campaign reference vectors");
       console.log("   - Lowering similarity threshold");
       console.log("   - Reviewing campaign descriptions");
