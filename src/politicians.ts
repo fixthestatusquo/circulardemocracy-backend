@@ -1,8 +1,8 @@
 import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
 import {
+  type AuthContext,
   authMiddleware,
   canAccessPoliticianId,
-  type AuthContext,
   requireAppRole,
 } from "./auth";
 import type { DatabaseClient } from "./database";

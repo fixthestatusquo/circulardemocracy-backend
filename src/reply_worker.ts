@@ -6,8 +6,8 @@ import { resolveOutboundEmailIdentity } from "./email_impersonation";
 import { renderEmailLayout } from "./email_layout";
 import {
   type EmailMessage,
-  jmapWellKnownSessionUrl,
   JMAPClient,
+  jmapWellKnownSessionUrl,
   resolveMailAccountIdFromSession,
 } from "./jmap_client";
 import { getSupabaseRelayAccessToken } from "./supabase_relay_token";

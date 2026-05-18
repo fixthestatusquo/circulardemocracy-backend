@@ -1,7 +1,7 @@
 import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
-import { authMiddleware, type AuthContext, requireAppRole } from "./auth";
+import { type AuthContext, authMiddleware, requireAppRole } from "./auth";
 import type { DatabaseClient } from "./database";
-import { type MailSendBindings } from "./reply_worker";
+import type { MailSendBindings } from "./reply_worker";
 
 // Define types for env and app
 interface Env extends MailSendBindings {
