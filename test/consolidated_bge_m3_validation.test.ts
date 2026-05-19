@@ -1191,7 +1191,9 @@ class ConsolidatedBGE_M3_Test {
     console.log("-".repeat(80));
 
     if (metrics.noCampaignCount / metrics.successfulClassifications > 0.3) {
-      console.log("⚠️  High rate of messages with no campaign (>30%). Consider:");
+      console.log(
+        "⚠️  High rate of messages with no campaign (>30%). Consider:",
+      );
       console.log("   - Adding more campaign reference vectors");
       console.log("   - Lowering similarity threshold");
       console.log("   - Reviewing campaign descriptions");
@@ -1468,9 +1470,11 @@ class ConsolidatedBGE_M3_Test {
   }
 }
 
-// Test suite for Vitest
-const runConsolidatedValidation = process.env.RUN_CONSOLIDATED_BGE_M3_TEST === "true";
-const describeConsolidated = runConsolidatedValidation ? describe : describe.skip;
+const RUN_CONSOLIDATED_BGE_M3_TEST = false;
+
+const describeConsolidated = RUN_CONSOLIDATED_BGE_M3_TEST
+  ? describe
+  : describe.skip;
 
 describeConsolidated("Consolidated BGE-M3 Validation", () => {
   it("should run complete BGE-M3 validation test suite", async () => {

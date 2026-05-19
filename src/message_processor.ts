@@ -48,13 +48,10 @@ export interface MessageProcessingResult {
   errors?: string[];
 }
 
-export type ImmediateReplyHandler = (messageId: number) => Promise<void>;
-
 export async function processMessage(
   db: DatabaseClient,
   ai: Ai,
   data: MessageInput,
-  immediateReplyHandler?: ImmediateReplyHandler,
 ): Promise<MessageProcessingResult> {
   // 1. Politician Lookup
   const politician = await db.findPoliticianByEmail(data.recipient_email);
@@ -149,8 +146,7 @@ export async function processMessage(
       classification_confidence: classification.confidence,
     });
 
-    // Ensure supporter audience is built from inbound messages,
-    // so broadcast sends can target campaign supporters even before any reply send.
+    // Ensure supporter audience is built from inbound messages for campaign context.
     await db.upsertSupporter(
       classification.campaign_id,
       politician.id,
@@ -178,9 +174,9 @@ export async function processMessage(
     if (activeTemplate) {
       replySchedule = calculateReplySchedule(
         activeTemplate.send_timing as
-        | "immediate"
-        | "office_hours"
-        | "scheduled",
+          | "immediate"
+          | "office_hours"
+          | "scheduled",
         activeTemplate.scheduled_for,
         data.timestamp,
       );
@@ -189,14 +185,6 @@ export async function processMessage(
         reply_status: replySchedule.reply_status,
         reply_scheduled_at: replySchedule.reply_scheduled_at,
       });
-    }
-  }
-
-  if (replySchedule?.send_immediately && immediateReplyHandler) {
-    try {
-      await immediateReplyHandler(messageId);
-    } catch (_error) {
-      console.error("Immediate reply send failed");
     }
   }
 

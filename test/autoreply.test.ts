@@ -500,7 +500,6 @@ describe("Message Processor Auto-Reply", () => {
   };
 
   it("should schedule immediate reply when template has immediate timing", async () => {
-    const immediateReplyHandler = vi.fn().mockResolvedValue(undefined);
     vi.spyOn(mockDb, "getMessageByExternalId").mockResolvedValue(null);
     vi.spyOn(mockDb, "findPoliticianByEmail").mockResolvedValue({
       id: 1,
@@ -529,12 +528,7 @@ describe("Message Processor Auto-Reply", () => {
     vi.spyOn(mockDb, "insertMessage").mockResolvedValue(100);
     vi.spyOn(mockDb, "assignMessageToCluster").mockResolvedValue(1);
 
-    const result = await processMessage(
-      mockDb,
-      mockAi as any,
-      validInput,
-      immediateReplyHandler,
-    );
+    const result = await processMessage(mockDb, mockAi as any, validInput);
 
     expect(result.success).toBe(true);
     expect(result.reply_status).toBe("pending");
@@ -554,7 +548,6 @@ describe("Message Processor Auto-Reply", () => {
       expect.any(String),
       validInput.timestamp,
     );
-    expect(immediateReplyHandler).toHaveBeenCalledWith(100);
   });
 
   it("should not schedule reply for duplicate messages", async () => {
@@ -583,7 +576,6 @@ describe("Message Processor Auto-Reply", () => {
   });
 
   it("should not schedule reply if no active template exists", async () => {
-    const immediateReplyHandler = vi.fn().mockResolvedValue(undefined);
     vi.spyOn(mockDb, "getMessageByExternalId").mockResolvedValue(null);
     vi.spyOn(mockDb, "findPoliticianByEmail").mockResolvedValue({
       id: 1,
@@ -599,18 +591,12 @@ describe("Message Processor Auto-Reply", () => {
     vi.spyOn(mockDb, "insertMessage").mockResolvedValue(100);
     vi.spyOn(mockDb, "assignMessageToCluster").mockResolvedValue(1);
 
-    const result = await processMessage(
-      mockDb,
-      mockAi as any,
-      validInput,
-      immediateReplyHandler,
-    );
+    const result = await processMessage(mockDb, mockAi as any, validInput);
 
     expect(result.success).toBe(true);
     expect(result.reply_status).toBeNull();
     expect(result.reply_scheduled_at).toBeNull();
     expect(mockDb.upsertSupporter).toHaveBeenCalled();
     expect(mockDb.storeMessageContact).toHaveBeenCalled();
-    expect(immediateReplyHandler).not.toHaveBeenCalled();
   });
 });

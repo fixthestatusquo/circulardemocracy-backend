@@ -46,5 +46,3 @@ process.env.API_KEY ||= "test-api-key";
 export function restoreConsole() {
   // No-op: console is no longer globally mocked in setup.
 }
-
-

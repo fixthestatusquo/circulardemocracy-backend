@@ -1052,9 +1052,7 @@ export class DatabaseClient {
   }
 
   /** Supporter aggregate rows for a campaign (hashes only; email lives in message_contacts). */
-  async getSupportersForCampaign(
-    campaignId: number,
-  ): Promise<
+  async getSupportersForCampaign(campaignId: number): Promise<
     Array<{
       id: number;
       campaign_id: number;
@@ -1132,74 +1130,6 @@ export class DatabaseClient {
     }
   }
 
-  async getCampaignBroadcastRecipients(campaignId: number): Promise<
-    Array<{
-      sender_hash: string;
-      politician_id: number;
-      email: string;
-    }>
-  > {
-    try {
-      const supporters = await this.getSupportersForCampaign(campaignId);
-      if (supporters.length === 0) {
-        return [];
-      }
-
-      const { data: contacts, error } = await this.supabase
-        .from("message_contacts")
-        .select(
-          "sender_hash,sender_email,contact_captured_at,messages!inner(campaign_id,politician_id)",
-        )
-        .is("purged_at", null);
-
-      if (error) {
-        throw error;
-      }
-
-      const byKey = new Map<
-        string,
-        { email: string; capturedAt: string; sender_hash: string; politician_id: number }
-      >();
-
-      for (const row of (contacts || []) as any[]) {
-        const msg = Array.isArray(row.messages) ? row.messages[0] : row.messages;
-        if (!msg || msg.campaign_id !== campaignId) {
-          continue;
-        }
-        const key = `${campaignId}:${msg.politician_id}:${row.sender_hash}`;
-        const existing = byKey.get(key);
-        if (
-          !existing ||
-          new Date(row.contact_captured_at) > new Date(existing.capturedAt)
-        ) {
-          byKey.set(key, {
-            email: row.sender_email,
-            capturedAt: row.contact_captured_at,
-            sender_hash: row.sender_hash,
-            politician_id: msg.politician_id,
-          });
-        }
-      }
-
-      const supporterKeys = new Set(
-        supporters.map(
-          (s) => `${s.campaign_id}:${s.politician_id}:${s.sender_hash}`,
-        ),
-      );
-
-      return Array.from(byKey.entries())
-        .filter(([key]) => supporterKeys.has(key))
-        .map(([, value]) => ({
-          sender_hash: value.sender_hash,
-          politician_id: value.politician_id,
-          email: value.email,
-        }));
-    } catch (error) {
-      console.error("Error building campaign broadcast recipients:", error);
-      return [];
-    }
-  }
-
   async getCampaignTechnicalEmail(campaignId: number): Promise<string | null> {
     try {
       const { data, error } = await this.supabase
@@ -1242,59 +1172,6 @@ export class DatabaseClient {
       }
     } catch (error) {
       console.error("Error logging email event:", error);
-    }
-  }
-
-
-  /**
-   * Creates a minimal broadcast message for a supporter without storing any PII in the messages table.
-   */
-  async createBroadcastMessageForSupporter(params: {
-    campaignId: number;
-    politicianId: number;
-    senderHash: string;
-    replyStatus?: "pending" | "scheduled";
-    replyScheduledAt?: string | null;
-  }): Promise<number | null> {
-    const {
-      campaignId,
-      politicianId,
-      senderHash,
-      replyStatus = "pending",
-      replyScheduledAt = null,
-    } = params;
-
-    try {
-      const externalId = `broadcast:${campaignId}:${senderHash}:${Date.now()}`;
-
-      const { data, error } = await this.supabase
-        .from("messages")
-        .insert({
-          external_id: externalId,
-          channel: "broadcast",
-          channel_source: "broadcast",
-          politician_id: politicianId,
-          sender_hash: senderHash,
-          campaign_id: campaignId,
-          classification_confidence: 0,
-          language: "auto",
-          received_at: new Date().toISOString(),
-          duplicate_rank: 0,
-          processing_status: "processed",
-          reply_status: replyStatus,
-          reply_scheduled_at: replyScheduledAt,
-        })
-        .select("id")
-        .single();
-
-      if (error) {
-        throw error;
-      }
-
-      return data?.id ?? null;
-    } catch (error) {
-      console.error("Error creating broadcast message for supporter:", error);
-      return null;
     }
   }
 
@@ -1408,17 +1285,19 @@ export class DatabaseClient {
     }
   }
 
-  async getMessagesReadyToSend(maxRetryAttempts: number): Promise<Array<{
-    id: number;
-    external_id: string;
-    politician_id: number;
-    campaign_id: number;
-    sender_hash: string;
-    reply_status: "pending" | "scheduled";
-    reply_scheduled_at: string | null;
-    received_at: string;
-    reply_retry_count: number | null;
-  }>> {
+  async getMessagesReadyToSend(maxRetryAttempts: number): Promise<
+    Array<{
+      id: number;
+      external_id: string;
+      politician_id: number;
+      campaign_id: number;
+      sender_hash: string;
+      reply_status: "pending" | "scheduled";
+      reply_scheduled_at: string | null;
+      received_at: string;
+      reply_retry_count: number | null;
+    }>
+  > {
     const { data, error } = await this.supabase
       .from("messages")
       .select(
@@ -1434,34 +1313,6 @@ export class DatabaseClient {
     }
 
     return data || [];
-  }
-
-  async getMessageReadyToSendById(messageId: number): Promise<{
-    id: number;
-    external_id: string;
-    politician_id: number;
-    campaign_id: number;
-    sender_hash: string;
-    reply_status: "pending" | "scheduled";
-    reply_scheduled_at: string | null;
-    received_at: string;
-    reply_retry_count: number | null;
-  } | null> {
-    const { data, error } = await this.supabase
-      .from("messages")
-      .select(
-        "id, external_id, politician_id, campaign_id, sender_hash, reply_status, reply_scheduled_at, received_at, reply_retry_count",
-      )
-      .eq("id", messageId)
-      .in("reply_status", ["pending", "scheduled"])
-      .is("reply_sent_at", null)
-      .limit(1);
-
-    if (error) {
-      throw error;
-    }
-
-    return data && data.length > 0 ? data[0] : null;
   }
 
   async getCampaignById(campaignId: number): Promise<{

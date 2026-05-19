@@ -1,15 +1,15 @@
 #!/usr/bin/env bun
 
 import { DatabaseClient } from "../src/database.js";
+import {
+  jmapWellKnownSessionUrl,
+  resolveMailAccountIdFromSession,
+} from "../src/jmap_client.js";
 import { processMessage, PoliticianNotFoundError, type Ai, type MessageInput } from "../src/message_processor.js";
 import { z } from "zod";
 import Turndown from "turndown";
 import { config as dotenv } from "dotenv";
 import { pipeline, type FeatureExtractionPipeline } from "@xenova/transformers";
-import {
-  jmapWellKnownSessionUrl,
-  resolveMailAccountIdFromSession,
-} from "../src/jmap_client.js";
 
 dotenv();
 

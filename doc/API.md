@@ -160,33 +160,6 @@ Content-Type: `application/json`
 
 ---
 
-### /api/v1/campaigns/{id}/replies/broadcast
-
-#### POST
-
-**Summary:** /api/v1/campaigns/{id}/replies/broadcast
-
-**Parameters:**
-
-| Name | Type | In | Required | Description |
-|------|------|----|---------|--------------|
-| id | string | path | ✓ |  |
-
-**Responses:**
-
-- **200**: Creates broadcast reply rows and sends immediately when JMAP is configured; otherwise leaves messages pending for the scheduled worker.
-- **400**: Bad request (e.g. no active template or no supporters)
-- **401**: Unauthorized
-- **403**: Forbidden
-
-**CLI Example:**
-
-```bash
-./cli /api/v1/campaigns/--id=123/replies/broadcast --method=POST
-```
-
----
-
 ### /api/v1/politicians
 
 #### GET
@@ -452,27 +425,6 @@ Check health status of the Stalwart hook service
 
 ```bash
 ./cli /health
-```
-
----
-
-### /api/v1/worker/process-replies
-
-#### POST
-
-**Summary:** /api/v1/worker/process-replies
-
-Manually trigger scheduled reply processing for admin use
-
-**Responses:**
-
-- **200**: Scheduled replies processed
-- **500**: Worker processing failed
-
-**CLI Example:**
-
-```bash
-./cli /api/v1/worker/process-replies --method=POST
 ```
 
 ---

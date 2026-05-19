@@ -111,7 +111,9 @@ function extractRoleClaim(user: {
   const roleCandidates = [
     user.app_metadata?.role,
     user.user_metadata?.role,
-    Array.isArray(user.app_metadata?.roles) ? user.app_metadata?.roles[0] : null,
+    Array.isArray(user.app_metadata?.roles)
+      ? user.app_metadata?.roles[0]
+      : null,
     Array.isArray(user.user_metadata?.roles)
       ? user.user_metadata?.roles[0]
       : null,

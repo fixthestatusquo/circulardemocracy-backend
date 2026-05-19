@@ -1,9 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { JMAPClient } from "../src/jmap_client";
-import {
-  processReplyImmediately,
-  processScheduledReplies,
-} from "../src/reply_worker";
+import { processScheduledReplies } from "../src/reply_worker";
 
 // =============================================================================
 // REPLY WORKER TESTS
@@ -23,7 +20,6 @@ describe("Reply Worker", () => {
       from: vi.fn(),
     },
     getMessagesReadyToSend: vi.fn(),
-    getMessageReadyToSendById: vi.fn(),
     getCampaignById: vi.fn(),
     getPoliticianById: vi.fn(),
     markMessageAsSent: vi.fn(),
@@ -72,7 +68,6 @@ describe("Reply Worker", () => {
       return new Response("not mocked", { status: 500 });
     });
     vi.spyOn(mockDb, "getMessagesReadyToSend").mockResolvedValue([]);
-    vi.spyOn(mockDb, "getMessageReadyToSendById").mockResolvedValue(null);
     vi.spyOn(mockDb, "getCampaignById").mockResolvedValue({
       id: 1,
       name: "Test Campaign",
@@ -512,7 +507,9 @@ describe("Reply Worker", () => {
         }),
       };
 
-      vi.spyOn(mockDb, "getMessagesReadyToSend").mockResolvedValue([mockMessage]);
+      vi.spyOn(mockDb, "getMessagesReadyToSend").mockResolvedValue([
+        mockMessage,
+      ]);
       vi.spyOn(mockDb, "getCampaignById").mockResolvedValue({
         id: 1,
         name: "Campaign One",
@@ -609,7 +606,9 @@ describe("Reply Worker", () => {
         }),
       };
 
-      vi.spyOn(mockDb, "getMessagesReadyToSend").mockResolvedValue([mockMessage]);
+      vi.spyOn(mockDb, "getMessagesReadyToSend").mockResolvedValue([
+        mockMessage,
+      ]);
       vi.spyOn(mockDb, "getCampaignById").mockResolvedValue({
         id: 1,
         name: "Campaign One",
@@ -716,7 +715,9 @@ describe("Reply Worker", () => {
           return {} as any;
         },
       );
-      vi.spyOn(mockDb, "getMessagesReadyToSend").mockResolvedValue([mockMessage]);
+      vi.spyOn(mockDb, "getMessagesReadyToSend").mockResolvedValue([
+        mockMessage,
+      ]);
       vi.spyOn(mockDb, "getCampaignById").mockResolvedValue({
         id: 1,
         name: "Campaign One",
@@ -835,143 +836,6 @@ describe("Reply Worker", () => {
       vi.spyOn(mockDb, "getMessagesReadyToSend").mockResolvedValue([]);
 
       expect(mockOr).toBeDefined();
-    });
-  });
-
-  describe("processReplyImmediately", () => {
-    it("throws when the message is not eligible (not found)", async () => {
-      const messagesById = {
-        select: vi.fn().mockReturnThis(),
-        eq: vi.fn().mockReturnThis(),
-        in: vi.fn().mockReturnThis(),
-        is: vi.fn().mockReturnThis(),
-        limit: vi.fn().mockResolvedValue({ data: [], error: null }),
-      };
-
-      vi.spyOn(mockDb.supabase, "from").mockImplementation(((table: string) => {
-        if (table === "messages") {
-          return messagesById as any;
-        }
-        return {} as any;
-      }) as (...args: unknown[]) => unknown);
-
-      await expect(
-        processReplyImmediately(mockDb, 404, runtimeSecrets),
-      ).rejects.toThrow(/not eligible/);
-      expect(mockDb.markMessageReplyDelivered).not.toHaveBeenCalled();
-    });
-
-    it("loads the message by id and sends a reply like the scheduled worker", async () => {
-      const mockMessage = {
-        id: 42,
-        external_id: "ext-42",
-        politician_id: 1,
-        campaign_id: 5,
-        sender_hash: "hash42",
-        reply_status: "pending" as const,
-        reply_scheduled_at: null,
-        received_at: "2024-01-01T00:00:00Z",
-        reply_retry_count: 0,
-      };
-
-      vi.spyOn(mockDb, "getMessageReadyToSendById").mockResolvedValue(
-        mockMessage,
-      );
-      vi.spyOn(mockDb, "getCampaignById").mockResolvedValue({
-        id: 5,
-        name: "Campaign",
-        technical_email: "outbound@campaign.example",
-        reply_to_email: null,
-      });
-      vi.spyOn(mockDb, "getPoliticianById").mockResolvedValue({
-        id: 1,
-        name: "Politician",
-        email: "pol@example.com",
-      });
-
-      const messagesById = {
-        select: vi.fn().mockReturnThis(),
-        eq: vi.fn().mockReturnThis(),
-        in: vi.fn().mockReturnThis(),
-        is: vi.fn().mockReturnThis(),
-        limit: vi.fn().mockResolvedValue({ data: [mockMessage], error: null }),
-      };
-      const campaignsTable = {
-        select: vi.fn().mockReturnThis(),
-        eq: vi.fn().mockReturnThis(),
-        limit: vi.fn().mockResolvedValue({
-          data: [
-            {
-              id: 5,
-              name: "Campaign",
-              technical_email: "outbound@campaign.example",
-              reply_to_email: null,
-            },
-          ],
-          error: null,
-        }),
-      };
-      const politiciansTable = {
-        select: vi.fn().mockReturnThis(),
-        eq: vi.fn().mockReturnThis(),
-        limit: vi.fn().mockResolvedValue({
-          data: [
-            {
-              id: 1,
-              name: "Politician",
-              email: "pol@example.com",
-            },
-          ],
-          error: null,
-        }),
-      };
-
-      vi.spyOn(mockDb.supabase, "from").mockImplementation(((table: string) => {
-        if (table === "messages") {
-          return messagesById as any;
-        }
-        if (table === "campaigns") {
-          return campaignsTable as any;
-        }
-        if (table === "politicians") {
-          return politiciansTable as any;
-        }
-        return {} as any;
-      }) as (...args: unknown[]) => unknown);
-
-      vi.spyOn(mockDb, "getActiveTemplateForCampaign").mockResolvedValue({
-        id: 1,
-        politician_id: 1,
-        campaign_id: 5,
-        name: "T",
-        subject: "Thanks",
-        body: "Thanks for writing",
-        active: true,
-        layout_type: "text_only",
-        send_timing: "immediate",
-        scheduled_for: null,
-        created_at: "2024-01-01T00:00:00Z",
-        updated_at: "2024-01-01T00:00:00Z",
-      });
-      vi.spyOn(mockDb, "getMessageContactEmail").mockResolvedValue(
-        "voter@example.com",
-      );
-      vi.spyOn(JMAPClient.prototype, "sendEmail").mockResolvedValue({
-        success: true,
-        messageId: "jmap-immediate-1",
-      });
-
-      await processReplyImmediately(mockDb, 42, runtimeSecrets);
-
-      expect(mockDb.markMessageReplyDelivered).toHaveBeenCalledWith(42);
-      expect(JMAPClient.prototype.sendEmail).toHaveBeenCalledWith(
-        expect.objectContaining({
-          from: "outbound@campaign.example",
-          fromName: "Politician",
-          replyTo: "pol@example.com",
-          to: ["voter@example.com"],
-        }),
-      );
     });
   });
 });

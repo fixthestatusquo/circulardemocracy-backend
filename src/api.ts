@@ -9,10 +9,7 @@ import type { Ai } from "./message_processor";
 import messagesApp from "./messages";
 import politiciansApp from "./politicians";
 import replyTemplatesApp from "./reply_templates";
-import {
-  type MailSendBindings,
-  processScheduledReplies,
-} from "./reply_worker";
+import { type MailSendBindings, processScheduledReplies } from "./reply_worker";
 
 // Define types for env and app
 interface Env extends MailSendBindings {
@@ -33,35 +30,12 @@ const WorkerHealthResponseSchema = z.object({
   timestamp: z.string(),
 });
 
-const WorkerProcessResultSchema = z.object({
-  total: z.number(),
-  sent: z.number(),
-  failed: z.number(),
-  errors: z.array(
-    z.object({
-      message_id: z.number(),
-      error: z.string(),
-    }),
-  ),
-});
-
-const WorkerProcessSuccessSchema = z.object({
-  success: z.literal(true),
-  result: WorkerProcessResultSchema,
-});
-
-const WorkerProcessErrorSchema = z.object({
-  success: z.literal(false),
-  error: z.string(),
-});
-
 const MainHealthResponseSchema = z.object({
   status: z.literal("ok"),
   service: z.literal("main-api"),
   timestamp: z.string(),
   version: z.string(),
 });
-
 
 app.use("/api/*", async (c, next) => {
   c.set(
@@ -116,62 +90,6 @@ app.openapi(mainHealthRoute, (c) => {
 app.use("/api/v1/worker/*", authMiddleware);
 app.use("/api/v1/worker/*", requireAppRole("admin"));
 
-const workerProcessRepliesRoute = createRoute({
-  method: "post",
-  path: "/api/v1/worker/process-replies",
-  security: [{ Bearer: [] }],
-  responses: {
-    200: {
-      content: {
-        "application/json": {
-          schema: WorkerProcessSuccessSchema,
-        },
-      },
-      description: "Scheduled replies processed",
-    },
-    500: {
-      content: {
-        "application/json": {
-          schema: WorkerProcessErrorSchema,
-        },
-      },
-      description: "Worker processing failed",
-    },
-  },
-  tags: ["Worker"],
-  summary: "/api/v1/worker/process-replies",
-  description: "Manually trigger scheduled reply processing for admin use",
-});
-
-app.openapi(workerProcessRepliesRoute, async (c) => {
-  try {
-    const db = c.get("db") as DatabaseClient;
-
-    const runtimeSecrets = c.env as unknown as Record<string, string | undefined>;
-    const result = await processScheduledReplies(
-      db,
-      runtimeSecrets,
-    );
-
-    return c.json(
-      {
-        success: true,
-        result,
-      },
-      200,
-    );
-  } catch (error) {
-    console.error("Manual worker trigger error:", error);
-    return c.json(
-      {
-        success: false,
-        error: error instanceof Error ? error.message : "Unknown error",
-      },
-      500,
-    );
-  }
-});
-
 const workerHealthRoute = createRoute({
   method: "get",
   path: "/api/v1/worker/health",
@@ -216,12 +134,8 @@ export async function handleScheduledEvent(env: Env): Promise<void> {
       key: env.SUPABASE_KEY,
     });
 
-    const runtimeSecrets =
-      env as unknown as Record<string, string | undefined>;
-    const result = await processScheduledReplies(
-      db,
-      runtimeSecrets,
-    );
+    const runtimeSecrets = env as unknown as Record<string, string | undefined>;
+    const result = await processScheduledReplies(db, runtimeSecrets);
 
     console.log("[Reply Worker] Processing complete:", {
       total: result.total,

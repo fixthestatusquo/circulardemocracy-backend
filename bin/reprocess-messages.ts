@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 
 import { DatabaseClient } from "../src/database.js";
+import { resolveMailAccountIdFromSession } from "../src/jmap_client.js";
 import { generateEmbedding, formatEmailContentForEmbedding } from "../src/embedding_service.js";
 import { z } from "zod";
 import Turndown from "turndown";
@@ -130,21 +131,6 @@ function getMethodResponse(
   }
 
   return response[1];
-}
-
-function resolveAccountId(session: JmapSessionResponse): string {
-  const primaryMailAccount =
-    session.primaryAccounts?.["urn:ietf:params:jmap:mail"];
-  if (primaryMailAccount) {
-    return primaryMailAccount;
-  }
-
-  const accountId = Object.keys(session.accounts || {})[0];
-  if (accountId) {
-    return accountId;
-  }
-
-  throw new Error("No JMAP mail account found in session response");
 }
 
 async function fetchEmailById(
@@ -508,7 +494,7 @@ async function reprocessMessages(
 
     console.log(`Connecting to Stalwart JMAP at ${endpoint}...`);
     jmapSession = await fetchJmapSession(endpoint, jmapAuthHeader);
-    jmapAccountId = resolveAccountId(jmapSession);
+    jmapAccountId = resolveMailAccountIdFromSession(jmapSession);
     console.log("Connected to Stalwart\n");
   }
 

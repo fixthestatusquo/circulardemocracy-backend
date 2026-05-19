@@ -6,8 +6,8 @@ import { resolveOutboundEmailIdentity } from "./email_impersonation";
 import { renderEmailLayout } from "./email_layout";
 import {
   type EmailMessage,
-  jmapWellKnownSessionUrl,
   JMAPClient,
+  jmapWellKnownSessionUrl,
   resolveMailAccountIdFromSession,
 } from "./jmap_client";
 import { getSupabaseRelayAccessToken } from "./supabase_relay_token";
@@ -142,19 +142,6 @@ export async function processScheduledReplies(
   }
 }
 
-export async function processReplyImmediately(
-  db: DatabaseClient,
-  messageId: number,
-  runtimeSecrets?: RuntimeSecretBindings,
-): Promise<void> {
-  const message = await getMessageById(db, messageId);
-  if (!message) {
-    throw new Error(`Message ${messageId} not eligible for immediate reply`);
-  }
-
-  await processSingleMessage(db, message, runtimeSecrets);
-}
-
 // Maximum number of retry attempts before giving up
 const MAX_RETRY_ATTEMPTS = 10;
 const RETRY_DELAYS_MINUTES = [5, 15, 60];
@@ -183,27 +170,6 @@ async function getMessagesReadyToSend(
   } catch (error) {
     console.error("Error fetching messages to send");
     throw error;
-  }
-}
-
-async function getMessageById(
-  db: DatabaseClient,
-  messageId: number,
-): Promise<MessageToProcess | null> {
-  try {
-    const record = await db.getMessageReadyToSendById(messageId);
-
-    if (!record) {
-      return null;
-    }
-
-    return {
-      ...record,
-      reply_retry_count: record.reply_retry_count ?? 0,
-    };
-  } catch (error) {
-    console.error("Error fetching message by ID");
-    return null;
   }
 }
 
@@ -279,11 +245,7 @@ async function processSingleMessage(
     throw new Error(errorMsg);
   }
 
-  const sendContext = await buildSendContext(
-    db,
-    message,
-    outboundIdentity,
-  );
+  const sendContext = await buildSendContext(db, message, outboundIdentity);
 
   // 5. Render email content based on layout type
   const emailContent = renderEmailLayout({
@@ -379,7 +341,11 @@ async function handleSendFailure(
 async function buildSendContext(
   db: DatabaseClient,
   message: MessageToProcess,
-  _identity: { fromEmail: string; replyToEmail: string; fromDisplayName: string },
+  _identity: {
+    fromEmail: string;
+    replyToEmail: string;
+    fromDisplayName: string;
+  },
 ): Promise<SendContext> {
   const supporterId = await db.upsertSupporter(
     message.campaign_id,
@@ -442,9 +408,7 @@ async function resolveSingleServiceAccountConfig(
     ...(processEnv || {}),
     ...(runtimeSecrets || {}),
   };
-  assertNoDynamicCredentialOverrides(
-    mergedBindings as RuntimeSecretBindings,
-  );
+  assertNoDynamicCredentialOverrides(mergedBindings as RuntimeSecretBindings);
   const baseConfig = resolveStalwartJmapWorkerConfig(mergedBindings);
   if (!baseConfig) {
     return {
@@ -464,6 +428,7 @@ async function resolveSingleServiceAccountConfig(
         "Supabase IdP relay auth is required. Set SUPABASE_URL, SUPABASE_ANON_KEY, RELAY_SERVICE_ACCOUNT_EMAIL, and RELAY_SERVICE_ACCOUNT_PASSWORD.",
     };
   }
+
   const config: WorkerConfig = {
     ...baseConfig,
     jmapAccountId: await fetchAndResolveMailAccountIdFromSession(
@@ -516,4 +481,3 @@ function sanitizeErrorMessage(raw: string): string {
     .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, "[redacted-email]")
     .slice(0, 500);
 }
-

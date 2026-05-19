@@ -1,8 +1,8 @@
 import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
 import {
+  type AuthContext,
   authMiddleware,
   canAccessPoliticianId,
-  type AuthContext,
   requireAppRole,
 } from "./auth";
 import type { DatabaseClient } from "./database";
@@ -22,7 +22,10 @@ const app = new OpenAPIHono<{ Bindings: Env; Variables: Variables }>();
 
 // Apply auth middleware to all routes in this file
 app.use("/api/v1/politicians/*", authMiddleware);
-app.use("/api/v1/politicians/*", requireAppRole("politician", "staff", "admin"));
+app.use(
+  "/api/v1/politicians/*",
+  requireAppRole("politician", "staff", "admin"),
+);
 
 // =============================================================================
 // SCHEMAS

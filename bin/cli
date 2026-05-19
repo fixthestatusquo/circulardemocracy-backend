@@ -978,11 +978,13 @@ Commands:
   logout                Clear authentication session
   add-campaign          Create a new campaign (text optional)
   update-campaign       Update campaign embedding
-  set-politician-jmap   Create/update per-politician reply sender credentials
   create-campaign-from-cluster  Assign cluster to campaign (match, merge, or create + messages)
   closest-campaigns     Find closest campaigns for a message
   reprocess-messages    Reprocess and reclassify existing messages
   <endpoint>            API endpoint path (e.g., campaigns, users/:id)
+
+Outbound JMAP (reply worker): set JMAP_URL to the mail server base URL; session URL is
+JMAP_URL + "/.well-known/jmap". The mail account id is read from the session response, not from CLI flags.
 
 Campaign Management:
   add-campaign --name <name> [--text <text>] [--description <desc>]
@@ -1040,7 +1042,6 @@ Examples:
   ./cli add-campaign --url "https://climate.example.com/action"
   ./cli update-campaign --id 5 --text "Updated representative text"
   ./cli update-campaign --id 5 --url "https://climate.example.com/new-page"
-  ./cli set-politician-jmap --id 3 --jmap-url "https://mail.example.org" --stalwart-jmap-account-id "<account-id>" --stalwart-username "user@example.org" --stalwart-app-password "<app-password>"
   ./cli create-campaign-from-cluster --cluster-id 123 --campaign-name "Climate Action"
   ./cli closest-campaigns --message-id "ieaaaacb" --limit 5
   ./cli closest-campaigns --message "I support GMO demeter policy" --limit 5

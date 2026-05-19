@@ -1,8 +1,8 @@
 import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
 import {
+  type AuthContext,
   authMiddleware,
   canAccessPoliticianId,
-  type AuthContext,
   requireAppRole,
 } from "./auth";
 import type { DatabaseClient } from "./database";
@@ -11,10 +11,7 @@ import {
   PoliticianNotFoundError,
   processMessage,
 } from "./message_processor";
-import {
-  type MailSendBindings,
-  processReplyImmediately,
-} from "./reply_worker";
+import type { MailSendBindings } from "./reply_worker";
 
 // Define types for env and app
 interface Env extends MailSendBindings {
@@ -209,20 +206,7 @@ app.openapi(messageRoute, async (c) => {
       return c.json({ success: false, error: "Forbidden" }, 403);
     }
 
-    const runtimeSecrets =
-      c.env as unknown as Record<string, string | undefined>;
-    const result = await processMessage(
-      db,
-      c.env.AI,
-      data,
-      async (messageId: number) => {
-        await processReplyImmediately(
-          db,
-          messageId,
-          runtimeSecrets,
-        );
-      },
-    );
+    const result = await processMessage(db, c.env.AI, data);
 
     if (result.status === "duplicate") {
       return c.json(result, 409);

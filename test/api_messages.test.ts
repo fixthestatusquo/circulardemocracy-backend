@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mockSupabaseGetUser = vi.fn();
 
@@ -44,7 +44,7 @@ vi.mock("../src/database", () => ({
 }));
 
 describe("Messages API Integration", () => {
-  let app: (typeof import("../src/api"))["default"];
+  let app: typeof import("../src/api")["default"];
 
   const env = {
     AI: { run: vi.fn() },
