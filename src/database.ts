@@ -233,55 +233,20 @@ export class DatabaseClient {
     if (!d) {
       return [];
     }
-    const suffix = `@${d}`;
-    const byLower = new Map<string, string>();
 
-    const add = (raw: string) => {
-      const t = raw.trim();
-      if (!t) {
-        return;
-      }
-      const lower = t.toLowerCase();
-      if (!lower.endsWith(suffix)) {
-        return;
-      }
-      if (!byLower.has(lower)) {
-        byLower.set(lower, t);
-      }
-    };
+    const { data: rows, error } = await this.supabase
+      .from("stalwart_mailbox_addresses")
+      .select("mailbox_address")
+      .eq("email_domain", d);
 
-    const { data: polRows, error: polErr } = await this.supabase
-      .from("politicians")
-      .select("email, additional_emails")
-      .eq("active", true);
-
-    if (polErr) {
-      throw polErr;
+    if (error) {
+      throw error;
     }
 
-    for (const row of polRows || []) {
-      add(row.email as string);
-      for (const extra of (row.additional_emails || []) as string[]) {
-        add(extra);
-      }
-    }
-
-    const { data: campRows, error: campErr } = await this.supabase
-      .from("campaigns")
-      .select("technical_email")
-      .in("status", ["active", "unconfirmed"]);
-
-    if (campErr) {
-      throw campErr;
-    }
-
-    for (const row of campRows || []) {
-      add((row.technical_email as string) || "");
-    }
-
-    return Array.from(byLower.values()).sort((a, b) =>
-      a.toLowerCase().localeCompare(b.toLowerCase()),
-    );
+    return (rows || [])
+      .map((row) => String(row.mailbox_address).trim())
+      .filter(Boolean)
+      .sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
   }
 
   // =============================================================================

@@ -269,6 +269,35 @@ describe("DatabaseClient", () => {
     });
   });
 
+  describe("listStalwartMailboxAddressesForDomain", () => {
+    it("queries stalwart_mailbox_addresses filtered by email_domain", async () => {
+      mockFetch.mockResolvedValueOnce(
+        createMockResponse([
+          { mailbox_address: "rep@example.org" },
+          { mailbox_address: "campaign@example.org" },
+        ]),
+      );
+
+      const result = await db.listStalwartMailboxAddressesForDomain(
+        "@Example.ORG",
+      );
+
+      expect(result).toEqual(["campaign@example.org", "rep@example.org"]);
+      const url = mockFetch.mock.calls[0][0] as string;
+      expect(url).toContain(
+        "https://test.supabase.co/rest/v1/stalwart_mailbox_addresses",
+      );
+      expect(url).toContain("email_domain=eq.example.org");
+      expect(url).toContain("select=mailbox_address");
+    });
+
+    it("returns empty array for blank domain", async () => {
+      const result = await db.listStalwartMailboxAddressesForDomain("  ");
+      expect(result).toEqual([]);
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+  });
+
   describe("insertMessage", () => {
     it("should insert message and return ID", async () => {
       const mockMessage = {
