@@ -224,6 +224,31 @@ export class DatabaseClient {
     }
   }
 
+  /**
+   * Mailbox addresses on {@link domain} used for multi-mailbox Stalwart ingestion
+   * (active politicians + campaign technical addresses).
+   */
+  async listStalwartMailboxAddressesForDomain(domain: string): Promise<string[]> {
+    const d = domain.trim().toLowerCase().replace(/^@/, "");
+    if (!d) {
+      return [];
+    }
+
+    const { data: rows, error } = await this.supabase
+      .from("stalwart_mailbox_addresses")
+      .select("mailbox_address")
+      .eq("email_domain", d);
+
+    if (error) {
+      throw error;
+    }
+
+    return (rows || [])
+      .map((row) => String(row.mailbox_address).trim())
+      .filter(Boolean)
+      .sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
+  }
+
   // =============================================================================
   // CAMPAIGN OPERATIONS
   // =============================================================================

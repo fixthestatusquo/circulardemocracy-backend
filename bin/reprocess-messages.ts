@@ -7,6 +7,7 @@ import Turndown from "turndown";
 import { config as dotenv } from "dotenv";
 import { jmapWellKnownSessionUrl } from "../src/jmap_client.js";
 
+// Load `.env` once; read config from `process.env` only (no env.ts wrapper).
 dotenv();
 
 interface ReprocessOptions {
