@@ -23,10 +23,12 @@ describe("Reply Worker", () => {
       from: vi.fn(),
     },
     getMessagesReadyToSend: vi.fn(),
+    getMessageForReplyScheduling: vi.fn(),
     getMessageReadyToSendById: vi.fn(),
     getCampaignById: vi.fn(),
     getPoliticianById: vi.fn(),
-    markMessageAsSent: vi.fn(),
+    getCampaignIdsWithActiveReplyTemplate: vi.fn(),
+    updateMessageFields: vi.fn(),
     getActiveTemplateForCampaign: vi.fn(),
     getMessageContactEmail: vi.fn(),
     upsertSupporter: vi.fn(),
@@ -71,7 +73,26 @@ describe("Reply Worker", () => {
       }
       return new Response("not mocked", { status: 500 });
     });
+    vi.spyOn(mockDb, "getCampaignIdsWithActiveReplyTemplate").mockResolvedValue([
+      1,
+    ]);
+    vi.spyOn(mockDb, "updateMessageFields").mockResolvedValue(undefined);
     vi.spyOn(mockDb, "getMessagesReadyToSend").mockResolvedValue([]);
+    vi.spyOn(mockDb, "getMessageForReplyScheduling").mockImplementation(
+      async (...args: unknown[]) => {
+        const messageId = args[0] as number;
+        return {
+          id: messageId,
+          campaign_id: 1,
+          politician_id: 1,
+          sender_hash: "hash1",
+          received_at: "2024-01-01T00:00:00Z",
+          duplicate_rank: 0,
+          reply_sent_at: null,
+          reply_scheduled_at: null,
+        };
+      },
+    );
     vi.spyOn(mockDb, "getMessageReadyToSendById").mockResolvedValue(null);
     vi.spyOn(mockDb, "getCampaignById").mockResolvedValue({
       id: 1,
@@ -84,7 +105,6 @@ describe("Reply Worker", () => {
       email: "politician@example.com",
       name: "Test Politician",
     });
-    vi.spyOn(mockDb, "markMessageAsSent").mockResolvedValue(undefined);
     vi.spyOn(mockDb, "upsertSupporter").mockResolvedValue(1);
     vi.spyOn(mockDb, "logEmailEvent").mockResolvedValue(undefined);
     vi.spyOn(mockDb, "markMessageReplyDelivered").mockResolvedValue(undefined);
@@ -104,7 +124,6 @@ describe("Reply Worker", () => {
             politician_id: 1,
             campaign_id: 1,
             sender_hash: "hash1",
-            reply_status: "pending",
             reply_scheduled_at: null,
             received_at: "2024-01-01T00:00:00Z",
             reply_retry_count: 0,
@@ -120,7 +139,6 @@ describe("Reply Worker", () => {
           politician_id: 1,
           campaign_id: 1,
           sender_hash: "hash1",
-          reply_status: "pending",
           reply_scheduled_at: null,
           received_at: "2024-01-01T00:00:00Z",
           reply_retry_count: 0,
@@ -172,7 +190,6 @@ describe("Reply Worker", () => {
       politician_id: 1,
       campaign_id: 1,
       sender_hash: "hash1",
-      reply_status: "pending" as const,
       reply_scheduled_at: null,
       received_at: "2024-01-01T00:00:00Z",
       reply_retry_count: 0,
@@ -282,7 +299,6 @@ describe("Reply Worker", () => {
             politician_id: 1,
             campaign_id: 1,
             sender_hash: "hash1",
-            reply_status: "pending",
             reply_scheduled_at: null,
             received_at: "2024-01-01T00:00:00Z",
             reply_retry_count: 0,
@@ -299,7 +315,6 @@ describe("Reply Worker", () => {
             politician_id: 1,
             campaign_id: 1,
             sender_hash: "hash1",
-            reply_status: "pending",
             reply_scheduled_at: null,
             received_at: "2024-01-01T00:00:00Z",
             reply_retry_count: 0,
@@ -333,7 +348,6 @@ describe("Reply Worker", () => {
             politician_id: 1,
             campaign_id: 1,
             sender_hash: "hash2",
-            reply_status: "scheduled",
             reply_scheduled_at: "2024-01-01T00:00:00Z",
             received_at: "2024-01-01T00:00:00Z",
             reply_retry_count: 9,
@@ -350,7 +364,6 @@ describe("Reply Worker", () => {
             politician_id: 1,
             campaign_id: 1,
             sender_hash: "hash2",
-            reply_status: "scheduled",
             reply_scheduled_at: "2024-01-01T00:00:00Z",
             received_at: "2024-01-01T00:00:00Z",
             reply_retry_count: 9,
@@ -407,7 +420,6 @@ describe("Reply Worker", () => {
         politician_id: 1,
         campaign_id: 1,
         sender_hash: "hash1",
-        reply_status: "pending" as const,
         reply_scheduled_at: null,
         received_at: "2024-01-01T00:00:00Z",
         reply_retry_count: 2,
@@ -424,7 +436,7 @@ describe("Reply Worker", () => {
         insert: mockInsert,
       });
 
-      vi.spyOn(mockDb, "markMessageAsSent").mockResolvedValue(undefined);
+      vi.spyOn(mockDb, "markMessageReplyDelivered").mockResolvedValue(undefined);
 
       expect(mockFrom).toBeDefined();
       expect(mockInsert).toBeDefined();
@@ -438,7 +450,7 @@ describe("Reply Worker", () => {
         eq: mockEq,
       });
 
-      vi.spyOn(mockDb, "markMessageAsSent").mockResolvedValue(undefined);
+      vi.spyOn(mockDb, "markMessageReplyDelivered").mockResolvedValue(undefined);
 
       expect(mockUpdate).toBeDefined();
       expect(mockEq).toBeDefined();
@@ -452,7 +464,7 @@ describe("Reply Worker", () => {
         insert: mockInsert,
       });
 
-      vi.spyOn(mockDb, "markMessageAsSent").mockRejectedValue(
+      vi.spyOn(mockDb, "markMessageReplyDelivered").mockRejectedValue(
         new Error("Database error"),
       );
 
@@ -468,7 +480,6 @@ describe("Reply Worker", () => {
         politician_id: 1,
         campaign_id: 1,
         sender_hash: "hash1",
-        reply_status: "pending",
         reply_scheduled_at: null,
         received_at: "2024-01-01T00:00:00Z",
         reply_retry_count: 0,
@@ -524,7 +535,7 @@ describe("Reply Worker", () => {
         name: "Jane Doe",
         email: "jane@pol.com",
       });
-      vi.spyOn(mockDb, "markMessageAsSent").mockResolvedValue(undefined);
+      vi.spyOn(mockDb, "markMessageReplyDelivered").mockResolvedValue(undefined);
 
       vi.spyOn(mockDb, "getActiveTemplateForCampaign").mockResolvedValue({
         id: 1,
@@ -564,7 +575,6 @@ describe("Reply Worker", () => {
         politician_id: 1,
         campaign_id: 1,
         sender_hash: "hash2",
-        reply_status: "pending",
         reply_scheduled_at: null,
         received_at: "2024-01-01T00:00:00Z",
         reply_retry_count: 0,
@@ -658,7 +668,6 @@ describe("Reply Worker", () => {
         politician_id: 1,
         campaign_id: 1,
         sender_hash: "hash3",
-        reply_status: "pending",
         reply_scheduled_at: null,
         received_at: "2024-01-01T00:00:00Z",
         reply_retry_count: 0,
@@ -801,7 +810,6 @@ describe("Reply Worker", () => {
           politician_id: 1,
           campaign_id: 1,
           sender_hash: "hash1",
-          reply_status: "pending" as const,
           reply_scheduled_at: null,
           received_at: "2024-01-01T00:00:00Z",
           reply_retry_count: 0,
@@ -812,7 +820,6 @@ describe("Reply Worker", () => {
           politician_id: 1,
           campaign_id: 1,
           sender_hash: "hash2",
-          reply_status: "pending" as const,
           reply_scheduled_at: null,
           received_at: "2024-01-01T00:00:00Z",
           reply_retry_count: 0,
@@ -868,7 +875,6 @@ describe("Reply Worker", () => {
         politician_id: 1,
         campaign_id: 5,
         sender_hash: "hash42",
-        reply_status: "pending" as const,
         reply_scheduled_at: null,
         received_at: "2024-01-01T00:00:00Z",
         reply_retry_count: 0,

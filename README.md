@@ -45,7 +45,7 @@ For performance reasons, it should be noted that it's quite common that the same
 - **Template Management**: Politicians can create custom reply templates for different campaigns
 - **Scheduled Responses**: Flexible timing options (immediate, office hours, before votes)
 - **Personalization**: Support for headers, contact details, and politician branding
-- **Delivery Tracking**: Each send is recorded in `reply_send_logs`; successful sends set `messages.reply_sent_at` and `messages.reply_status = sent` so the worker does not pick the same message again
+- **Delivery Tracking**: Each send is recorded in `reply_send_logs`; successful sends set `messages.reply_sent_at` so the worker does not pick the same message again
 - **Inbound auto-reply once per supporter/campaign**: Only the first classified message for a given sender hash + politician + campaign (`duplicate_rank === 0`) is scheduled for an automatic template reply; later messages from the same supporter in that campaign are not auto-replied by this path
 - **Campaign broadcast**: Each broadcast creates new outbound rows per supporter; running broadcast again can send again (by design) unless you add higher-level product rules
 
@@ -277,6 +277,7 @@ npx tsx bin/cli <command> [options]
 
 - `jmap-fetch`: Fetch new mail from Stalwart and process/store/classify it
 - `reprocess-messages`: Recompute embeddings/classification for already stored messages
+- `send-replies`: Send pending/scheduled auto-replies via the production reply worker (for testing JMAP send / impersonation)
 - `<endpoint>`: Direct API endpoint access (e.g., campaigns, users/:id)
 
 **Campaign Management Examples:**
@@ -309,6 +310,22 @@ npx tsx bin/cli reprocess-messages --since "2024-03-01"
 npx tsx bin/cli reprocess-messages --process-all --dry-run
 npx tsx bin/cli reprocess-messages --process-all --no-move-to-folders
 ```
+
+**Reply send testing (same code path as cron / `worker/process-replies`):**
+
+```bash
+# Process all messages ready to send (pending/scheduled, reply_sent_at null)
+npx tsx bin/cli send-replies
+
+# Send one message by database id
+npx tsx bin/cli send-replies --message-id 42
+
+# All ready replies for a campaign (by id or name hint)
+npx tsx bin/cli send-replies --campaign-id 5
+npx tsx bin/cli send-replies --campaign-name "Climate Action"
+```
+
+Uses `processScheduledReplies` and `processReplyImmediately` from `src/reply_worker.ts`. With `ALL_DOMAIN` set in `.env`, outbound mail uses Stalwart impersonation (`target%RELAY_SERVICE_ACCOUNT_EMAIL`); otherwise the Supabase relay JWT path.
 
 **API Access Examples:**
 
@@ -748,10 +765,10 @@ Use the credential type that matches your auth flow:
 
 After a successful JMAP send, `markMessageReplyDelivered()` in the database layer:
 
-- Sets `messages.reply_status` to `sent` and `messages.reply_sent_at` to the send timestamp
+- Sets `messages.reply_sent_at` to the send timestamp
 - Deletes the short-term `message_contacts` row for that message (PII removed after send)
 
-The reply worker only loads rows where `reply_sent_at` is null and `reply_status` is `pending` or `scheduled`, so **the same message row is never sent twice** by the worker.
+The reply worker only loads rows where `reply_sent_at` is null, the campaign has an active reply template, and `reply_scheduled_at` is due (or null for immediate), so **the same message row is never sent twice** by the worker.
 
 **Audit trail**
 

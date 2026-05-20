@@ -3,6 +3,7 @@ import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
 import { cors } from "hono/cors";
 import Turndown from "turndown";
 import { DatabaseClient, hashEmail, type MessageInsert } from "./database";
+import { applyReplyScheduleForMessage } from "./message_processor";
 import {
   formatEmailContentForEmbedding,
   generateEmbedding,
@@ -497,7 +498,19 @@ async function processEmailForRecipient(
       stalwart_account_id: recipientEmail, // JMAP account is the politician's email
     };
 
-    await db.insertMessage(messageData);
+    const messageId = await db.insertMessage(messageData);
+
+    await db.storeMessageContact({
+      messageId,
+      senderHash,
+      senderEmail,
+      senderName: _senderName,
+      capturedAt: new Date(hookData.timestamp * 1000).toISOString(),
+    });
+
+    if (classification.campaign_id !== null) {
+      await applyReplyScheduleForMessage(db, messageId);
+    }
 
     // Step 7: Generate folder and response
     const folderName = generateFolderName(

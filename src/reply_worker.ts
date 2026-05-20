@@ -3,6 +3,8 @@
 
 import type { DatabaseClient } from "./database";
 import { resolveOutboundEmailIdentity } from "./email_impersonation";
+import { applyReplyScheduleForMessage } from "./message_processor";
+import { isReadyToSend } from "./scheduling";
 import { renderEmailLayout } from "./email_layout";
 import {
   type EmailMessage,
@@ -102,7 +104,6 @@ export interface MessageToProcess {
   politician_id: number;
   campaign_id: number;
   sender_hash: string;
-  reply_status: "pending" | "scheduled";
   reply_scheduled_at: string | null;
   received_at: string;
   reply_retry_count: number;
@@ -201,10 +202,8 @@ async function getMessagesReadyToSend(
 ): Promise<MessageToProcess[]> {
   try {
     // Query messages where:
-    // - reply_status is 'pending' OR 'scheduled'
-    // - reply_scheduled_at is NULL (immediate) OR <= NOW (scheduled time reached)
-    // - reply_sent_at is NULL (not already sent)
-    // - reply_retry_count < MAX_RETRY_ATTEMPTS (haven't exceeded retry limit)
+    // Eligible rows: campaign with active template, duplicate_rank 0, not sent,
+    // reply_scheduled_at due (or null), under retry limit.
     const data = await db.getMessagesReadyToSend(MAX_RETRY_ATTEMPTS);
 
     // Ensure reply_retry_count has a default value of 0
@@ -257,11 +256,21 @@ async function processSingleMessage(
   }
   const jmapConfig = jmapResolve.config;
 
-  // 1. Get the active reply template for this campaign
   const template = await db.getActiveTemplateForCampaign(message.campaign_id);
-
   if (!template) {
     const errorMsg = `No active template found for campaign ${message.campaign_id}`;
+    await handleSendFailure(db, message, errorMsg);
+    throw new Error(errorMsg);
+  }
+
+  const replySchedule = await applyReplyScheduleForMessage(db, message.id);
+  if (!replySchedule) {
+    const errorMsg = `Message ${message.id} is not eligible for auto-reply`;
+    await handleSendFailure(db, message, errorMsg);
+    throw new Error(errorMsg);
+  }
+  if (!isReadyToSend(replySchedule.reply_scheduled_at)) {
+    const errorMsg = `Reply for message ${message.id} is scheduled for later`;
     await handleSendFailure(db, message, errorMsg);
     throw new Error(errorMsg);
   }
@@ -320,11 +329,11 @@ async function processSingleMessage(
     ? new JMAPClient({
       apiUrl: jmapConfig.jmapApiUrl,
       accountId: "",
-        basicUsername: buildStalwartImpersonationLogin(
-          imp.relayAccountEmail,
-          outboundIdentity.fromEmail,
-        ),
-        basicPassword: imp.relayAccountPassword,
+      basicUsername: buildStalwartImpersonationLogin(
+        imp.relayAccountEmail,
+        outboundIdentity.fromEmail,
+      ),
+      basicPassword: imp.relayAccountPassword,
     })
     : new JMAPClient({
       apiUrl: jmapConfig.jmapApiUrl,

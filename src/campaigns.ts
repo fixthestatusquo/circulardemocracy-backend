@@ -319,7 +319,6 @@ app.openapi(broadcastRepliesRoute, async (c) => {
         campaignId,
         politicianId: recipient.politician_id,
         senderHash: recipient.sender_hash,
-        replyStatus: replySchedule.reply_status,
         replyScheduledAt: replySchedule.reply_scheduled_at,
       });
 
