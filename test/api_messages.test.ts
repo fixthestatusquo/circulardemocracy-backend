@@ -29,6 +29,7 @@ const { mockDbInstance } = vi.hoisted(() => ({
     updateMessageFields: vi.fn(),
     getUserPoliticianIds: vi.fn(),
     getActiveTemplateForCampaign: vi.fn(),
+    getMessageForReplyScheduling: vi.fn(),
     upsertSupporter: vi.fn(),
     storeMessageContact: vi.fn(),
     assignMessageToCluster: vi.fn(),
@@ -207,6 +208,16 @@ describe("Messages API Integration", () => {
     });
     mockDbInstance.getDuplicateRank.mockResolvedValue(0);
     mockDbInstance.getActiveTemplateForCampaign.mockResolvedValue(null);
+    mockDbInstance.getMessageForReplyScheduling.mockResolvedValue({
+      id: 100,
+      campaign_id: 10,
+      politician_id: 1,
+      sender_hash: "hashed-email",
+      received_at: validMessage.timestamp,
+      duplicate_rank: 0,
+      reply_sent_at: null,
+      reply_scheduled_at: null,
+    });
     mockDbInstance.insertMessage.mockResolvedValue(100);
     mockDbInstance.assignMessageToCluster.mockResolvedValue(1);
     mockDbInstance.storeMessageContact.mockResolvedValue(undefined);

@@ -3,6 +3,8 @@
 
 import type { DatabaseClient } from "./database";
 import { resolveOutboundEmailIdentity } from "./email_impersonation";
+import { applyReplyScheduleForMessage } from "./message_processor";
+import { isReadyToSend } from "./scheduling";
 import { renderEmailLayout } from "./email_layout";
 import {
   type EmailMessage,
@@ -10,12 +12,20 @@ import {
   JMAPClient,
   resolveMailAccountIdFromSession,
 } from "./jmap_client";
+import {
+  buildStalwartImpersonationLogin,
+  emailHostedOnDomain,
+  normalizeMailDomain,
+  resolveRelayImpersonationCredentials,
+  type StalwartImpersonationConfig,
+} from "./stalwart_jmap";
 import { getSupabaseRelayAccessToken } from "./supabase_relay_token";
 
 export interface WorkerConfig {
   jmapApiUrl: string;
   jmapAccountId: string;
   jmapBearerToken: string;
+  stalwartImpersonation?: StalwartImpersonationConfig;
 }
 
 /** Worker / runtime bindings used for outbound JMAP + Supabase relay auth. */
@@ -26,6 +36,11 @@ export type MailSendBindings = {
   /** Supabase user (email) used for password-grant relay tokens to call JMAP as the service identity. */
   RELAY_SERVICE_ACCOUNT_EMAIL?: string;
   RELAY_SERVICE_ACCOUNT_PASSWORD?: string;
+  /**
+   * When set (e.g. from `ALL_DOMAIN` in `.env`), outbound mail uses Stalwart Basic-auth
+   * impersonation (`fromAddress%RELAY_SERVICE_ACCOUNT_EMAIL`) instead of the Supabase relay Bearer.
+   */
+  ALL_DOMAIN?: string;
 };
 
 function resolveStalwartJmapWorkerConfig(
@@ -38,6 +53,27 @@ function resolveStalwartJmapWorkerConfig(
   if (!jmapApiUrl) {
     return null;
   }
+
+  const allDomainRaw = (env.ALL_DOMAIN || "").trim();
+  if (allDomainRaw) {
+    const relay = resolveRelayImpersonationCredentials(
+      env as Record<string, string | undefined | null>,
+    );
+    if (!relay) {
+      return null;
+    }
+    return {
+      jmapApiUrl,
+      jmapAccountId: "",
+      jmapBearerToken: "",
+      stalwartImpersonation: {
+        allDomainLower: normalizeMailDomain(allDomainRaw),
+        relayAccountEmail: relay.relayEmail,
+        relayAccountPassword: relay.relayPassword,
+      },
+    };
+  }
+
   return {
     jmapApiUrl,
     jmapAccountId: "",
@@ -68,7 +104,6 @@ export interface MessageToProcess {
   politician_id: number;
   campaign_id: number;
   sender_hash: string;
-  reply_status: "pending" | "scheduled";
   reply_scheduled_at: string | null;
   received_at: string;
   reply_retry_count: number;
@@ -167,10 +202,8 @@ async function getMessagesReadyToSend(
 ): Promise<MessageToProcess[]> {
   try {
     // Query messages where:
-    // - reply_status is 'pending' OR 'scheduled'
-    // - reply_scheduled_at is NULL (immediate) OR <= NOW (scheduled time reached)
-    // - reply_sent_at is NULL (not already sent)
-    // - reply_retry_count < MAX_RETRY_ATTEMPTS (haven't exceeded retry limit)
+    // Eligible rows: campaign with active template, duplicate_rank 0, not sent,
+    // reply_scheduled_at due (or null), under retry limit.
     const data = await db.getMessagesReadyToSend(MAX_RETRY_ATTEMPTS);
 
     // Ensure reply_retry_count has a default value of 0
@@ -223,11 +256,21 @@ async function processSingleMessage(
   }
   const jmapConfig = jmapResolve.config;
 
-  // 1. Get the active reply template for this campaign
   const template = await db.getActiveTemplateForCampaign(message.campaign_id);
-
   if (!template) {
     const errorMsg = `No active template found for campaign ${message.campaign_id}`;
+    await handleSendFailure(db, message, errorMsg);
+    throw new Error(errorMsg);
+  }
+
+  const replySchedule = await applyReplyScheduleForMessage(db, message.id);
+  if (!replySchedule) {
+    const errorMsg = `Message ${message.id} is not eligible for auto-reply`;
+    await handleSendFailure(db, message, errorMsg);
+    throw new Error(errorMsg);
+  }
+  if (!isReadyToSend(replySchedule.reply_scheduled_at)) {
+    const errorMsg = `Reply for message ${message.id} is scheduled for later`;
     await handleSendFailure(db, message, errorMsg);
     throw new Error(errorMsg);
   }
@@ -239,12 +282,6 @@ async function processSingleMessage(
     await handleSendFailure(db, message, errorMsg);
     throw new Error(errorMsg);
   }
-
-  const jmapClient = new JMAPClient({
-    apiUrl: jmapConfig.jmapApiUrl,
-    accountId: jmapConfig.jmapAccountId,
-    bearerToken: jmapConfig.jmapBearerToken,
-  });
 
   // 3. Resolve recipient email from short-term contact storage
   const senderEmail = await db.getMessageContactEmail(message.id);
@@ -278,6 +315,31 @@ async function processSingleMessage(
     await handleSendFailure(db, message, errorMsg);
     throw new Error(errorMsg);
   }
+
+  const imp = jmapConfig.stalwartImpersonation;
+  if (imp) {
+    if (!emailHostedOnDomain(outboundIdentity.fromEmail, imp.allDomainLower)) {
+      const errorMsg = `ALL_DOMAIN is ${imp.allDomainLower} but outbound From is not on that domain`;
+      await handleSendFailure(db, message, errorMsg);
+      throw new Error(errorMsg);
+    }
+  }
+
+  const jmapClient = imp
+    ? new JMAPClient({
+      apiUrl: jmapConfig.jmapApiUrl,
+      accountId: "",
+      basicUsername: buildStalwartImpersonationLogin(
+        imp.relayAccountEmail,
+        outboundIdentity.fromEmail,
+      ),
+      basicPassword: imp.relayAccountPassword,
+    })
+    : new JMAPClient({
+      apiUrl: jmapConfig.jmapApiUrl,
+      accountId: jmapConfig.jmapAccountId,
+      bearerToken: jmapConfig.jmapBearerToken,
+    });
 
   const sendContext = await buildSendContext(
     db,
@@ -447,10 +509,21 @@ async function resolveSingleServiceAccountConfig(
   );
   const baseConfig = resolveStalwartJmapWorkerConfig(mergedBindings);
   if (!baseConfig) {
+    const allDomainHint = (mergedBindings.ALL_DOMAIN || "").trim()
+      ? " For ALL_DOMAIN mode, set JMAP_URL plus RELAY_SERVICE_ACCOUNT_EMAIL and RELAY_SERVICE_ACCOUNT_PASSWORD."
+      : "";
     return {
       ok: false,
       reason:
-        "Single JMAP relay service account is not configured. Set JMAP_URL (base mail server URL).",
+        "Single JMAP relay service account is not configured. Set JMAP_URL (base mail server URL)." +
+        allDomainHint,
+    };
+  }
+
+  if (baseConfig.stalwartImpersonation) {
+    return {
+      ok: true,
+      config: baseConfig,
     };
   }
 

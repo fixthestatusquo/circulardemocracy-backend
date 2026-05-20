@@ -15,7 +15,7 @@ describe("CLI Argument Parsing", () => {
 
   beforeEach(() => {
     originalArgv = process.argv;
-    consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => { });
     processExitSpy = vi
       .spyOn(process, "exit")
       .mockImplementation((code?: any) => {
@@ -626,6 +626,60 @@ describe("CLI Argument Parsing", () => {
 
       expect(parsed.user).toBe("testuser");
       expect(parsed.password).toBeUndefined();
+    });
+  });
+
+  describe("send-replies CLI - parseArgs", () => {
+    it("should parse message-id", async () => {
+      const { parseArgs } = await import("../bin/send-replies.js");
+      const result = parseArgs(["--message-id", "42"]);
+      expect(result).toEqual({
+        messageId: 42,
+        campaignId: undefined,
+        campaignName: undefined,
+      });
+    });
+
+    it("should return empty options with no args", async () => {
+      const { parseArgs } = await import("../bin/send-replies.js");
+      const result = parseArgs([]);
+      expect(result).toEqual({
+        messageId: undefined,
+        campaignId: undefined,
+        campaignName: undefined,
+      });
+    });
+
+    it("should return null for help", async () => {
+      const { parseArgs } = await import("../bin/send-replies.js");
+      expect(parseArgs(["--help"])).toBeNull();
+    });
+
+    it("should parse campaign-id", async () => {
+      const { parseArgs } = await import("../bin/send-replies.js");
+      const result = parseArgs(["--campaign-id", "5"]);
+      expect(result).toEqual({
+        messageId: undefined,
+        campaignId: 5,
+        campaignName: undefined,
+      });
+    });
+
+    it("should parse campaign-name", async () => {
+      const { parseArgs } = await import("../bin/send-replies.js");
+      const result = parseArgs(["--campaign-name", "Climate"]);
+      expect(result).toEqual({
+        messageId: undefined,
+        campaignId: undefined,
+        campaignName: "Climate",
+      });
+    });
+
+    it("should reject both campaign-id and campaign-name", async () => {
+      const { parseArgs } = await import("../bin/send-replies.js");
+      expect(() =>
+        parseArgs(["--campaign-id", "1", "--campaign-name", "Climate"]),
+      ).toThrow("process.exit(1)");
     });
   });
 });

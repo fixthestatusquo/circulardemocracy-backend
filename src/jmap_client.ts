@@ -1,6 +1,8 @@
 // JMAP Client for sending emails via Stalwart mail server
 // JMAP (JSON Meta Application Protocol) is a modern email protocol
 
+import { encodeBasicAuth } from "./stalwart_jmap";
+
 /**
  * JMAP session document URL from `JMAP_URL` (trimmed, no trailing slash) + `/.well-known/jmap`.
  */
@@ -16,8 +18,15 @@ export function jmapWellKnownSessionUrl(
 
 export interface JMAPConfig {
   apiUrl: string;
+  /**
+   * JMAP mail account id. When empty and Basic auth is used, the id is read from
+   * the JMAP session response after the first GET to `apiUrl` (well-known flow).
+   */
   accountId: string;
-  bearerToken: string;
+  bearerToken?: string;
+  /** When both are set, HTTP Basic is used instead of Bearer (Stalwart impersonation). */
+  basicUsername?: string;
+  basicPassword?: string;
 }
 
 export interface EmailMessage {
@@ -80,11 +89,18 @@ export class JMAPClient {
   }
 
   private authHeader(): string {
-    const token = this.config.bearerToken.trim();
+    const basicUser = (this.config.basicUsername || "").trim();
+    const basicPass = (this.config.basicPassword || "").trim();
+    if (basicUser && basicPass) {
+      return encodeBasicAuth(basicUser, basicPass);
+    }
+    const token = (this.config.bearerToken || "").trim();
     if (token) {
       return `Bearer ${token}`;
     }
-    throw new Error("JMAP bearer token is required");
+    throw new Error(
+      "JMAP authentication is not configured (set bearerToken for relay or basicUsername/basicPassword for impersonation)",
+    );
   }
 
   /**
@@ -97,6 +113,11 @@ export class JMAPClient {
     }
     const configured = this.config.apiUrl.trim();
     if (!configured.includes(".well-known/jmap")) {
+      if (!(this.config.accountId || "").trim()) {
+        throw new Error(
+          "JMAP accountId is required when apiUrl is not the well-known session URL",
+        );
+      }
       this.resolvedPostApiUrl = configured;
       return this.resolvedPostApiUrl;
     }
@@ -114,6 +135,9 @@ export class JMAPClient {
     const session = (await response.json()) as JmapSessionResponse;
     if (!session?.apiUrl) {
       throw new Error("JMAP session response missing apiUrl");
+    }
+    if (!(this.config.accountId || "").trim()) {
+      this.config.accountId = resolveMailAccountIdFromSession(session);
     }
     this.resolvedPostApiUrl = session.apiUrl;
     return this.resolvedPostApiUrl;

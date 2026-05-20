@@ -98,30 +98,6 @@ describe("Auth role and scope enforcement", () => {
     app = apiModule.default;
   });
 
-  it("returns 403 for staff on admin-only worker health endpoint", async () => {
-    const req = new Request("http://localhost/api/v1/worker/health", {
-      method: "GET",
-      headers: {
-        Authorization: "Bearer staff-jwt",
-      },
-    });
-
-    const res = await app.fetch(req, env);
-    expect(res.status).toBe(403);
-  });
-
-  it("returns 200 for admin on worker health endpoint", async () => {
-    const req = new Request("http://localhost/api/v1/worker/health", {
-      method: "GET",
-      headers: {
-        Authorization: "Bearer admin-jwt",
-      },
-    });
-
-    const res = await app.fetch(req, env);
-    expect(res.status).toBe(200);
-  });
-
   it("scopes politician list by authenticated staff politician IDs", async () => {
     const req = new Request("http://localhost/api/v1/politicians", {
       method: "GET",

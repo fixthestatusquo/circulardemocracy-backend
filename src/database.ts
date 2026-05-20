@@ -40,7 +40,6 @@ export interface MessageInsert {
   received_at: string;
   duplicate_rank: number;
   processing_status: string;
-  reply_status?: "pending" | "scheduled" | null;
   reply_scheduled_at?: string | null;
   sender_flag?: string;
   is_reply?: boolean;
@@ -222,6 +221,31 @@ export class DatabaseClient {
       console.error("Error finding politician:", error);
       return null;
     }
+  }
+
+  /**
+   * Mailbox addresses on {@link domain} used for multi-mailbox Stalwart ingestion
+   * (active politicians + campaign technical addresses).
+   */
+  async listStalwartMailboxAddressesForDomain(domain: string): Promise<string[]> {
+    const d = domain.trim().toLowerCase().replace(/^@/, "");
+    if (!d) {
+      return [];
+    }
+
+    const { data: rows, error } = await this.supabase
+      .from("stalwart_mailbox_addresses")
+      .select("mailbox_address")
+      .eq("email_domain", d);
+
+    if (error) {
+      throw error;
+    }
+
+    return (rows || [])
+      .map((row) => String(row.mailbox_address).trim())
+      .filter(Boolean)
+      .sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
   }
 
   // =============================================================================
@@ -1091,12 +1115,19 @@ export class DatabaseClient {
     senderName?: string;
     capturedAt?: string;
   }): Promise<void> {
+    const senderEmail = params.senderEmail.trim();
+    if (!senderEmail) {
+      throw new Error(
+        `Cannot store message contact: sender email is missing for message ${params.messageId}`,
+      );
+    }
+
     try {
       const { error } = await this.supabase.from("message_contacts").upsert(
         {
           message_id: params.messageId,
           sender_hash: params.senderHash,
-          sender_email: params.senderEmail,
+          sender_email: senderEmail,
           sender_name: params.senderName || null,
           contact_captured_at: params.capturedAt || new Date().toISOString(),
         },
@@ -1125,78 +1156,63 @@ export class DatabaseClient {
         throw error;
       }
 
-      return data && data.length > 0 ? (data[0].sender_email as string) : null;
+      if (data && data.length > 0) {
+        return data[0].sender_email as string;
+      }
+
+      const { data: messageRow, error: messageError } = await this.supabase
+        .from("messages")
+        .select("sender_hash, politician_id, campaign_id")
+        .eq("id", messageId)
+        .limit(1);
+
+      if (messageError) {
+        throw messageError;
+      }
+
+      const message = messageRow?.[0];
+      if (
+        !message?.sender_hash ||
+        message.politician_id == null ||
+        message.campaign_id == null
+      ) {
+        return null;
+      }
+
+      const { data: fallbackContacts, error: fallbackError } =
+        await this.supabase
+          .from("message_contacts")
+          .select(
+            "sender_email, contact_captured_at, messages!inner(politician_id, campaign_id)",
+          )
+          .eq("sender_hash", message.sender_hash)
+          .eq("messages.politician_id", message.politician_id)
+          .eq("messages.campaign_id", message.campaign_id)
+          .is("purged_at", null)
+          .order("contact_captured_at", { ascending: false })
+          .limit(1);
+
+      if (fallbackError) {
+        throw fallbackError;
+      }
+
+      const fallbackEmail = fallbackContacts?.[0]?.sender_email as
+        | string
+        | undefined;
+      if (fallbackEmail) {
+        await this.storeMessageContact({
+          messageId,
+          senderHash: message.sender_hash,
+          senderEmail: fallbackEmail,
+          capturedAt: new Date().toISOString(),
+        });
+        return fallbackEmail;
+      }
+
+      return null;
     } catch (error) {
       console.error("Error fetching message contact email:", error);
       return null;
-    }
-  }
-
-  async getCampaignBroadcastRecipients(campaignId: number): Promise<
-    Array<{
-      sender_hash: string;
-      politician_id: number;
-      email: string;
-    }>
-  > {
-    try {
-      const supporters = await this.getSupportersForCampaign(campaignId);
-      if (supporters.length === 0) {
-        return [];
-      }
-
-      const { data: contacts, error } = await this.supabase
-        .from("message_contacts")
-        .select(
-          "sender_hash,sender_email,contact_captured_at,messages!inner(campaign_id,politician_id)",
-        )
-        .is("purged_at", null);
-
-      if (error) {
-        throw error;
-      }
-
-      const byKey = new Map<
-        string,
-        { email: string; capturedAt: string; sender_hash: string; politician_id: number }
-      >();
-
-      for (const row of (contacts || []) as any[]) {
-        const msg = Array.isArray(row.messages) ? row.messages[0] : row.messages;
-        if (!msg || msg.campaign_id !== campaignId) {
-          continue;
-        }
-        const key = `${campaignId}:${msg.politician_id}:${row.sender_hash}`;
-        const existing = byKey.get(key);
-        if (
-          !existing ||
-          new Date(row.contact_captured_at) > new Date(existing.capturedAt)
-        ) {
-          byKey.set(key, {
-            email: row.sender_email,
-            capturedAt: row.contact_captured_at,
-            sender_hash: row.sender_hash,
-            politician_id: msg.politician_id,
-          });
-        }
-      }
-
-      const supporterKeys = new Set(
-        supporters.map(
-          (s) => `${s.campaign_id}:${s.politician_id}:${s.sender_hash}`,
-        ),
-      );
-
-      return Array.from(byKey.entries())
-        .filter(([key]) => supporterKeys.has(key))
-        .map(([, value]) => ({
-          sender_hash: value.sender_hash,
-          politician_id: value.politician_id,
-          email: value.email,
-        }));
-    } catch (error) {
-      console.error("Error building campaign broadcast recipients:", error);
-      return [];
     }
   }
 
@@ -1246,56 +1262,24 @@ export class DatabaseClient {
   }
 
 
-  /**
-   * Creates a minimal broadcast message for a supporter without storing any PII in the messages table.
-   */
-  async createBroadcastMessageForSupporter(params: {
-    campaignId: number;
-    politicianId: number;
-    senderHash: string;
-    replyStatus?: "pending" | "scheduled";
-    replyScheduledAt?: string | null;
-  }): Promise<number | null> {
-    const {
-      campaignId,
-      politicianId,
-      senderHash,
-      replyStatus = "pending",
-      replyScheduledAt = null,
-    } = params;
+  async getCampaignIdsWithActiveReplyTemplate(): Promise<number[]> {
+    const { data, error } = await this.supabase
+      .from("reply_templates")
+      .select("campaign_id")
+      .eq("active", true);
 
-    try {
-      const externalId = `broadcast:${campaignId}:${senderHash}:${Date.now()}`;
-
-      const { data, error } = await this.supabase
-        .from("messages")
-        .insert({
-          external_id: externalId,
-          channel: "broadcast",
-          channel_source: "broadcast",
-          politician_id: politicianId,
-          sender_hash: senderHash,
-          campaign_id: campaignId,
-          classification_confidence: 0,
-          language: "auto",
-          received_at: new Date().toISOString(),
-          duplicate_rank: 0,
-          processing_status: "processed",
-          reply_status: replyStatus,
-          reply_scheduled_at: replyScheduledAt,
-        })
-        .select("id")
-        .single();
-
-      if (error) {
-        throw error;
-      }
-
-      return data?.id ?? null;
-    } catch (error) {
-      console.error("Error creating broadcast message for supporter:", error);
-      return null;
+    if (error) {
+      console.error("Error listing campaigns with active reply templates:", error);
+      throw error;
     }
+
+    return Array.from(
+      new Set(
+        (data || [])
+          .map((row) => row.campaign_id as number)
+          .filter((id) => typeof id === "number"),
+      ),
+    );
   }
 
   /** Sets message reply fields and removes short-term contact row. */
@@ -1305,7 +1289,6 @@ export class DatabaseClient {
     const { error: msgError } = await this.supabase
       .from("messages")
       .update({
-        reply_status: "sent",
         reply_sent_at: replySentAt,
       })
       .eq("id", messageId);
@@ -1332,7 +1315,6 @@ export class DatabaseClient {
       campaign_id: number | null;
       classification_confidence: number;
       duplicate_rank: number;
-      reply_status: "pending" | "scheduled" | null;
       reply_scheduled_at: string | null;
     }>,
   ): Promise<void> {
@@ -1368,7 +1350,6 @@ export class DatabaseClient {
       }
 
       if (nextRetryAt) {
-        updateData.reply_status = "scheduled";
         updateData.reply_scheduled_at = nextRetryAt;
       }
 
@@ -1394,7 +1375,6 @@ export class DatabaseClient {
       const { error } = await this.supabase
         .from("messages")
         .update({
-          reply_status: null,
           reply_failure_reason: failureReason,
         })
         .eq("id", messageId);
@@ -1408,24 +1388,54 @@ export class DatabaseClient {
     }
   }
 
+  async getMessageForReplyScheduling(messageId: number): Promise<{
+    id: number;
+    campaign_id: number | null;
+    politician_id: number;
+    sender_hash: string;
+    received_at: string;
+    duplicate_rank: number;
+    reply_sent_at: string | null;
+    reply_scheduled_at: string | null;
+  } | null> {
+    const { data, error } = await this.supabase
+      .from("messages")
+      .select(
+        "id, campaign_id, politician_id, sender_hash, received_at, duplicate_rank, reply_sent_at, reply_scheduled_at",
+      )
+      .eq("id", messageId)
+      .limit(1);
+
+    if (error) {
+      throw error;
+    }
+
+    return data && data.length > 0 ? data[0] : null;
+  }
+
   async getMessagesReadyToSend(maxRetryAttempts: number): Promise<Array<{
     id: number;
     external_id: string;
     politician_id: number;
     campaign_id: number;
     sender_hash: string;
-    reply_status: "pending" | "scheduled";
     reply_scheduled_at: string | null;
     received_at: string;
     reply_retry_count: number | null;
   }>> {
+    const campaignIds = await this.getCampaignIdsWithActiveReplyTemplate();
+    if (campaignIds.length === 0) {
+      return [];
+    }
+
     const { data, error } = await this.supabase
       .from("messages")
       .select(
-        "id, external_id, politician_id, campaign_id, sender_hash, reply_status, reply_scheduled_at, received_at, reply_retry_count",
+        "id, external_id, politician_id, campaign_id, sender_hash, reply_scheduled_at, received_at, reply_retry_count",
       )
-      .in("reply_status", ["pending", "scheduled"])
       .is("reply_sent_at", null)
+      .in("campaign_id", campaignIds)
+      .eq("duplicate_rank", 0)
       .lt("reply_retry_count", maxRetryAttempts)
       .or("reply_scheduled_at.is.null,reply_scheduled_at.lte.now()");
 
@@ -1442,19 +1452,24 @@ export class DatabaseClient {
     politician_id: number;
     campaign_id: number;
     sender_hash: string;
-    reply_status: "pending" | "scheduled";
     reply_scheduled_at: string | null;
     received_at: string;
     reply_retry_count: number | null;
   } | null> {
+    const campaignIds = await this.getCampaignIdsWithActiveReplyTemplate();
+    if (campaignIds.length === 0) {
+      return null;
+    }
+
     const { data, error } = await this.supabase
       .from("messages")
       .select(
-        "id, external_id, politician_id, campaign_id, sender_hash, reply_status, reply_scheduled_at, received_at, reply_retry_count",
+        "id, external_id, politician_id, campaign_id, sender_hash, reply_scheduled_at, received_at, reply_retry_count",
       )
       .eq("id", messageId)
-      .in("reply_status", ["pending", "scheduled"])
       .is("reply_sent_at", null)
+      .in("campaign_id", campaignIds)
+      .eq("duplicate_rank", 0)
       .limit(1);
 
     if (error) {
@@ -1499,20 +1514,6 @@ export class DatabaseClient {
     }
 
     return data && data.length > 0 ? data[0] : null;
-  }
-
-  async markMessageAsSent(messageId: number): Promise<void> {
-    const { error } = await this.supabase
-      .from("messages")
-      .update({
-        reply_status: "sent",
-        reply_sent_at: new Date().toISOString(),
-      })
-      .eq("id", messageId);
-
-    if (error) {
-      throw error;
-    }
   }
 
   // =============================================================================

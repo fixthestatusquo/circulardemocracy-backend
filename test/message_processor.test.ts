@@ -23,6 +23,7 @@ const mockDb = {
   insertMessage: vi.fn(),
   updateMessageFields: vi.fn(),
   getActiveTemplateForCampaign: vi.fn(),
+  getMessageForReplyScheduling: vi.fn(),
   upsertSupporter: vi.fn(),
   storeMessageContact: vi.fn(),
   assignMessageToCluster: vi.fn(),
@@ -92,6 +93,16 @@ describe("message_processor", () => {
       confidence: 0.9,
     });
     vi.spyOn(mockDb, "getDuplicateRank").mockResolvedValue(0);
+    vi.spyOn(mockDb, "getMessageForReplyScheduling").mockResolvedValue({
+      id: 100,
+      campaign_id: 10,
+      politician_id: 1,
+      sender_hash: "hash",
+      received_at: "2023-01-01T00:00:00Z",
+      duplicate_rank: 0,
+      reply_sent_at: null,
+      reply_scheduled_at: null,
+    });
     vi.spyOn(mockDb, "getActiveTemplateForCampaign").mockResolvedValue(null);
     vi.spyOn(mockDb, "insertMessage").mockResolvedValue(100);
     vi.spyOn(mockDb, "assignMessageToCluster").mockResolvedValue(1);

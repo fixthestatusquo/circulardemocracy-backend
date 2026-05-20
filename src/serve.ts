@@ -23,6 +23,7 @@ serve(
           process.env.RELAY_SERVICE_ACCOUNT_EMAIL || "",
         RELAY_SERVICE_ACCOUNT_PASSWORD:
           process.env.RELAY_SERVICE_ACCOUNT_PASSWORD || "",
+        ALL_DOMAIN: process.env.ALL_DOMAIN || "",
       });
     },
     port: 3000,

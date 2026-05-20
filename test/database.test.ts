@@ -269,6 +269,65 @@ describe("DatabaseClient", () => {
     });
   });
 
+  describe("listStalwartMailboxAddressesForDomain", () => {
+    it("queries stalwart_mailbox_addresses filtered by email_domain", async () => {
+      mockFetch.mockResolvedValueOnce(
+        createMockResponse([
+          { mailbox_address: "rep@example.org" },
+          { mailbox_address: "campaign@example.org" },
+        ]),
+      );
+
+      const result = await db.listStalwartMailboxAddressesForDomain(
+        "@Example.ORG",
+      );
+
+      expect(result).toEqual(["campaign@example.org", "rep@example.org"]);
+      const url = mockFetch.mock.calls[0][0] as string;
+      expect(url).toContain(
+        "https://test.supabase.co/rest/v1/stalwart_mailbox_addresses",
+      );
+      expect(url).toContain("email_domain=eq.example.org");
+      expect(url).toContain("select=mailbox_address");
+    });
+
+    it("returns empty array for blank domain", async () => {
+      const result = await db.listStalwartMailboxAddressesForDomain("  ");
+      expect(result).toEqual([]);
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("getCampaignIdsWithActiveReplyTemplate", () => {
+    it("filters reply_templates by active column", async () => {
+      const eq = vi.fn().mockResolvedValue({
+        data: [{ campaign_id: 5 }, { campaign_id: 5 }, { campaign_id: 7 }],
+        error: null,
+      });
+      const select = vi.fn().mockReturnValue({ eq });
+      const from = vi.fn().mockReturnValue({ select });
+      vi.spyOn(db.supabase, "from").mockImplementation(from as never);
+
+      const result = await db.getCampaignIdsWithActiveReplyTemplate();
+
+      expect(from).toHaveBeenCalledWith("reply_templates");
+      expect(select).toHaveBeenCalledWith("campaign_id");
+      expect(eq).toHaveBeenCalledWith("active", true);
+      expect(result).toEqual([5, 7]);
+    });
+
+    it("throws on query error instead of returning an empty list", async () => {
+      const dbError = { code: "42703", message: "column does not exist" };
+      const eq = vi.fn().mockResolvedValue({ data: null, error: dbError });
+      const select = vi.fn().mockReturnValue({ eq });
+      vi.spyOn(db.supabase, "from").mockReturnValue({ select } as never);
+
+      await expect(db.getCampaignIdsWithActiveReplyTemplate()).rejects.toEqual(
+        dbError,
+      );
+    });
+  });
+
   describe("insertMessage", () => {
     it("should insert message and return ID", async () => {
       const mockMessage = {
