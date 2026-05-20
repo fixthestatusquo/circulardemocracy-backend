@@ -981,6 +981,7 @@ Commands:
   create-campaign-from-cluster  Assign cluster to campaign (match, merge, or create + messages)
   closest-campaigns     Find closest campaigns for a message
   reprocess-messages    Reprocess and reclassify existing messages
+  send-replies          Send pending/scheduled auto-replies (reply worker)
   <endpoint>            API endpoint path (e.g., campaigns, users/:id)
 
 Outbound JMAP (reply worker): set JMAP_URL to the mail server base URL; session URL is
@@ -1028,6 +1029,11 @@ Message Reprocessing:
       --username <user>     JMAP mailbox email (default: JMAP_SERVICE_ACCOUNT_EMAIL env)
       --password <pass>     JMAP app password (default: JMAP_SERVICE_ACCOUNT_PASSWORD env)
 
+Reply sending (test):
+  send-replies [--message-id <id> | --campaign-id <id> | --campaign-name <hint>]
+    Uses processScheduledReplies / processReplyImmediately from reply_worker (same as cron/API).
+    Set ALL_DOMAIN + RELAY_* in .env for Stalwart impersonation; otherwise Supabase relay JWT.
+
 API Options:
   -m, --method     HTTP method (GET, POST, PUT, DELETE) [default: GET]
   -s, --server     Server to use (index or description) [default: 0]
@@ -1047,6 +1053,10 @@ Examples:
   ./cli closest-campaigns --message "I support GMO demeter policy" --limit 5
   ./cli reprocess-messages --process-all
   ./cli reprocess-messages --campaign-id 5 --limit 100
+  ./cli send-replies
+  ./cli send-replies --message-id 42
+  ./cli send-replies --campaign-id 5
+  ./cli send-replies --campaign-name "Climate Action"
   ./cli campaigns --name=example --status=active
   ./cli campaigns/:id --id=123 --name=updated --method=PUT
   ./cli --list-servers
@@ -1147,6 +1157,26 @@ if (command === 'reprocess-messages') {
   });
 
   // Wait for child process to complete
+  await new Promise((resolve) => {
+    child.on('close', resolve);
+  });
+
+  process.exit(0);
+}
+
+if (command === 'send-replies') {
+  const { spawn } = await import('child_process');
+  const args = process.argv.slice(3);
+
+  const child = spawn('npx', ['tsx', 'bin/send-replies.ts', ...args], {
+    stdio: 'inherit',
+    env: process.env
+  });
+
+  child.on('exit', (code) => {
+    process.exit(code || 0);
+  });
+
   await new Promise((resolve) => {
     child.on('close', resolve);
   });

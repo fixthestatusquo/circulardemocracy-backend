@@ -64,7 +64,7 @@ Set `JMAP_URL`, `RELAY_SERVICE_ACCOUNT_EMAIL`, and `RELAY_SERVICE_ACCOUNT_PASSWO
 
 ### Reply sends (brief)
 
-- Each `messages` row is sent at most once by the worker: after success, `reply_sent_at` is set and `reply_status` is `sent`.
+- Each `messages` row is sent at most once by the worker: after success, `reply_sent_at` is set.
 - Inbound auto-replies are only scheduled for the first message per supporter + campaign (`duplicate_rank === 0`); see README “Reply deduplication and persistence” for full detail.
 
 ## Production Deployment

@@ -37,7 +37,6 @@ describe("Scheduling", () => {
           "2024-01-15T22:00:00Z",
         );
 
-        expect(result.reply_status).toBe("pending");
         expect(result.reply_scheduled_at).toBeNull();
         expect(result.send_immediately).toBe(true);
       });
@@ -51,7 +50,6 @@ describe("Scheduling", () => {
           "2024-01-15T08:00:00Z",
         );
 
-        expect(result.reply_status).toBe("pending");
         expect(result.reply_scheduled_at).toBeNull();
         expect(result.send_immediately).toBe(true);
       });
@@ -63,7 +61,6 @@ describe("Scheduling", () => {
           "2024-01-15T18:00:00Z",
         );
 
-        expect(result.reply_status).toBe("scheduled");
         expect(result.reply_scheduled_at).not.toBeNull();
         expect(result.send_immediately).toBe(false);
 
@@ -78,7 +75,6 @@ describe("Scheduling", () => {
           "2024-01-19T18:00:00Z",
         );
 
-        expect(result.reply_status).toBe("scheduled");
         expect(result.send_immediately).toBe(false);
         expect(result.reply_scheduled_at).not.toBeNull();
         const scheduledDate = new Date(result.reply_scheduled_at!);
@@ -92,7 +88,6 @@ describe("Scheduling", () => {
           "2024-01-20T12:00:00Z",
         );
 
-        expect(result.reply_status).toBe("scheduled");
         const scheduledDate = new Date(result.reply_scheduled_at!);
         expect(scheduledDate.getUTCDay()).toBe(1);
       });
@@ -104,7 +99,6 @@ describe("Scheduling", () => {
           "2024-01-15T05:00:00Z",
         );
 
-        expect(result.reply_status).toBe("scheduled");
         expect(result.send_immediately).toBe(false);
         expect(result.reply_scheduled_at).not.toBeNull();
         const scheduledDate = new Date(result.reply_scheduled_at!);
@@ -121,7 +115,6 @@ describe("Scheduling", () => {
           "2024-01-15T12:00:00Z",
         );
 
-        expect(result.reply_status).toBe("scheduled");
         expect(result.reply_scheduled_at).toContain("2024-02-01T10:00:00");
         expect(result.send_immediately).toBe(false);
       });
@@ -474,6 +467,7 @@ describe("Message Processor Auto-Reply", () => {
     insertMessage: vi.fn(),
     updateMessageFields: vi.fn(),
     getActiveTemplateForCampaign: vi.fn(),
+    getMessageForReplyScheduling: vi.fn(),
     upsertSupporter: vi.fn(),
     storeMessageContact: vi.fn(),
     assignMessageToCluster: vi.fn(),
@@ -487,6 +481,18 @@ describe("Message Processor Auto-Reply", () => {
     vi.clearAllMocks();
     vi.mocked(mockDb.upsertSupporter).mockResolvedValue(1);
     vi.mocked(mockDb.storeMessageContact).mockResolvedValue(undefined);
+    vi.mocked(mockDb.getMessageForReplyScheduling).mockImplementation(
+      async (messageId: number) => ({
+        id: messageId,
+        campaign_id: 10,
+        politician_id: 1,
+        sender_hash: "hash",
+        received_at: "2024-01-15T10:00:00Z",
+        duplicate_rank: 0,
+        reply_sent_at: null,
+        reply_scheduled_at: null,
+      }),
+    );
   });
 
   const validInput: MessageInput = {
@@ -531,7 +537,6 @@ describe("Message Processor Auto-Reply", () => {
     const result = await processMessage(mockDb, mockAi as any, validInput);
 
     expect(result.success).toBe(true);
-    expect(result.reply_status).toBe("pending");
     expect(result.reply_scheduled_at).toBeNull();
     expect(result.send_immediately).toBe(true);
     expect(mockDb.storeMessageContact).toHaveBeenCalledWith(
@@ -569,7 +574,7 @@ describe("Message Processor Auto-Reply", () => {
 
     expect(result.success).toBe(true);
     expect(result.duplicate_rank).toBe(1);
-    expect(result.reply_status).toBeNull();
+    expect(result.reply_scheduled_at).toBeNull();
     expect(mockDb.getActiveTemplateForCampaign).not.toHaveBeenCalled();
     expect(mockDb.upsertSupporter).toHaveBeenCalled();
     expect(mockDb.storeMessageContact).toHaveBeenCalled();
@@ -594,7 +599,6 @@ describe("Message Processor Auto-Reply", () => {
     const result = await processMessage(mockDb, mockAi as any, validInput);
 
     expect(result.success).toBe(true);
-    expect(result.reply_status).toBeNull();
     expect(result.reply_scheduled_at).toBeNull();
     expect(mockDb.upsertSupporter).toHaveBeenCalled();
     expect(mockDb.storeMessageContact).toHaveBeenCalled();

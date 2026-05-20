@@ -3,7 +3,11 @@ import {
   formatEmailContentForEmbedding,
   generateEmbedding,
 } from "./embedding_service";
-import { calculateReplySchedule } from "./scheduling";
+import {
+  calculateReplySchedule,
+  isReadyToSend,
+  type ScheduleResult,
+} from "./scheduling";
 
 export class PoliticianNotFoundError extends Error {
   constructor(email: string) {
@@ -12,7 +16,6 @@ export class PoliticianNotFoundError extends Error {
   }
 }
 
-// Define Ai interface locally to avoid dependency issues if global type is not available
 export interface Ai {
   // biome-ignore lint/suspicious/noExplicitAny: AI inputs/outputs are dynamic
   run(model: string, inputs: any): Promise<any>;
@@ -42,10 +45,50 @@ export interface MessageProcessingResult {
   campaign_name?: string;
   confidence?: number;
   duplicate_rank?: number;
-  reply_status?: "pending" | "scheduled" | null;
   reply_scheduled_at?: string | null;
   send_immediately?: boolean;
   errors?: string[];
+}
+
+/**
+ * Applies send timing from the campaign's active template when the message is eligible:
+ * campaign assigned, duplicate_rank 0, not yet sent. Returns null when no auto-reply applies.
+ */
+export async function applyReplyScheduleForMessage(
+  db: DatabaseClient,
+  messageId: number,
+): Promise<ScheduleResult | null> {
+  const row = await db.getMessageForReplyScheduling(messageId);
+  if (!row || row.reply_sent_at) {
+    return null;
+  }
+  if (row.campaign_id == null || row.duplicate_rank !== 0) {
+    return null;
+  }
+
+  const activeTemplate = await db.getActiveTemplateForCampaign(row.campaign_id);
+  if (!activeTemplate) {
+    return null;
+  }
+
+  if (row.reply_scheduled_at && !isReadyToSend(row.reply_scheduled_at)) {
+    return {
+      reply_scheduled_at: row.reply_scheduled_at,
+      send_immediately: false,
+    };
+  }
+
+  const replySchedule = calculateReplySchedule(
+    activeTemplate.send_timing as "immediate" | "office_hours" | "scheduled",
+    activeTemplate.scheduled_for,
+    row.received_at,
+  );
+
+  await db.updateMessageFields(messageId, {
+    reply_scheduled_at: replySchedule.reply_scheduled_at,
+  });
+
+  return replySchedule;
 }
 
 export async function processMessage(
@@ -53,20 +96,17 @@ export async function processMessage(
   ai: Ai,
   data: MessageInput,
 ): Promise<MessageProcessingResult> {
-  // 1. Politician Lookup
   const politician = await db.findPoliticianByEmail(data.recipient_email);
   if (!politician) {
     throw new PoliticianNotFoundError(data.recipient_email);
   }
 
-  // 2. Duplicate Check
   const existingMessage = await db.getMessageByExternalId(
     data.external_id,
     data.channel_source || "unknown",
   );
 
   if (existingMessage) {
-    // Determine campaign name safely
     let campaignName = "Unknown";
     let campaignId = existingMessage.campaign_id;
 
@@ -91,30 +131,25 @@ export async function processMessage(
     };
   }
 
-  // 3. Embedding
   const body = data.text_content || data.message;
   const textForEmbedding = formatEmailContentForEmbedding(data.subject, body);
   const embedding = await generateEmbedding(ai, textForEmbedding);
 
-  // 4. Storage (PRIVACY: only metadata, no PII)
-  // Use sender_email ONLY to generate hash, then discard it
   const senderHash = await hashEmail(data.sender_email);
 
-  // Insert message first without campaign/cluster assignment
   const messageData: MessageInsert = {
     external_id: data.external_id,
     channel: "api",
     channel_source: data.channel_source || "unknown",
     politician_id: politician.id,
     sender_hash: senderHash,
-    campaign_id: null as any, // Will be set by classification
-    classification_confidence: 0, // Will be updated by classification
+    campaign_id: null as any,
+    classification_confidence: 0,
     message_embedding: embedding,
     language: "auto",
     received_at: data.timestamp,
-    duplicate_rank: 0, // Will be updated after classification
+    duplicate_rank: 0,
     processing_status: "processed",
-    reply_status: null,
     reply_scheduled_at: null,
     sender_flag: data.sender_flag,
     is_reply: data.is_reply,
@@ -124,7 +159,14 @@ export async function processMessage(
 
   const messageId = await db.insertMessage(messageData);
 
-  // 5. Unified classification and cluster assignment
+  await db.storeMessageContact({
+    messageId,
+    senderHash,
+    senderEmail: data.sender_email,
+    senderName: data.sender_name,
+    capturedAt: data.timestamp,
+  });
+
   const classification = await db.classifyAndAssignToCluster(
     messageId,
     embedding,
@@ -132,7 +174,6 @@ export async function processMessage(
     data.campaign_hint,
   );
 
-  // 6. Update duplicate rank if message has a campaign assigned
   let duplicateRank = 0;
   if (classification.campaign_id !== null) {
     duplicateRank = await db.getDuplicateRank(
@@ -140,53 +181,23 @@ export async function processMessage(
       politician.id,
       classification.campaign_id,
     );
-    // Update the message with the duplicate rank
     await db.updateMessageFields(messageId, {
       duplicate_rank: duplicateRank,
       classification_confidence: classification.confidence,
     });
 
-    // Ensure supporter audience is built from inbound messages for campaign context.
     await db.upsertSupporter(
       classification.campaign_id,
       politician.id,
       senderHash,
       data.timestamp,
     );
-
-    await db.storeMessageContact({
-      messageId,
-      senderHash,
-      senderEmail: data.sender_email,
-      senderName: data.sender_name,
-      capturedAt: data.timestamp,
-    });
   }
 
-  // 7. Determine reply scheduling (only for first message from sender with campaign)
-  let replySchedule = null;
-  if (duplicateRank === 0 && classification.campaign_id !== null) {
-    // Get active template for this campaign to determine send_timing
-    const activeTemplate = await db.getActiveTemplateForCampaign(
-      classification.campaign_id,
-    );
-
-    if (activeTemplate) {
-      replySchedule = calculateReplySchedule(
-        activeTemplate.send_timing as
-          | "immediate"
-          | "office_hours"
-          | "scheduled",
-        activeTemplate.scheduled_for,
-        data.timestamp,
-      );
-      // Update reply status
-      await db.updateMessageFields(messageId, {
-        reply_status: replySchedule.reply_status,
-        reply_scheduled_at: replySchedule.reply_scheduled_at,
-      });
-    }
-  }
+  const replySchedule =
+    duplicateRank === 0 && classification.campaign_id !== null
+      ? await applyReplyScheduleForMessage(db, messageId)
+      : null;
 
   return {
     success: true,
@@ -196,8 +207,7 @@ export async function processMessage(
     campaign_name: classification.campaign_name ?? undefined,
     confidence: classification.confidence,
     duplicate_rank: duplicateRank,
-    reply_status: replySchedule?.reply_status || null,
-    reply_scheduled_at: replySchedule?.reply_scheduled_at || null,
-    send_immediately: replySchedule?.send_immediately || false,
+    reply_scheduled_at: replySchedule?.reply_scheduled_at ?? null,
+    send_immediately: replySchedule?.send_immediately ?? false,
   };
 }
