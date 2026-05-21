@@ -1,6 +1,7 @@
 // JMAP Client for sending emails via Stalwart mail server
 // JMAP (JSON Meta Application Protocol) is a modern email protocol
 
+import { normalizeEmailSubject } from "./email_subject";
 import { encodeBasicAuth } from "./stalwart_jmap";
 
 /**
@@ -413,7 +414,7 @@ export class JMAPClient {
       },
       from: [fromEntry],
       to: email.to.map((addr) => ({ email: addr })),
-      subject: email.subject,
+      subject: normalizeEmailSubject(email.subject),
     };
 
     // Add Reply-To if specified

@@ -1,5 +1,6 @@
 // Template Service - Business logic for reply template management
 import type { DatabaseClient, ReplyTemplate } from "./database";
+import { normalizeEmailSubject } from "./email_subject";
 import { validateMarkdownForEmail } from "./markdown";
 
 export interface TemplateValidationError {
@@ -86,15 +87,20 @@ export async function createReplyTemplate(
   }
 
   try {
+    const payload: CreateTemplateInput = {
+      ...data,
+      subject: normalizeEmailSubject(data.subject),
+    };
+
     // If this template is being set as active, deactivate other templates for this campaign
-    if (data.active) {
-      await db.deactivateOtherTemplates(data.campaign_id);
+    if (payload.active) {
+      await db.deactivateOtherTemplates(payload.campaign_id);
     }
 
     // Create the template using Supabase client
     const template = await db.request<ReplyTemplate[]>("/reply_templates", {
       method: "POST",
-      body: JSON.stringify(data),
+      body: JSON.stringify(payload),
     });
 
     return { success: true, template: template[0] };
@@ -150,8 +156,13 @@ export async function updateReplyTemplate(
       );
     }
 
+    const payload: UpdateTemplateInput = { ...updates };
+    if (payload.subject !== undefined) {
+      payload.subject = normalizeEmailSubject(payload.subject);
+    }
+
     // Update the template
-    const updatedTemplate = await db.updateReplyTemplate(templateId, updates);
+    const updatedTemplate = await db.updateReplyTemplate(templateId, payload);
     return { success: true, template: updatedTemplate };
   } catch (error) {
     console.error("Error updating template:", error);
