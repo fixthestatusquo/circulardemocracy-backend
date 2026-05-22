@@ -195,13 +195,7 @@ All HTTP routes are under `/api/v1/…` and documented in [`doc/openapi.json`](d
 | Politicians | `GET` | `/api/v1/politicians`, `/api/v1/politicians/{id}` |
 | Reply templates | `GET`, `POST`, `PUT`, `DELETE` | `/api/v1/reply-templates`, `/api/v1/reply-templates/{id}`, `/api/v1/reply-templates/{id}/toggle-active` |
 
-**Removed (no longer in this codebase):**
 
-- `POST /api/v1/worker/process-replies` — manual HTTP trigger for the reply worker
-- `GET /api/v1/worker/health` — worker health probe tied to that flow
-- `POST /api/v1/campaigns/{id}/replies/broadcast` — campaign-wide broadcast send
-
-Outbound template replies are **not** started by these HTTP routes. Ingest (`POST /api/v1/messages`, Stalwart webhook, CLI) only classifies and schedules; JMAP send runs on the **Cloudflare cron** reply worker or via **`bin/cli send-replies`** for local testing.
 
 ### REST message ingest
 

@@ -68,10 +68,10 @@ Set `JMAP_URL`, `RELAY_SERVICE_ACCOUNT_EMAIL`, and `RELAY_SERVICE_ACCOUNT_PASSWO
 
 ### Reply sends (brief)
 
-- There is **no** HTTP API to trigger sends (`/api/v1/worker/process-replies` and campaign broadcast were removed).
+
 - Production sends run on the Cloudflare cron reply worker; locally use `npx tsx bin/cli send-replies`.
 - Each `messages` row is sent at most once by the worker: after success, `reply_sent_at` is set.
-- The `reply_status` column was dropped (migration `20260520180000_drop_reply_status.sql`); eligibility uses `reply_sent_at`, `reply_scheduled_at`, and active templates.
+
 - Inbound auto-replies are only scheduled for the first message per supporter + campaign (`duplicate_rank === 0`); see README “Reply deduplication and persistence” for full detail.
 
 ## Production Deployment
