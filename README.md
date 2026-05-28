@@ -411,6 +411,7 @@ npm run jmap-fetch -- [--user <username>] [--password <password>] [options]
 
 - `--user <username>`: JMAP mailbox email (default: `JMAP_SERVICE_ACCOUNT_EMAIL` env)
 - `--password <password>`: JMAP app password (default: `JMAP_SERVICE_ACCOUNT_PASSWORD` env)
+- `--folder <name>`: Additional folder/mailbox name to fetch from (optional; additive with Inbox)
 - `--process-all`: Fetch all available messages (default when no filter provided)
 - `--since <date>`: Fetch messages received after a date (ISO 8601)
 - `--message-id <id>`: Fetch one specific message (JMAP ID or Message-ID header)
@@ -420,8 +421,10 @@ npm run jmap-fetch -- [--user <username>] [--password <password>] [options]
 **Behavior notes:**
 
 - The JMAP mail account id is taken from the session (`primaryAccounts` mail) after login.
+- Fetch scope is Inbox by default; when `--folder` is provided, fetch scope becomes Inbox + that folder.
 - Normal runs automatically move each successfully processed message to a campaign folder in Stalwart.
 - If no campaign match is found, the message is stored with `campaign_id = null` and moved to the `Unclassified` folder.
+- Messages already marked as processed in the database are skipped (idempotent behavior).
 - Dry runs never move messages.
 
 **Examples:**
@@ -432,6 +435,9 @@ npm run jmap-fetch -- --process-all
 
 # Fetch messages since a specific date
 npm run jmap-fetch -- --since "2024-03-01"
+
+# Fetch from Inbox + an additional folder
+npm run jmap-fetch -- --process-all --folder "Junk Mail"
 
 # Fetch a specific message
 npm run jmap-fetch -- --message-id "specific-id"
