@@ -168,6 +168,41 @@ function getSupabase() {
   return createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 }
 
+function getServiceSupabase() {
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const supabaseKey = process.env.SUPABASE_KEY;
+  if (!supabaseUrl || !supabaseKey) {
+    console.error('Error: SUPABASE_URL and SUPABASE_KEY environment variables must be set');
+    process.exit(1);
+  }
+  return createClient(supabaseUrl, supabaseKey);
+}
+
+async function findAuthUserIdByEmail(supabase, email) {
+  const normalized = email.trim().toLowerCase();
+  let page = 1;
+  const perPage = 1000;
+
+  while (true) {
+    const { data, error } = await supabase.auth.admin.listUsers({ page, perPage });
+    if (error) {
+      throw new Error(`Failed to list auth users: ${error.message}`);
+    }
+
+    const match = data.users.find(
+      (user) => user.email?.trim().toLowerCase() === normalized,
+    );
+    if (match) {
+      return match.id;
+    }
+
+    if (data.users.length < perPage) {
+      return null;
+    }
+    page += 1;
+  }
+}
+
 async function login() {
   let email = argv.email;
   let password = argv.password;
@@ -330,45 +365,67 @@ async function addPolitician() {
     process.exit(1);
   }
 
-  try {
-    const supabaseUrl = process.env.SUPABASE_URL;
-    const supabaseKey = process.env.SUPABASE_KEY;
-    if (!supabaseUrl || !supabaseKey) {
-      console.error('Error: SUPABASE_URL and SUPABASE_KEY environment variables must be set');
-      process.exit(1);
-    }
+  const supabase = getServiceSupabase();
 
-    const supabase = createClient(supabaseUrl, supabaseKey);
+  const insertData = {
+    email,
+    name,
+    active: true,
+    country: country || null,
+    region: region || null,
+    level: level || null,
+    position: position || null,
+    party: party || null,
+  };
 
-    const insertData = {
-      email,
-      name,
-      active: true,
-      country: country || null,
-      region: region || null,
-      level: level || null,
-      position: position || null,
-      party: party || null,
-    };
+  console.log(`💾 Creating politician: ${name} <${email}>`);
+  const { data: createdPolitician, error: createError } = await supabase
+    .from('politicians')
+    .insert(insertData)
+    .select()
+    .single();
 
-    console.log(`💾 Creating politician: ${name} <${email}>`);
-    const { data: createdPolitician, error: createError } = await supabase
-      .from('politicians')
-      .insert(insertData)
-      .select()
-      .single();
-
-    if (createError) {
-      console.error(`❌ Error creating politician: ${createError.message}`);
-      process.exit(1);
-    }
-
-    console.log('✅ Politician created successfully!');
-    console.log(JSON.stringify(createdPolitician, null, 2));
-  } catch (error) {
-    console.error('❌ Failed to create politician:', error.message);
+  if (createError) {
+    console.error(`❌ Error creating politician: ${createError.message}`);
     process.exit(1);
   }
+
+  console.log(`🔗 Linking auth user to politician ${createdPolitician.id}...`);
+  let authUserId;
+  try {
+    authUserId = await findAuthUserIdByEmail(supabase, email);
+  } catch (error) {
+    await supabase.from('politicians').delete().eq('id', createdPolitician.id);
+    console.error(`❌ ${error.message}`);
+    process.exit(1);
+  }
+
+  if (!authUserId) {
+    await supabase.from('politicians').delete().eq('id', createdPolitician.id);
+    console.error(`❌ No Supabase auth user found for email: ${email}`);
+    console.error('   Create the auth account first, then run add-politician again.');
+    process.exit(1);
+  }
+
+  const staffRole = position?.trim() ? position.trim().toLowerCase() : 'staff';
+  const { data: staffRow, error: staffError } = await supabase
+    .from('politician_staff')
+    .insert({
+      politician_id: createdPolitician.id,
+      user_id: authUserId,
+      role: staffRole,
+    })
+    .select()
+    .single();
+
+  if (staffError) {
+    await supabase.from('politicians').delete().eq('id', createdPolitician.id);
+    console.error(`❌ Error linking politician staff: ${staffError.message}`);
+    process.exit(1);
+  }
+
+  console.log('✅ Politician created and staff link added!');
+  console.log(JSON.stringify({ politician: createdPolitician, staff: staffRow }, null, 2));
 }
 
 async function updateCampaign() {
@@ -1040,7 +1097,7 @@ JMAP_URL + "/.well-known/jmap". The mail account id is read from the session res
 
 Campaign Management:
   add-politician --email <email> --name <name> [--country <ISO2>] [--region <region>] [--level <level>] [--position <position>] [--party <party>]
-    Create politician directly in Supabase with active=true
+    Create politician in Supabase (active=true) and add politician_staff for the auth user with matching email
 
   add-campaign --name <name> [--text <text>] [--description <desc>]
     Create campaign directly in Supabase (slug auto-generated from name)

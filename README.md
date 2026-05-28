@@ -261,7 +261,7 @@ npx tsx bin/cli <command> [options]
 
 **Politician Management:**
 
-- `add-politician`: Insert a new row into `politicians` via Supabase with `active = true`
+- `add-politician`: Insert a new row into `politicians` via Supabase with `active = true`, then link the Supabase auth user with the same email in `politician_staff` (rolls back the politician row if no auth user or staff insert fails)
 
 **Required arguments:** `--email`, `--name`
 
