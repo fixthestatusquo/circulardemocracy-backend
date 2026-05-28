@@ -630,23 +630,23 @@ describe("CLI Argument Parsing", () => {
   });
 
   describe("send-replies CLI - parseArgs", () => {
-    it("should parse message-id", async () => {
-      const { parseArgs } = await import("../bin/send-replies.js");
-      const result = parseArgs(["--message-id", "42"]);
-      expect(result).toEqual({
-        messageId: 42,
-        campaignId: undefined,
-        campaignName: undefined,
-      });
-    });
-
     it("should return empty options with no args", async () => {
       const { parseArgs } = await import("../bin/send-replies.js");
       const result = parseArgs([]);
       expect(result).toEqual({
-        messageId: undefined,
         campaignId: undefined,
         campaignName: undefined,
+        dryRun: false,
+      });
+    });
+
+    it("should parse --dry-run flag", async () => {
+      const { parseArgs } = await import("../bin/send-replies.js");
+      const result = parseArgs(["--dry-run"]);
+      expect(result).toEqual({
+        campaignId: undefined,
+        campaignName: undefined,
+        dryRun: true,
       });
     });
 
@@ -659,9 +659,9 @@ describe("CLI Argument Parsing", () => {
       const { parseArgs } = await import("../bin/send-replies.js");
       const result = parseArgs(["--campaign-id", "5"]);
       expect(result).toEqual({
-        messageId: undefined,
         campaignId: 5,
         campaignName: undefined,
+        dryRun: false,
       });
     });
 
@@ -669,9 +669,9 @@ describe("CLI Argument Parsing", () => {
       const { parseArgs } = await import("../bin/send-replies.js");
       const result = parseArgs(["--campaign-name", "Climate"]);
       expect(result).toEqual({
-        messageId: undefined,
         campaignId: undefined,
         campaignName: "Climate",
+        dryRun: false,
       });
     });
 

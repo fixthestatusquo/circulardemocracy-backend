@@ -315,12 +315,13 @@ npx tsx bin/cli reprocess-messages --process-all --no-move-to-folders
 # Process all messages ready to send (pending/scheduled, reply_sent_at null)
 npx tsx bin/cli send-replies
 
-# Send one message by database id
-npx tsx bin/cli send-replies --message-id 42
+# Preview counts per campaign without sending
+npx tsx bin/cli send-replies --dry-run
 
 # All ready replies for a campaign (by id or name hint)
 npx tsx bin/cli send-replies --campaign-id 5
 npx tsx bin/cli send-replies --campaign-name "Climate Action"
+npx tsx bin/cli send-replies --dry-run --campaign-name "Climate Action"
 ```
 
 Uses `processScheduledReplies` and `processReplyImmediately` from `src/reply_worker.ts`. With `ALL_DOMAIN` set in `.env`, outbound mail uses Stalwart impersonation (`target%RELAY_SERVICE_ACCOUNT_EMAIL`); otherwise the Supabase relay JWT path.

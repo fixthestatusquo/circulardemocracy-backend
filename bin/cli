@@ -1028,8 +1028,9 @@ Message Reprocessing:
       --password <pass>     JMAP app password (default: JMAP_SERVICE_ACCOUNT_PASSWORD env)
 
 Reply sending (test):
-  send-replies [--message-id <id> | --campaign-id <id> | --campaign-name <hint>]
+  send-replies [--campaign-id <id> | --campaign-name <hint>] [--dry-run]
     Uses processScheduledReplies / processReplyImmediately from reply_worker (same as Cloudflare cron).
+    --dry-run previews eligible replies and per-campaign counts without sending mail.
     Set ALL_DOMAIN + RELAY_* in .env for Stalwart impersonation; otherwise Supabase relay JWT.
 
 API Options:
@@ -1053,7 +1054,7 @@ Examples:
   ./cli reprocess-messages --process-all
   ./cli reprocess-messages --campaign-id 5 --limit 100
   ./cli send-replies
-  ./cli send-replies --message-id 42
+  ./cli send-replies --dry-run
   ./cli send-replies --campaign-id 5
   ./cli send-replies --campaign-name "Climate Action"
   ./cli campaigns --name=example --status=active
