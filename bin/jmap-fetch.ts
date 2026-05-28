@@ -71,6 +71,7 @@ interface StalwartFetchOptions {
   since?: string;
   messageId?: string;
   dryRun: boolean;
+  folder?: string;
 }
 
 interface JmapSessionResponse {
@@ -159,6 +160,13 @@ function parseStalwartArgs(args: string[]): StalwartFetchOptions {
     process.exit(1);
   }
 
+  const folderValue = parsed.folder;
+  if (typeof folderValue === "string" && folderValue.trim().length === 0) {
+    console.error("Invalid --folder value: cannot be empty");
+    console.error("Use --help for usage information");
+    process.exit(1);
+  }
+
   const processAll = parsed["process-all"] === true
     || (!parsed.since && !parsed["message-id"]);
 
@@ -170,6 +178,7 @@ function parseStalwartArgs(args: string[]): StalwartFetchOptions {
         ? parsed["message-id"]
         : undefined,
     dryRun: parsed["dry-run"] === true,
+    folder: typeof parsed.folder === "string" ? parsed.folder.trim() : undefined,
   };
 }
 
@@ -207,6 +216,7 @@ USAGE:
 OPTIONS:
   --user <username>      JMAP mailbox email (default: JMAP_SERVICE_ACCOUNT_EMAIL env)
   --password <password>  JMAP app password (default: JMAP_SERVICE_ACCOUNT_PASSWORD env)
+  --folder <name>        Additional mailbox/folder name to fetch from (optional; additive)
   --process-all          Fetch all available messages (default when no filter provided)
   --since <date>         Fetch messages received after date (ISO 8601)
   --message-id <id>      Fetch one specific message (JMAP ID or Message-ID header)
@@ -562,6 +572,88 @@ async function resolveInboxMailboxId(
   throw new Error("Inbox mailbox not found for JMAP account");
 }
 
+async function resolveMailboxIdByName(
+  apiUrl: string,
+  authHeader: string,
+  accountId: string,
+  folderName: string,
+): Promise<string | null> {
+  const queryResponses = await jmapCall(apiUrl, authHeader, [
+    [
+      "Mailbox/query",
+      {
+        accountId,
+        filter: { name: folderName },
+        position: 0,
+        limit: 1,
+      },
+      "queryMailboxByName",
+    ],
+    [
+      "Mailbox/get",
+      {
+        accountId,
+        "#ids": {
+          resultOf: "queryMailboxByName",
+          name: "Mailbox/query",
+          path: "/ids",
+        },
+      },
+      "getMailboxByName",
+    ],
+  ]);
+
+  const getData = getMethodResponse(
+    queryResponses,
+    "Mailbox/get",
+    "getMailboxByName",
+  );
+  if (Array.isArray(getData.list) && getData.list.length > 0 && getData.list[0]?.id) {
+    return getData.list[0].id as string;
+  }
+
+  // Fallback: some servers/users vary mailbox casing ("Junk Mail" vs "junk mail").
+  // Scan available mailboxes and match case-insensitively before failing.
+  const allMailboxResponses = await jmapCall(apiUrl, authHeader, [
+    [
+      "Mailbox/get",
+      {
+        accountId,
+        properties: ["id", "name"],
+      },
+      "getAllMailboxes",
+    ],
+  ]);
+  const allMailboxes = getMethodResponse(
+    allMailboxResponses,
+    "Mailbox/get",
+    "getAllMailboxes",
+  );
+  const normalizedTarget = folderName.trim().toLowerCase();
+  if (Array.isArray(allMailboxes.list)) {
+    const match = allMailboxes.list.find((mailbox: any) => {
+      const name = typeof mailbox?.name === "string" ? mailbox.name.trim().toLowerCase() : "";
+      return name === normalizedTarget;
+    });
+    if (match?.id) {
+      return match.id as string;
+    }
+  }
+
+  return null;
+}
+
+function buildMailboxFilter(mailboxIds: string[]): Record<string, unknown> {
+  if (mailboxIds.length === 1) {
+    return { inMailbox: mailboxIds[0] };
+  }
+
+  return {
+    operator: "OR",
+    conditions: mailboxIds.map((mailboxId) => ({ inMailbox: mailboxId })),
+  };
+}
+
 async function fetchEmailPage(
   apiUrl: string,
   authHeader: string,
@@ -667,7 +759,7 @@ async function fetchEmailById(
   apiUrl: string,
   authHeader: string,
   accountId: string,
-  inboxMailboxId: string,
+  sourceMailboxIds: string[],
   messageId: string,
 ): Promise<JmapEmail[]> {
   const directGetResponses = await jmapCall(apiUrl, authHeader, [
@@ -704,11 +796,11 @@ async function fetchEmailById(
     "getById",
   );
   if (Array.isArray(directGet.list) && directGet.list.length > 0) {
-    const inboxDirectHits = (directGet.list as JmapEmail[]).filter(
-      (email) => email.mailboxIds?.[inboxMailboxId] === true,
+    const directHits = (directGet.list as JmapEmail[]).filter(
+      (email) => sourceMailboxIds.some((mailboxId) => email.mailboxIds?.[mailboxId] === true),
     );
-    if (inboxDirectHits.length > 0) {
-      return inboxDirectHits;
+    if (directHits.length > 0) {
+      return directHits;
     }
   }
 
@@ -720,7 +812,7 @@ async function fetchEmailById(
         filter: {
           operator: "AND",
           conditions: [
-            { inMailbox: inboxMailboxId },
+            buildMailboxFilter(sourceMailboxIds),
             { header: ["Message-ID", messageId] },
           ],
         },
@@ -763,7 +855,7 @@ async function fetchEmailById(
   const byHeader = getMethodResponse(queryResponses, "Email/get", "getByHeader");
   return Array.isArray(byHeader.list)
     ? (byHeader.list as JmapEmail[]).filter(
-      (email) => email.mailboxIds?.[inboxMailboxId] === true,
+      (email) => sourceMailboxIds.some((mailboxId) => email.mailboxIds?.[mailboxId] === true),
     )
     : [];
 }
@@ -971,6 +1063,21 @@ async function runStalwartIngestion(
     authHeader,
     accountId,
   );
+  const sourceMailboxIds = [inboxMailboxId];
+  if (options.folder) {
+    const folderMailboxId = await resolveMailboxIdByName(
+      session.apiUrl,
+      authHeader,
+      accountId,
+      options.folder,
+    );
+    if (!folderMailboxId) {
+      throw new Error(`Mailbox not found for --folder: ${options.folder}`);
+    }
+    if (!sourceMailboxIds.includes(folderMailboxId)) {
+      sourceMailboxIds.push(folderMailboxId);
+    }
+  }
   const mailboxCache = new Map<string, string>();
 
   let rawEmails: JmapEmail[] = [];
@@ -980,12 +1087,15 @@ async function runStalwartIngestion(
       session.apiUrl,
       authHeader,
       accountId,
-      inboxMailboxId,
+      sourceMailboxIds,
       options.messageId,
     );
   } else if (options.since) {
     const sinceIso = toIsoDate(options.since);
-    console.log(`Fetching messages since ${sinceIso}`);
+    const sourceInfo = options.folder
+      ? `Inbox + ${options.folder}`
+      : "Inbox";
+    console.log(`Fetching messages from ${sourceInfo} since ${sinceIso}`);
     rawEmails = await fetchAllEmails(
       session.apiUrl,
       authHeader,
@@ -993,18 +1103,22 @@ async function runStalwartIngestion(
       {
         operator: "AND",
         conditions: [
-          { inMailbox: inboxMailboxId },
+          buildMailboxFilter(sourceMailboxIds),
           { after: sinceIso },
         ],
       },
     );
   } else if (options.processAll) {
-    console.log("Fetching inbound inbox messages from Stalwart...");
+    if (options.folder) {
+      console.log(`Fetching inbound messages from Inbox + ${options.folder}...`);
+    } else {
+      console.log("Fetching inbound inbox messages from Stalwart...");
+    }
     rawEmails = await fetchAllEmails(
       session.apiUrl,
       authHeader,
       accountId,
-      { inMailbox: inboxMailboxId },
+      buildMailboxFilter(sourceMailboxIds),
     );
   }
 
