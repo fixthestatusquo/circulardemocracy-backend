@@ -449,7 +449,7 @@ npm run jmap-fetch -- [--user <username>] [--password <password>] [options]
 - Fetch scope is Inbox by default; when `--folder` is provided, fetch scope becomes Inbox + that folder.
 - Normal runs automatically move each successfully processed message to a campaign folder in Stalwart.
 - If no campaign match is found, the message is stored with `campaign_id = null` and moved to the `Unclassified` folder.
-- Duplicate detection is **per politician**: the same JMAP `external_id` may be stored once per `politician_id` (constraint `UNIQUE (external_id, channel_source, politician_id)`). If the same inbound message was already processed for politician A but is addressed to politician B, ingestion still runs and creates a row under B. Re-running for the same politician + external id returns duplicate status without inserting again.
+- Messages already marked as processed in the database are skipped (idempotent behavior).
 - Dry runs never move messages.
 
 **Examples:**
