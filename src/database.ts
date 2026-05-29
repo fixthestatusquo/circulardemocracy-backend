@@ -1237,30 +1237,6 @@ export class DatabaseClient {
     }
   }
 
-  async logEmailEvent(data: {
-    message_id: number;
-    campaign_id: number;
-    politician_id: number;
-    supporter_id?: number | null;
-    subject: string;
-    status: "sent" | "failed";
-    provider?: string;
-    provider_message_id?: string;
-    error_message?: string;
-  }): Promise<void> {
-    try {
-      const { error } = await this.supabase.from("reply_send_logs").insert({
-        ...data,
-        provider: data.provider || "jmap",
-      });
-      if (error) {
-        throw error;
-      }
-    } catch (error) {
-      console.error("Error logging email event:", error);
-    }
-  }
-
   async getCampaignIdsWithActiveReplyTemplate(): Promise<number[]> {
     const { data, error } = await this.supabase
       .from("reply_templates")
@@ -1292,6 +1268,7 @@ export class DatabaseClient {
       .from("messages")
       .update({
         reply_sent_at: replySentAt,
+        processing_status: "replied",
       })
       .eq("id", messageId);
 
@@ -1318,6 +1295,7 @@ export class DatabaseClient {
       classification_confidence: number;
       duplicate_rank: number;
       reply_scheduled_at: string | null;
+      processing_status: string;
     }>,
   ): Promise<void> {
     try {
@@ -1415,7 +1393,35 @@ export class DatabaseClient {
     return data && data.length > 0 ? data[0] : null;
   }
 
-  async getMessagesReadyToSend(maxRetryAttempts: number): Promise<
+  async bulkUpdateMessageStatus(
+    messageIds: number[],
+    status: string,
+    extraFields: Partial<{ reply_sent_at: string; reply_failure_reason: string }> = {},
+  ): Promise<void> {
+    if (messageIds.length === 0) return;
+
+    try {
+      const { error } = await this.supabase
+        .from("messages")
+        .update({
+          processing_status: status,
+          ...extraFields,
+        })
+        .in("id", messageIds);
+
+      if (error) {
+        throw error;
+      }
+    } catch (error) {
+      console.error(`Error bulk updating messages to ${status}:`, error);
+      throw error;
+    }
+  }
+
+  async getMessagesReadyToSend(
+    maxRetryAttempts: number,
+    filters: { politicianId?: number; campaignId?: number } = {},
+  ): Promise<
     Array<{
       id: number;
       external_id: string;
@@ -1432,16 +1438,27 @@ export class DatabaseClient {
       return [];
     }
 
-    const { data, error } = await this.supabase
+    let query = this.supabase
       .from("messages")
       .select(
         "id, external_id, politician_id, campaign_id, sender_hash, reply_scheduled_at, received_at, reply_retry_count",
       )
+      .eq("processing_status", "processed") // Only pick up messages not already being sent or replied
       .is("reply_sent_at", null)
       .in("campaign_id", campaignIds)
       .eq("duplicate_rank", 0)
       .lt("reply_retry_count", maxRetryAttempts)
       .or("reply_scheduled_at.is.null,reply_scheduled_at.lte.now()");
+
+    if (filters.politicianId !== undefined) {
+      query = query.eq("politician_id", filters.politicianId);
+    }
+
+    if (filters.campaignId !== undefined) {
+      query = query.eq("campaign_id", filters.campaignId);
+    }
+
+    const { data, error } = await query;
 
     if (error) {
       throw error;
@@ -1460,11 +1477,6 @@ export class DatabaseClient {
     received_at: string;
     reply_retry_count: number | null;
   } | null> {
-    const campaignIds = await this.getCampaignIdsWithActiveReplyTemplate();
-    if (campaignIds.length === 0) {
-      return null;
-    }
-
     const { data, error } = await this.supabase
       .from("messages")
       .select(
@@ -1472,7 +1484,6 @@ export class DatabaseClient {
       )
       .eq("id", messageId)
       .is("reply_sent_at", null)
-      .in("campaign_id", campaignIds)
       .eq("duplicate_rank", 0)
       .limit(1);
 

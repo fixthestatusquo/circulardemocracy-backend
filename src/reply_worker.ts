@@ -121,11 +121,13 @@ interface SendContext {
 }
 
 /**
- * Main worker function to process and send scheduled replies
+ * Main worker function to process and send scheduled replies.
+ * Groups messages by politician to reuse JMAP authentication/connections.
  */
 export async function processScheduledReplies(
   db: DatabaseClient,
   runtimeSecrets?: RuntimeSecretBindings,
+  filters: { politicianId?: number; campaignId?: number } = {},
 ): Promise<ProcessingResult> {
   const result: ProcessingResult = {
     total: 0,
@@ -135,35 +137,45 @@ export async function processScheduledReplies(
   };
 
   try {
-    // 1. Get messages ready to send
-    const messages = await getMessagesReadyToSend(db);
-    result.total = messages.length;
-
-    console.log(`[Reply Worker] Found ${messages.length} messages to process`);
-
+    // 1. Get messages ready to send with optional filters
+    const messages = await getMessagesReadyToSend(db, filters);
     if (messages.length === 0) {
       return result;
     }
 
-    // 2. Process each message
-    for (const message of messages) {
-      try {
-        await processSingleMessage(db, message, runtimeSecrets);
-        result.sent++;
-        console.log(`[Reply Worker] ✓ Sent reply for message ${message.id}`);
-      } catch (error) {
-        result.failed++;
-        const errorMsg =
-          error instanceof Error ? error.message : "Unknown error";
-        result.errors.push({
-          message_id: message.id,
-          error: errorMsg,
-        });
-        console.error(
-          `[Reply Worker] ✗ Failed to send reply for message ${message.id}:`,
-          errorMsg,
-        );
-      }
+    // 2. Claim messages by setting status to 'sending' to prevent concurrency issues
+    const messageIds = messages.map((m) => m.id);
+    await db.bulkUpdateMessageStatus(messageIds, "sending");
+
+    result.total = messages.length;
+    console.log(
+      `[Reply Worker] Claimed ${messages.length} messages for processing`,
+    );
+
+    // 3. Group messages by politician to reuse auth
+    const byPolitician = new Map<number, MessageToProcess[]>();
+    for (const msg of messages) {
+      const list = byPolitician.get(msg.politician_id) ?? [];
+      list.push(msg);
+      byPolitician.set(msg.politician_id, list);
+    }
+
+    console.log(
+      `[Reply Worker] Grouped into ${byPolitician.size} politician batch(es)`,
+    );
+
+    // 4. Process each politician batch
+    for (const [politicianId, batch] of byPolitician.entries()) {
+      const politicianResult = await processPoliticianBatch(
+        db,
+        politicianId,
+        batch,
+        runtimeSecrets,
+      );
+
+      result.sent += politicianResult.sent;
+      result.failed += politicianResult.failed;
+      result.errors.push(...politicianResult.errors);
     }
 
     console.log(
@@ -172,7 +184,94 @@ export async function processScheduledReplies(
 
     return result;
   } catch (error) {
-    console.error("[Reply Worker] Fatal error");
+    console.error("[Reply Worker] Fatal error in scheduled processing");
+    throw error;
+  }
+}
+
+/**
+ * Processes all messages for a single politician.
+ * Resolves JMAP configuration once and reuses it for the entire batch.
+ */
+async function processPoliticianBatch(
+  db: DatabaseClient,
+  politicianId: number,
+  messages: MessageToProcess[],
+  runtimeSecrets?: RuntimeSecretBindings,
+): Promise<ProcessingResult> {
+  const result: ProcessingResult = {
+    total: messages.length,
+    sent: 0,
+    failed: 0,
+    errors: [],
+  };
+
+  try {
+    const politician = await getPoliticianById(db, politicianId);
+    if (!politician) {
+      const errorMsg = `Politician ${politicianId} not found`;
+      for (const msg of messages) {
+        await handleSendFailure(db, msg, errorMsg);
+        result.failed++;
+        result.errors.push({ message_id: msg.id, error: errorMsg });
+      }
+      return result;
+    }
+
+    // Resolve JMAP config once for this politician
+    const jmapResolve = await resolveSingleServiceAccountConfig(runtimeSecrets);
+    if (!jmapResolve.ok) {
+      const errorMsg = jmapResolve.reason;
+      for (const msg of messages) {
+        await handleSendFailure(db, msg, errorMsg);
+        result.failed++;
+        result.errors.push({ message_id: msg.id, error: errorMsg });
+      }
+      return result;
+    }
+
+    // Cache campaigns, templates, and JMAP clients to avoid redundant calls
+    const campaignCache = new Map<number, any>();
+    const templateCache = new Map<number, any>();
+    const jmapClientCache = new Map<string, JMAPClient>();
+
+    // Process messages in parallel with a concurrency limit
+    const CONCURRENCY = 10;
+    for (let i = 0; i < messages.length; i += CONCURRENCY) {
+      const chunk = messages.slice(i, i + CONCURRENCY);
+      const tasks = chunk.map(async (message) => {
+        try {
+          await processSingleMessage(db, message, {
+            politician,
+            jmapConfig: jmapResolve.config,
+            campaignCache,
+            templateCache,
+            jmapClientCache,
+          });
+          result.sent++;
+          console.log(`[Reply Worker] ✓ Sent reply for message ${message.id}`);
+        } catch (error) {
+          result.failed++;
+          const errorMsg =
+            error instanceof Error ? error.message : "Unknown error";
+          result.errors.push({
+            message_id: message.id,
+            error: errorMsg,
+          });
+          console.error(
+            `[Reply Worker] ✗ Failed to send reply for message ${message.id}:`,
+            errorMsg,
+          );
+        }
+      });
+      await Promise.all(tasks);
+    }
+
+    return result;
+  } catch (error) {
+    console.error(
+      `[Reply Worker] Fatal error processing batch for politician ${politicianId}`,
+    );
     throw error;
   }
 }
@@ -187,7 +286,21 @@ export async function processReplyImmediately(
     throw new Error(`Message ${messageId} not eligible for immediate reply`);
   }
 
-  await processSingleMessage(db, message, runtimeSecrets);
+  // Still resolve auth per immediate call (CLI/Web-hook context)
+  const jmapResolve = await resolveSingleServiceAccountConfig(runtimeSecrets);
+  if (!jmapResolve.ok) {
+    throw new Error(jmapResolve.reason);
+  }
+
+  const politician = await getPoliticianById(db, message.politician_id);
+  if (!politician) {
+    throw new Error(`Politician ${message.politician_id} not found`);
+  }
+
+  await processSingleMessage(db, message, {
+    politician,
+    jmapConfig: jmapResolve.config,
+  });
 }
 
 // Maximum number of retry attempts before giving up
@@ -199,20 +312,15 @@ const RETRY_DELAYS_MINUTES = [5, 15, 60];
  */
 async function getMessagesReadyToSend(
   db: DatabaseClient,
+  filters: { politicianId?: number; campaignId?: number } = {},
 ): Promise<MessageToProcess[]> {
   try {
-    // Query messages where:
-    // Eligible rows: campaign with active template, duplicate_rank 0, not sent,
-    // reply_scheduled_at due (or null), under retry limit.
-    const data = await db.getMessagesReadyToSend(MAX_RETRY_ATTEMPTS);
+    const data = await db.getMessagesReadyToSend(MAX_RETRY_ATTEMPTS, filters);
 
-    // Ensure reply_retry_count has a default value of 0
-    const messages = (data || []).map((msg) => ({
+    return (data || []).map((msg) => ({
       ...msg,
       reply_retry_count: msg.reply_retry_count ?? 0,
     }));
-
-    return messages;
   } catch (error) {
     console.error("Error fetching messages to send");
     throw error;
@@ -240,29 +348,37 @@ async function getMessageById(
   }
 }
 
+interface BatchProcessingContext {
+  politician: { id: number; email: string; name: string };
+  jmapConfig: WorkerConfig;
+  campaignCache?: Map<number, any>;
+  templateCache?: Map<number, any>;
+  jmapClientCache?: Map<string, JMAPClient>;
+}
+
 /**
- * Processes a single message: loads template, renders email, sends via JMAP
+ * Processes a single message using pre-resolved context (politician, JMAP auth).
  */
 async function processSingleMessage(
   db: DatabaseClient,
   message: MessageToProcess,
-  runtimeSecrets?: RuntimeSecretBindings,
+  context: BatchProcessingContext,
 ): Promise<void> {
-  const jmapResolve = await resolveSingleServiceAccountConfig(runtimeSecrets);
-  if (!jmapResolve.ok) {
-    const errorMsg = jmapResolve.reason;
-    await handleSendFailure(db, message, errorMsg);
-    throw new Error(errorMsg);
-  }
-  const jmapConfig = jmapResolve.config;
+  const { politician, jmapConfig, campaignCache, templateCache, jmapClientCache } = context;
 
-  const template = await db.getActiveTemplateForCampaign(message.campaign_id);
+  // 1. Get template (cached if in batch)
+  let template = templateCache?.get(message.campaign_id);
   if (!template) {
-    const errorMsg = `No active template found for campaign ${message.campaign_id}`;
-    await handleSendFailure(db, message, errorMsg);
-    throw new Error(errorMsg);
+    template = await db.getActiveTemplateForCampaign(message.campaign_id);
+    if (!template) {
+      const errorMsg = `No active template found for campaign ${message.campaign_id}`;
+      await handleSendFailure(db, message, errorMsg);
+      throw new Error(errorMsg);
+    }
+    templateCache?.set(message.campaign_id, template);
   }
 
+  // 2. Apply schedule check
   const replySchedule = await applyReplyScheduleForMessage(db, message.id);
   if (!replySchedule) {
     const errorMsg = `Message ${message.id} is not eligible for auto-reply`;
@@ -275,15 +391,7 @@ async function processSingleMessage(
     throw new Error(errorMsg);
   }
 
-  // 2. Get politician details for sender/reply-to
-  const politician = await getPoliticianById(db, message.politician_id);
-  if (!politician) {
-    const errorMsg = `Politician ${message.politician_id} not found`;
-    await handleSendFailure(db, message, errorMsg);
-    throw new Error(errorMsg);
-  }
-
-  // 3. Resolve recipient email from short-term contact storage
+  // 3. Resolve recipient email
   const senderEmail = await db.getMessageContactEmail(message.id);
   if (!senderEmail) {
     const errorMsg = `Short-term contact email not found for message ${message.id}`;
@@ -291,14 +399,19 @@ async function processSingleMessage(
     throw new Error(errorMsg);
   }
 
-  // 4. Get campaign details for header and sender address
-  const campaign = await getCampaignById(db, message.campaign_id);
+  // 4. Get campaign (cached if in batch)
+  let campaign = campaignCache?.get(message.campaign_id);
   if (!campaign) {
-    const errorMsg = `Campaign ${message.campaign_id} not found`;
-    await handleSendFailure(db, message, errorMsg);
-    throw new Error(errorMsg);
+    campaign = await getCampaignById(db, message.campaign_id);
+    if (!campaign) {
+      const errorMsg = `Campaign ${message.campaign_id} not found`;
+      await handleSendFailure(db, message, errorMsg);
+      throw new Error(errorMsg);
+    }
+    campaignCache?.set(message.campaign_id, campaign);
   }
 
+  // 5. Resolve outbound identity
   const outboundIdentity = resolveOutboundEmailIdentity(
     {
       id: politician.id,
@@ -311,7 +424,7 @@ async function processSingleMessage(
     },
   );
   if (!outboundIdentity) {
-    const errorMsg = `No From/Reply-To: set campaigns.technical_email and/or politicians.email, and reply_to_email or politician email for campaign ${message.campaign_id} politician ${message.politician_id}`;
+    const errorMsg = `No From/Reply-To: set campaigns.technical_email and/or politicians.email for campaign ${message.campaign_id}`;
     await handleSendFailure(db, message, errorMsg);
     throw new Error(errorMsg);
   }
@@ -325,25 +438,30 @@ async function processSingleMessage(
     }
   }
 
-  const jmapClient = imp
-    ? new JMAPClient({
-        apiUrl: jmapConfig.jmapApiUrl,
-        accountId: "",
-        basicUsername: buildStalwartImpersonationLogin(
-          imp.relayAccountEmail,
-          outboundIdentity.fromEmail,
-        ),
-        basicPassword: imp.relayAccountPassword,
-      })
-    : new JMAPClient({
-        apiUrl: jmapConfig.jmapApiUrl,
-        accountId: jmapConfig.jmapAccountId,
-        bearerToken: jmapConfig.jmapBearerToken,
-      });
+  // 6. Resolve/Reuse JMAP client
+  const clientKey = imp ? `imp:${outboundIdentity.fromEmail}` : "relay:default";
+  let jmapClient = jmapClientCache?.get(clientKey);
+  if (!jmapClient) {
+    jmapClient = imp
+      ? new JMAPClient({
+          apiUrl: jmapConfig.jmapApiUrl,
+          accountId: "",
+          basicUsername: buildStalwartImpersonationLogin(
+            imp.relayAccountEmail,
+            outboundIdentity.fromEmail,
+          ),
+          basicPassword: imp.relayAccountPassword,
+        })
+      : new JMAPClient({
+          apiUrl: jmapConfig.jmapApiUrl,
+          accountId: jmapConfig.jmapAccountId,
+          bearerToken: jmapConfig.jmapBearerToken,
+        });
+    jmapClientCache?.set(clientKey, jmapClient);
+  }
 
   const sendContext = await buildSendContext(db, message, outboundIdentity);
-
-  // 5. Render email content based on layout type
+  // 7. Render and build email
   const emailContent = renderEmailLayout({
     subject: template.subject,
     markdown_body: template.body,
@@ -353,7 +471,6 @@ async function processSingleMessage(
     politician_email: politician.email,
   });
 
-  // 6. Build email message
   const email: EmailMessage = {
     from: outboundIdentity.fromEmail,
     fromName: outboundIdentity.fromDisplayName,
@@ -364,42 +481,29 @@ async function processSingleMessage(
     htmlBody: emailContent.htmlBody,
   };
 
-  // 7. Send via JMAP
+  // 8. Send via JMAP
   const sendResult = await jmapClient.sendEmail(email);
 
   if (!sendResult.success) {
     const errorMsg = "JMAP send failed";
-    await db.logEmailEvent({
-      message_id: message.id,
-      campaign_id: message.campaign_id,
-      politician_id: message.politician_id,
-      supporter_id: sendContext.supporterId,
-      subject: emailContent.subject,
-      status: "failed",
-      provider: "jmap",
-      error_message: errorMsg,
-    });
+    console.error(
+      `[Reply Worker] ✗ Failed to send reply for message ${message.id}: ${errorMsg}`,
+    );
     await handleSendFailure(db, message, errorMsg);
     throw new Error(errorMsg);
   }
 
-  await db.logEmailEvent({
-    message_id: message.id,
-    campaign_id: message.campaign_id,
-    politician_id: message.politician_id,
-    supporter_id: sendContext.supporterId,
-    subject: emailContent.subject,
-    status: "sent",
-    provider: "jmap",
-    provider_message_id: sendResult.messageId,
-  });
+  // 9. Log success and finalize
+  console.log(
+    `[Reply Worker] ✓ Sent reply for message ${message.id} (Provider ID: ${sendResult.messageId})`,
+  );
 
-  // 8. Mark message and contact row as sent
   await db.markMessageReplyDelivered(message.id);
 }
 
 /**
- * Handles send failure by updating retry count or marking as permanently failed
+ * Handles send failure by updating retry count or marking as permanently failed.
+ * Also resets status from 'sending' back to 'processed' (if retrying) or 'failed'.
  */
 async function handleSendFailure(
   db: DatabaseClient,
@@ -412,6 +516,11 @@ async function handleSendFailure(
   if (newRetryCount >= MAX_RETRY_ATTEMPTS) {
     // Exceeded max retries - mark as permanently failed
     await db.markMessageAsFailed(message.id, safeError);
+    // Explicitly update processing_status to 'failed' (markMessageAsFailed only sets the reason)
+    await db.updateMessageFields(message.id, {
+      processing_status: "failed",
+    });
+
     console.error(
       `[Reply Worker] Message ${message.id} permanently failed after ${MAX_RETRY_ATTEMPTS} attempts`,
     );
@@ -428,6 +537,11 @@ async function handleSendFailure(
       safeError,
       nextRetryAt,
     );
+    // Reset status to 'processed' so it can be picked up by the next worker run
+    await db.updateMessageFields(message.id, {
+      processing_status: "processed",
+    });
+
     console.warn(
       `[Reply Worker] Message ${message.id} failed (attempt ${newRetryCount}/${MAX_RETRY_ATTEMPTS}), scheduled retry at ${nextRetryAt}`,
     );

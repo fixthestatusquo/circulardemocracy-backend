@@ -17,6 +17,8 @@ const MAX_RETRY_ATTEMPTS = 10;
 export interface SendRepliesOptions {
   campaignId?: number;
   campaignName?: string;
+  politicianId?: number;
+  politicianName?: string;
   dryRun?: boolean;
 }
 
@@ -47,14 +49,14 @@ export function parseArgs(args: string[]): SendRepliesOptions | null {
     if (i + 1 < args.length && !args[i + 1].startsWith("--")) {
       const value = args[i + 1];
 
-      if (key === "campaign-id") {
+      if (key === "campaign-id" || key === "politician-id") {
         const numValue = parseInt(value, 10);
         if (Number.isNaN(numValue)) {
           console.error(`Invalid ${key} value: ${value}`);
           process.exit(1);
         }
         parsed[key] = numValue;
-      } else if (key === "campaign-name") {
+      } else if (key === "campaign-name" || key === "politician-name") {
         parsed[key] = value;
       } else {
         console.error(`Unknown option: --${key}`);
@@ -79,6 +81,14 @@ export function parseArgs(args: string[]): SendRepliesOptions | null {
     process.exit(1);
   }
 
+  if (
+    parsed["politician-id"] !== undefined &&
+    parsed["politician-name"] !== undefined
+  ) {
+    console.error("Use only one of --politician-id or --politician-name");
+    process.exit(1);
+  }
+
   return {
     campaignId:
       typeof parsed["campaign-id"] === "number"
@@ -88,6 +98,14 @@ export function parseArgs(args: string[]): SendRepliesOptions | null {
       typeof parsed["campaign-name"] === "string"
         ? parsed["campaign-name"]
         : undefined,
+    politicianId:
+      typeof parsed["politician-id"] === "number"
+        ? parsed["politician-id"]
+        : undefined,
+    politicianName:
+      typeof parsed["politician-name"] === "string"
+        ? parsed["politician-name"]
+        : undefined,
     dryRun: parsed["dry-run"] === true,
   };
 }
@@ -95,7 +113,7 @@ export function parseArgs(args: string[]): SendRepliesOptions | null {
 export async function resolveCampaignId(
   db: DatabaseClient,
   options: Pick<SendRepliesOptions, "campaignId" | "campaignName">,
-): Promise<number> {
+): Promise<number | undefined> {
   if (options.campaignId !== undefined) {
     const campaign = await db.getCampaignById(options.campaignId);
     if (!campaign) {
@@ -114,66 +132,67 @@ export async function resolveCampaignId(
     return campaign.id;
   }
 
-  throw new Error("Campaign id or name is required");
+  return undefined;
 }
 
-async function processCampaignReplies(
+export async function resolvePoliticianId(
   db: DatabaseClient,
-  campaignId: number,
-  runtimeSecrets: Record<string, string | undefined>,
-): Promise<ProcessingResult> {
-  const result: ProcessingResult = {
-    total: 0,
-    sent: 0,
-    failed: 0,
-    errors: [],
-  };
-
-  const allReady = await db.getMessagesReadyToSend(MAX_RETRY_ATTEMPTS);
-  const messages = allReady.filter((m) => m.campaign_id === campaignId);
-  result.total = messages.length;
-
-  console.log(
-    `Found ${messages.length} message(s) ready to send for campaign ${campaignId}`,
-  );
-
-  for (const message of messages) {
-    try {
-      await processReplyImmediately(db, message.id, runtimeSecrets);
-      result.sent++;
-      console.log(`[Reply Worker] ✓ Sent reply for message ${message.id}`);
-    } catch (error) {
-      result.failed++;
-      const errorMsg =
-        error instanceof Error ? error.message : "Unknown error";
-      result.errors.push({ message_id: message.id, error: errorMsg });
-      console.error(
-        `[Reply Worker] ✗ Failed to send reply for message ${message.id}:`,
-        errorMsg,
-      );
+  options: Pick<SendRepliesOptions, "politicianId" | "politicianName">,
+): Promise<number | undefined> {
+  if (options.politicianId !== undefined) {
+    const politician = await db.getPoliticianById(options.politicianId);
+    if (!politician) {
+      throw new Error(`Politician not found: id ${options.politicianId}`);
     }
+    return politician.id;
   }
 
-  return result;
+  if (options.politicianName) {
+    const politician = await db.findPoliticianByEmail(options.politicianName);
+    if (!politician) {
+      throw new Error(
+        `No politician matched name/email hint: ${options.politicianName}`,
+      );
+    }
+    return politician.id;
+  }
+
+  return undefined;
+}
+
+async function processFilteredReplies(
+  db: DatabaseClient,
+  options: SendRepliesOptions,
+  runtimeSecrets: Record<string, string | undefined>,
+): Promise<ProcessingResult> {
+  const campaignId = await resolveCampaignId(db, options);
+  const politicianId = await resolvePoliticianId(db, options);
+
+  console.log("Processing replies with filters:", { campaignId, politicianId });
+
+  return processScheduledReplies(db, runtimeSecrets, {
+    campaignId,
+    politicianId,
+  });
 }
 
 export async function previewReadyReplies(
   db: DatabaseClient,
   options: SendRepliesOptions,
 ): Promise<void> {
-  const allReady = await db.getMessagesReadyToSend(MAX_RETRY_ATTEMPTS);
+  const campaignId = await resolveCampaignId(db, options);
+  const politicianId = await resolvePoliticianId(db, options);
 
-  if (options.campaignId !== undefined || options.campaignName) {
-    const campaignId = await resolveCampaignId(db, options);
-    const messages = allReady.filter((m) => m.campaign_id === campaignId);
-    const campaign = await db.getCampaignById(campaignId);
-    console.log("DRY RUN - No replies will be sent.\n");
-    console.log(
-      `${messages.length} reply(ies) would be sent for campaign: ${campaign?.name ?? campaignId} (id ${campaignId})`,
-    );
-    if (messages.length > 0) {
-      console.log(`Message IDs: ${messages.map((m) => m.id).join(", ")}`);
-    }
+  const allReady = await db.getMessagesReadyToSend(MAX_RETRY_ATTEMPTS, {
+    campaignId,
+    politicianId,
+  });
+
+  console.log("DRY RUN - No replies will be sent.\n");
+
+  if (allReady.length === 0) {
+    console.log("  (none)");
+    console.log("\nTotal: 0 message(s) ready to send");
     return;
   }
 
@@ -184,21 +203,14 @@ export async function previewReadyReplies(
     byCampaign.set(message.campaign_id, list);
   }
 
-  console.log("DRY RUN - No replies will be sent.\n");
   console.log("Replies that would be sent per campaign:\n");
 
-  if (byCampaign.size === 0) {
-    console.log("  (none)");
-    console.log("\nTotal: 0 message(s) ready to send");
-    return;
-  }
-
   const campaignIds = [...byCampaign.keys()].sort((a, b) => a - b);
-  for (const campaignId of campaignIds) {
-    const messages = byCampaign.get(campaignId)!;
-    const campaign = await db.getCampaignById(campaignId);
+  for (const cid of campaignIds) {
+    const messages = byCampaign.get(cid)!;
+    const campaign = await db.getCampaignById(cid);
     console.log(
-      `  ${campaign?.name ?? campaignId} (id ${campaignId}): ${messages.length}`,
+      `  ${campaign?.name ?? cid} (id ${cid}): ${messages.length}`,
     );
   }
 
@@ -214,34 +226,17 @@ Send Replies - Test outbound auto-replies using the production reply worker
 USAGE:
   send-replies
   send-replies [--campaign-id <id> | --campaign-name <hint>]
+  send-replies [--politician-id <id> | --politician-name <hint>]
 
 OPTIONS:
-  --campaign-id <id>      Send all ready replies for a campaign (numeric id)
-  --campaign-name <hint>  Send all ready replies for a campaign (name/slug ilike match)
+  --campaign-id <id>      Filter by campaign (numeric id)
+  --campaign-name <hint>  Filter by campaign (name/slug ilike match)
+  --politician-id <id>    Filter by politician (numeric id)
+  --politician-name <hint> Filter by politician (email exact or partial)
   --dry-run               Preview what would be sent without sending mail
   -h, --help              Show this help message
 
 Without filters, processes all messages ready to send (same as the scheduled worker).
-
-ENVIRONMENT VARIABLES:
-  SUPABASE_URL                    Required
-  SUPABASE_KEY                    Required
-  JMAP_URL                        Required (mail server base URL)
-  SUPABASE_ANON_KEY               Required when ALL_DOMAIN is unset (Supabase relay JWT)
-  RELAY_SERVICE_ACCOUNT_EMAIL     Required
-  RELAY_SERVICE_ACCOUNT_PASSWORD  Required
-
-Impersonation (Stalwart Basic auth, same as reply worker):
-  ALL_DOMAIN                      When set (e.g. example.org), sends via target%RELAY_SERVICE_ACCOUNT_EMAIL
-  RELAY_SERVICE_ACCOUNT_EMAIL     Impersonator account
-  RELAY_SERVICE_ACCOUNT_PASSWORD  Impersonator password
-
-EXAMPLES:
-  send-replies
-  send-replies --dry-run
-  send-replies --dry-run --campaign-id 5
-  send-replies --campaign-id 5
-  send-replies --campaign-name "Climate Action"
 `);
 }
 
@@ -277,26 +272,7 @@ async function main(): Promise<void> {
       return;
     }
 
-    if (options.campaignId !== undefined || options.campaignName) {
-      const campaignId = await resolveCampaignId(db, options);
-      const campaign = await db.getCampaignById(campaignId);
-      console.log(
-        `Processing replies for campaign: ${campaign?.name ?? campaignId} (id ${campaignId})`,
-      );
-      const result = await processCampaignReplies(
-        db,
-        campaignId,
-        runtimeSecrets,
-      );
-      console.log(JSON.stringify(result, null, 2));
-      if (result.failed > 0) {
-        process.exit(1);
-      }
-      return;
-    }
-
-    console.log("Processing scheduled replies...");
-    const result = await processScheduledReplies(db, runtimeSecrets);
+    const result = await processFilteredReplies(db, options, runtimeSecrets);
     console.log(JSON.stringify(result, null, 2));
 
     if (result.failed > 0) {
