@@ -11,7 +11,6 @@ import {
   PoliticianNotFoundError,
   processMessage,
 } from "./message_processor";
-
 // Define types for env and app
 interface Env {
   AI: Ai; // Cloudflare Workers AI

@@ -3,12 +3,12 @@ import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
 import { cors } from "hono/cors";
 import Turndown from "turndown";
 import { DatabaseClient, hashEmail, type MessageInsert } from "./database";
+import { applyReplyScheduleForMessage } from "./message_processor";
 import {
   formatEmailContentForEmbedding,
   generateEmbedding,
 } from "./embedding_service";
 import type { Ai } from "./message_processor";
-import { applyReplyScheduleForMessage } from "./message_processor";
 
 // =============================================================================
 // SENDER FLAG TYPE

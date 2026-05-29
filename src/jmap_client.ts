@@ -484,9 +484,7 @@ export class JMAPClient {
    * Useful for retrieving sender details on-demand.
    */
   async getEmails(ids: string[]): Promise<Map<string, EmailMessage>> {
-    if (ids.length === 0) {
-      return new Map();
-    }
+    if (ids.length === 0) return new Map();
 
     try {
       const authHeader = this.authHeader();
@@ -519,7 +517,7 @@ export class JMAPClient {
       for (const item of body.list || []) {
         const from = item.from?.[0];
         const replyTo = item.replyTo?.[0];
-
+        
         result.set(item.id, {
           from: from?.email || "",
           fromName: from?.name || "",

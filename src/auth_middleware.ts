@@ -1,20 +1,18 @@
-import type { MiddlewareHandler } from "hono";
+import type { Context, Next } from "hono";
 import { bearerAuth } from "hono/bearer-auth";
 
 export interface AuthEnv {
   API_KEY: string;
 }
 
-const requireApiKey = bearerAuth<{ Bindings: AuthEnv }>({
-  verifyToken: (token, c) => token === c.env.API_KEY,
-});
-
-export const apiKeyAuthMiddleware: MiddlewareHandler<{
-  Bindings: AuthEnv;
-}> = async (c, next) => {
+export const apiKeyAuthMiddleware = async (
+  c: Context<{ Bindings: AuthEnv }>,
+  next: Next,
+) => {
   if (c.req.method === "OPTIONS") {
     await next();
     return;
   }
-  return requireApiKey(c, next);
+  const auth = bearerAuth({ token: c.env.API_KEY });
+  await auth(c, next);
 };

@@ -3,6 +3,8 @@
 
 import type { DatabaseClient } from "./database";
 import { resolveOutboundEmailIdentity } from "./email_impersonation";
+import { applyReplyScheduleForMessage } from "./message_processor";
+import { isReadyToSend } from "./scheduling";
 import { renderEmailLayout } from "./email_layout";
 import {
   type EmailMessage,
@@ -10,8 +12,6 @@ import {
   jmapWellKnownSessionUrl,
   resolveMailAccountIdFromSession,
 } from "./jmap_client";
-import { applyReplyScheduleForMessage } from "./message_processor";
-import { isReadyToSend } from "./scheduling";
 import {
   buildStalwartImpersonationLogin,
   emailHostedOnDomain,
@@ -405,7 +405,7 @@ async function getMessageById(
       ...record,
       reply_retry_count: record.reply_retry_count ?? 0,
     };
-  } catch (_error) {
+  } catch (error) {
     console.error("Error fetching message by ID");
     return null;
   }
@@ -465,7 +465,7 @@ async function processSingleMessage(
   }
 
   // 3. Resolve recipient email
-  const jmapEmail = context.jmapEmailCache?.get(message.external_id);
+  const jmapEmail = jmapEmailCache?.get(message.external_id);
   const senderEmail = jmapEmail?.replyTo || jmapEmail?.from;
   if (!senderEmail) {
     const errorMsg = `Short-term contact email not found for message ${message.id} (JMAP ID ${message.external_id})`;
@@ -505,9 +505,7 @@ async function processSingleMessage(
 
   const imp = jmapConfig.stalwartImpersonation;
   if (imp) {
-    if (
-      !emailHostedOnDomain(outboundIdentity.fromEmail, imp.defaultDomainLower)
-    ) {
+    if (!emailHostedOnDomain(outboundIdentity.fromEmail, imp.defaultDomainLower)) {
       const errorMsg = `DEFAULT_DOMAIN is ${imp.defaultDomainLower} but outbound From is not on that domain`;
       await handleSendFailure(db, message, errorMsg);
       throw new Error(errorMsg);
@@ -536,7 +534,7 @@ async function processSingleMessage(
     jmapClientCache?.set(clientKey, jmapClient);
   }
 
-  const _sendContext = await buildSendContext(db, message, outboundIdentity);
+  const sendContext = await buildSendContext(db, message, outboundIdentity);
   // 7. Render and build email
   const emailContent = renderEmailLayout({
     subject: template.subject,
@@ -658,7 +656,7 @@ async function getCampaignById(
 } | null> {
   try {
     return await db.getCampaignById(campaignId);
-  } catch (_error) {
+  } catch (error) {
     console.error("Error fetching campaign");
     return null;
   }
@@ -677,7 +675,7 @@ async function getPoliticianById(
 } | null> {
   try {
     return await db.getPoliticianById(politicianId);
-  } catch (_error) {
+  } catch (error) {
     console.error("Error fetching politician");
     return null;
   }
@@ -698,12 +696,12 @@ async function resolveSingleServiceAccountConfig(
   const baseConfig = resolveStalwartJmapWorkerConfig(mergedBindings);
   if (!baseConfig) {
     const defaultDomainHint = (mergedBindings.DEFAULT_DOMAIN || "").trim()
-      ? " For JMAP default-domain mode, set JMAP_URL plus JMAP_ADMIN_EMAIL and JMAP_ADMIN_PASSWORD."
+      ? " For DEFAULT_DOMAIN mode, set JMAP_URL plus JMAP_ADMIN_EMAIL and JMAP_ADMIN_PASSWORD."
       : "";
     return {
       ok: false,
       reason:
-        "Outbound JMAP is not configured. Set JMAP_URL (base mail server URL)." +
+        "Single JMAP relay service account is not configured. Set JMAP_URL (base mail server URL)." +
         defaultDomainHint,
     };
   }

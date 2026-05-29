@@ -23,7 +23,9 @@ export async function resolveCampaignId(
   if (options.campaignName) {
     const campaign = await db.findCampaignByHint(options.campaignName);
     if (!campaign) {
-      throw new Error(`No campaign matched name hint: ${options.campaignName}`);
+      throw new Error(
+        `No campaign matched name hint: ${options.campaignName}`,
+      );
     }
     return campaign.id;
   }
