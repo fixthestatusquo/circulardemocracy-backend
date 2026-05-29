@@ -72,7 +72,17 @@ export function resolveMailAccountIdFromSession(session: {
   if (firstAccountId) {
     return firstAccountId;
   }
-  throw new Error("No JMAP mail account found in session response");
+
+  // Debugging information for common JMAP session issues
+  const hasAccounts = session.accounts && Object.keys(session.accounts).length > 0;
+  const capabilities = Object.keys(session.primaryAccounts || {}).join(", ") || "none";
+
+  throw new Error(
+    `No JMAP mail account found in session response. ` +
+    `Accounts found: ${hasAccounts ? "yes" : "no"}. ` +
+    `Capabilities: ${capabilities}. ` +
+    `Check if the user has mail permissions and if authentication was successful.`
+  );
 }
 
 /**
@@ -125,13 +135,30 @@ export class JMAPClient {
       return this.resolvedPostApiUrl;
     }
     const authHeader = this.authHeader();
-    const response = await fetch(configured, {
+    let response = await fetch(configured, {
       method: "GET",
       headers: {
         Authorization: authHeader,
         Accept: "application/json",
       },
+      redirect: "manual",
     });
+
+    // Handle redirects manually to preserve Authorization header (standard fetch strips it on redirects)
+    if (response.status >= 300 && response.status < 400) {
+      const location = response.headers.get("location");
+      if (location) {
+        const nextUrl = new URL(location, configured).href;
+        response = await fetch(nextUrl, {
+          method: "GET",
+          headers: {
+            Authorization: authHeader,
+            Accept: "application/json",
+          },
+        });
+      }
+    }
+
     if (!response.ok) {
       throw new Error(`JMAP session GET failed (${response.status})`);
     }
@@ -517,7 +544,7 @@ export class JMAPClient {
       for (const item of body.list || []) {
         const from = item.from?.[0];
         const replyTo = item.replyTo?.[0];
-        
+
         result.set(item.id, {
           from: from?.email || "",
           fromName: from?.name || "",

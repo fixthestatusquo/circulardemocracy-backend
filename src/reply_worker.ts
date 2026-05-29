@@ -406,7 +406,7 @@ async function getMessageById(
       reply_retry_count: record.reply_retry_count ?? 0,
     };
   } catch (error) {
-    console.error("Error fetching message by ID");
+    console.error("Error fetching message by ID", error);
     return null;
   }
 }
@@ -428,7 +428,13 @@ async function processSingleMessage(
   message: MessageToProcess,
   context: BatchProcessingContext,
 ): Promise<void> {
-  const { politician, jmapConfig, campaignCache, templateCache, jmapClientCache } = context;
+  const {
+    politician,
+    jmapConfig,
+    campaignCache,
+    templateCache,
+    jmapClientCache,
+  } = context;
 
   // 1. Get template (cached if in batch)
   let template = templateCache?.get(message.campaign_id);
@@ -547,7 +553,10 @@ async function processSingleMessage(
   };
 
   // 8. Send via JMAP
-  const sendResult = await jmapClient.sendEmail(email);
+  // XAV
+  console.log(email);
+  process.exit(1);
+  //  const sendResult = await jmapClient.sendEmail(email);
 
   if (!sendResult.success) {
     const errorMsg = "JMAP send failed";
@@ -734,13 +743,31 @@ async function fetchAndResolveMailAccountIdFromSession(
   sessionUrl: string,
   bearerToken: string,
 ): Promise<string> {
-  const response = await fetch(sessionUrl, {
+  const authHeader = `Bearer ${bearerToken}`;
+  let response = await fetch(sessionUrl, {
     method: "GET",
     headers: {
-      Authorization: `Bearer ${bearerToken}`,
+      Authorization: authHeader,
       Accept: "application/json",
     },
+    redirect: "manual",
   });
+
+  // Handle redirects manually to preserve Authorization header (standard fetch strips it on redirects)
+  if (response.status >= 300 && response.status < 400) {
+    const location = response.headers.get("location");
+    if (location) {
+      const nextUrl = new URL(location, sessionUrl).href;
+      response = await fetch(nextUrl, {
+        method: "GET",
+        headers: {
+          Authorization: authHeader,
+          Accept: "application/json",
+        },
+      });
+    }
+  }
+
   if (!response.ok) {
     throw new Error(`JMAP session GET failed (${response.status})`);
   }
