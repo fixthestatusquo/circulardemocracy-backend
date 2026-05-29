@@ -86,39 +86,6 @@ export function resolveMailAccountIdFromSession(session: {
 }
 
 /**
- * Robust fetch that preserves Authorization header across redirects.
- * Standard fetch implementations strip Authorization when following redirects.
- */
-export async function fetchWithPreservedAuth(
-  url: string,
-  options: RequestInit & { headers: Record<string, string> },
-  maxRedirects = 5
-): Promise<Response> {
-  let currentUrl = url;
-  let redirects = 0;
-
-  while (redirects < maxRedirects) {
-    const response = await fetch(currentUrl, {
-      ...options,
-      redirect: "manual",
-    });
-
-    if (response.status >= 300 && response.status < 400) {
-      const location = response.headers.get("location");
-      if (location) {
-        currentUrl = new URL(location, currentUrl).href;
-        redirects++;
-        continue;
-      }
-    }
-
-    return response;
-  }
-
-  throw new Error(`Too many redirects (limit: ${maxRedirects})`);
-}
-
-/**
  * JMAP Client for sending emails
  */
 export class JMAPClient {
@@ -168,13 +135,29 @@ export class JMAPClient {
       return this.resolvedPostApiUrl;
     }
     const authHeader = this.authHeader();
-    const response = await fetchWithPreservedAuth(configured, {
+    let response = await fetch(configured, {
       method: "GET",
       headers: {
         Authorization: authHeader,
         Accept: "application/json",
       },
+      redirect: "manual",
     });
+
+    // Handle redirects manually to preserve Authorization header (standard fetch strips it on redirects)
+    if (response.status >= 300 && response.status < 400) {
+      const location = response.headers.get("location");
+      if (location) {
+        const nextUrl = new URL(location, configured).href;
+        response = await fetch(nextUrl, {
+          method: "GET",
+          headers: {
+            Authorization: authHeader,
+            Accept: "application/json",
+          },
+        });
+      }
+    }
 
     if (!response.ok) {
       throw new Error(`JMAP session GET failed (${response.status})`);

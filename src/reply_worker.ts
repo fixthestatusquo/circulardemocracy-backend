@@ -8,7 +8,6 @@ import { isReadyToSend } from "./scheduling";
 import { renderEmailLayout } from "./email_layout";
 import {
   type EmailMessage,
-  fetchWithPreservedAuth,
   JMAPClient,
   jmapWellKnownSessionUrl,
   resolveMailAccountIdFromSession,
@@ -745,13 +744,29 @@ async function fetchAndResolveMailAccountIdFromSession(
   bearerToken: string,
 ): Promise<string> {
   const authHeader = `Bearer ${bearerToken}`;
-  const response = await fetchWithPreservedAuth(sessionUrl, {
+  let response = await fetch(sessionUrl, {
     method: "GET",
     headers: {
       Authorization: authHeader,
       Accept: "application/json",
     },
+    redirect: "manual",
   });
+
+  // Handle redirects manually to preserve Authorization header (standard fetch strips it on redirects)
+  if (response.status >= 300 && response.status < 400) {
+    const location = response.headers.get("location");
+    if (location) {
+      const nextUrl = new URL(location, sessionUrl).href;
+      response = await fetch(nextUrl, {
+        method: "GET",
+        headers: {
+          Authorization: authHeader,
+          Accept: "application/json",
+        },
+      });
+    }
+  }
 
   if (!response.ok) {
     throw new Error(`JMAP session GET failed (${response.status})`);
