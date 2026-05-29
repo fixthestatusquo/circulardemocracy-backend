@@ -825,14 +825,14 @@ export class DatabaseClient {
   async getMessageByExternalId(
     externalId: string,
     channelSource: string,
-    politician: string,
+    politicianId: number,
   ): Promise<(MessageInsert & { id: number; campaigns: Campaign }) | null> {
     try {
       const { data, error } = await this.supabase
         .from("messages")
         .select("*, campaigns(id, name)")
         .eq("external_id", externalId)
-        .eq("politician_id", politician)
+        .eq("politician_id", politicianId)
         .eq("channel_source", channelSource)
         .limit(1);
 
@@ -873,12 +873,14 @@ export class DatabaseClient {
 
   async getActiveTemplateForCampaign(
     campaignId: number,
+    politicianId: number,
   ): Promise<ReplyTemplate | null> {
     try {
       const { data, error } = await this.supabase
         .from("reply_templates")
         .select("*")
         .eq("campaign_id", campaignId)
+        .eq("politician_id", politicianId)
         .eq("active", true)
         .limit(1);
 

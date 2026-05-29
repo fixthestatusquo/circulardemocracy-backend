@@ -198,8 +198,9 @@ export async function ensureSingleActiveTemplate(
 export async function getActiveTemplate(
   db: DatabaseClient,
   campaignId: number,
+  politicianId: number,
 ): Promise<ReplyTemplate | null> {
-  return await db.getActiveTemplateForCampaign(campaignId);
+  return await db.getActiveTemplateForCampaign(campaignId, politicianId);
 }
 
 /**

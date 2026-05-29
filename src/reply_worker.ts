@@ -428,12 +428,21 @@ async function processSingleMessage(
   message: MessageToProcess,
   context: BatchProcessingContext,
 ): Promise<void> {
-  const { politician, jmapConfig, campaignCache, templateCache, jmapClientCache } = context;
+  const {
+    politician,
+    jmapConfig,
+    campaignCache,
+    templateCache,
+    jmapClientCache,
+  } = context;
 
   // 1. Get template (cached if in batch)
   let template = templateCache?.get(message.campaign_id);
   if (!template) {
-    template = await db.getActiveTemplateForCampaign(message.campaign_id);
+    template = await db.getActiveTemplateForCampaign(
+      message.campaign_id,
+      politician.id,
+    );
     if (!template) {
       const errorMsg = `No active template found for campaign ${message.campaign_id}`;
       await handleSendFailure(db, message, errorMsg);
