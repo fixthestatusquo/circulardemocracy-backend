@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import minimist from "minimist";
 import { DatabaseClient } from "../src/database.js";
 import { processMessage, PoliticianNotFoundError, type Ai, type MessageInput } from "../src/message_processor.js";
 import { z } from "zod";
@@ -48,53 +49,43 @@ const MessageInputSchema = z.object({
 
 export function parseArgs(): MessageInput | null {
   const args = process.argv.slice(2);
+  const argv = minimist(args, {
+    string: [
+      "message-id",
+      "sender-name",
+      "sender-email",
+      "recipient-email",
+      "subject",
+      "message",
+      "timestamp",
+      "channel-source",
+      "campaign-name",
+    ],
+    boolean: ["help"],
+    alias: { h: "help" },
+  });
 
-  if (args.length === 0 || args.includes('--help') || args.includes('-h')) {
+  if (args.length === 0 || argv.help) {
     printUsage();
     return null;
   }
 
-  const parsed: any = {};
-
-  for (let i = 0; i < args.length; i++) {
-    const flag = args[i];
-
-    if (!flag.startsWith('--')) {
-      console.error(`Invalid argument format: ${flag}`);
-      console.error('Use --help for usage information');
-      process.exit(1);
-    }
-
-    const key = flag.substring(2);
-
-    if (i + 1 < args.length && !args[i + 1].startsWith('--')) {
-      parsed[key] = args[i + 1];
-      i++;
-    } else {
-      console.error(`Missing value for argument: ${flag}`);
-      console.error('Use --help for usage information');
-      process.exit(1);
-    }
-  }
-
-  parsed.channel_source = parsed["channel-source"] || parsed.channel_source || "cli";
-
   const schemaData: any = {
-    external_id: parsed['message-id'],
-    sender_name: parsed['sender-name'],
-    sender_email: parsed['sender-email'],
-    recipient_email: parsed['recipient-email'],
-    subject: parsed.subject,
-    message: parsed.message,
-    timestamp: parsed.timestamp,
-    channel_source: parsed["channel-source"] || parsed.channel_source,
-    campaign_hint: parsed['campaign-name'] || parsed.campaign_hint,
+    external_id: argv["message-id"],
+    sender_name: argv["sender-name"],
+    sender_email: argv["sender-email"],
+    recipient_email: argv["recipient-email"],
+    subject: argv.subject,
+    message: argv.message,
+    timestamp: argv.timestamp,
+    channel_source: argv["channel-source"] || "cli",
+    campaign_hint: argv["campaign-name"],
   };
 
   try {
     return MessageInputSchema.parse(schemaData);
   } catch (error) {
-    console.error('Validation error:');
+    console.error("Validation error:");
     if (error instanceof z.ZodError) {
       const issues = error.issues;
       for (const err of issues) {
@@ -102,7 +93,7 @@ export function parseArgs(): MessageInput | null {
         console.error(`  ${path}: ${err.message}`);
       }
     } else {
-      console.error(error instanceof Error ? error.message : 'Unknown validation error');
+      console.error(error instanceof Error ? error.message : "Unknown validation error");
     }
     process.exit(1);
   }

@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 
+import minimist from "minimist";
 import { DatabaseClient } from "../src/database.js";
 import { resolveMailAccountIdFromSession } from "../src/jmap_client.js";
 import { generateEmbedding, formatEmailContentForEmbedding } from "../src/embedding_service.js";
@@ -290,70 +291,42 @@ async function moveEmailToMailbox(
 }
 
 function parseArgs(args: string[]): ReprocessOptions {
-  const parsed: Record<string, string | boolean | number> = {};
-  const booleanFlags = new Set(["dry-run", "process-all", "move-to-folders", "no-move-to-folders"]);
+  const argv = minimist(args, {
+    string: ["since", "user", "password"],
+    boolean: ["dry-run", "process-all", "no-move-to-folders", "help"],
+    alias: { h: "help" },
+  });
 
-  for (let i = 0; i < args.length; i++) {
-    const flag = args[i];
-
-    if (!flag.startsWith("--")) {
-      console.error(`Invalid argument format: ${flag}`);
-      console.error("Use --help for usage information");
-      process.exit(1);
-    }
-
-    const key = flag.substring(2);
-
-    if (booleanFlags.has(key)) {
-      parsed[key] = true;
-      continue;
-    }
-
-    if (i + 1 < args.length && !args[i + 1].startsWith("--")) {
-      const value = args[i + 1];
-
-      // Try to parse as number for campaign-id and limit
-      if (key === "campaign-id" || key === "limit") {
-        const numValue = parseInt(value, 10);
-        if (isNaN(numValue)) {
-          console.error(`Invalid ${key} value: ${value}`);
-          process.exit(1);
-        }
-        parsed[key] = numValue;
-      } else {
-        parsed[key] = value;
-      }
-
-      i++;
-      continue;
-    }
-
-    console.error(`Missing value for argument: ${flag}`);
-    console.error("Use --help for usage information");
-    process.exit(1);
+  if (argv.help) {
+    printUsage();
+    process.exit(0);
   }
 
-  const sinceValue = parsed.since;
+  const campaignId = argv["campaign-id"];
+  const limit = argv["limit"];
+
+  const sinceValue = argv.since;
   if (typeof sinceValue === "string" && Number.isNaN(Date.parse(sinceValue))) {
     console.error(`Invalid --since value: ${sinceValue}`);
     console.error("Use a valid date, e.g. 2024-03-01 or 2024-03-01T10:30:00Z");
     process.exit(1);
   }
 
-  const processAll = parsed["process-all"] === true || (!parsed.since && !parsed["campaign-id"] && !parsed.limit);
+  const processAll =
+    argv["process-all"] === true ||
+    (!argv.since && !argv["campaign-id"] && !argv.limit);
 
-  const options = {
-    campaignId: typeof parsed["campaign-id"] === "number" ? parsed["campaign-id"] : undefined,
-    since: typeof parsed.since === "string" ? parsed.since : undefined,
-    limit: typeof parsed.limit === "number" ? parsed.limit : undefined,
+  return {
+    campaignId: typeof campaignId === "number" ? campaignId : undefined,
+    since: typeof sinceValue === "string" ? sinceValue : undefined,
+    limit: typeof limit === "number" ? limit : undefined,
     processAll,
-    dryRun: parsed["dry-run"] === true,
-    moveToFolders: parsed["dry-run"] === true ? false : parsed["no-move-to-folders"] !== true,
-    username: typeof parsed.user === "string" ? parsed.user : undefined,
-    password: typeof parsed.password === "string" ? parsed.password : undefined,
+    dryRun: argv["dry-run"] === true,
+    moveToFolders:
+      argv["dry-run"] === true ? false : argv["no-move-to-folders"] !== true,
+    username: typeof argv.user === "string" ? argv.user : undefined,
+    password: typeof argv.password === "string" ? argv.password : undefined,
   };
-
-  return options;
 }
 
 function printUsage() {

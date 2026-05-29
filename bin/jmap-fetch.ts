@@ -1,11 +1,16 @@
 #!/usr/bin/env bun
 
+import minimist from "minimist";
 import { DatabaseClient } from "../src/database.js";
 import {
   jmapWellKnownSessionUrl,
   resolveMailAccountIdFromSession,
 } from "../src/jmap_client.js";
 import { processMessage, PoliticianNotFoundError, type Ai, type MessageInput } from "../src/message_processor.js";
+import {
+  resolvePoliticianId,
+  type CliFilters,
+} from "../src/cli_shared.js";
 import {
   buildStalwartImpersonationLogin,
   emailHostedOnDomain,
@@ -65,12 +70,13 @@ const MessageInputSchema = z.object({
 
 type SenderFlag = "normal" | "replyToDiffers" | "suspicious";
 
-interface StalwartFetchOptions {
+interface StalwartFetchOptions extends CliFilters {
   processAll: boolean;
   since?: string;
   messageId?: string;
-  dryRun: boolean;
   folder?: string;
+  user?: string;
+  password?: string;
 }
 
 interface JmapSessionResponse {
@@ -119,65 +125,61 @@ const turndownService = new Turndown({
 });
 
 function parseStalwartArgs(args: string[]): StalwartFetchOptions {
-  const parsed: Record<string, string | boolean> = {};
-  const booleanFlags = new Set([
-    "process-all",
-    "dry-run",
-  ]);
+  const argv = minimist(args, {
+    string: [
+      "politician-name",
+      "since",
+      "message-id",
+      "folder",
+      "user",
+      "password",
+    ],
+    boolean: ["process-all", "dry-run", "help"],
+    alias: { h: "help" },
+  });
 
-  for (let i = 0; i < args.length; i++) {
-    const flag = args[i];
+  if (argv.help) {
+    printUsage();
+    process.exit(0);
+  }
 
-    if (!flag.startsWith("--")) {
-      console.error(`Invalid argument format: ${flag}`);
-      console.error("Use --help for usage information");
-      process.exit(1);
-    }
+  const politicianId = argv["politician-id"];
+  const politicianName = argv["politician-name"];
 
-    const key = flag.substring(2);
-
-    if (booleanFlags.has(key)) {
-      parsed[key] = true;
-      continue;
-    }
-
-    if (i + 1 < args.length && !args[i + 1].startsWith("--")) {
-      parsed[key] = args[i + 1];
-      i++;
-      continue;
-    }
-
-    console.error(`Missing value for argument: ${flag}`);
-    console.error("Use --help for usage information");
+  if (politicianId !== undefined && politicianName !== undefined) {
+    console.error("Use only one of --politician-id or --politician-name");
     process.exit(1);
   }
 
-  const sinceValue = parsed.since;
+  const sinceValue = argv.since;
   if (typeof sinceValue === "string" && Number.isNaN(Date.parse(sinceValue))) {
     console.error(`Invalid --since value: ${sinceValue}`);
     console.error("Use a valid date, e.g. 2024-03-01 or 2024-03-01T10:30:00Z");
     process.exit(1);
   }
 
-  const folderValue = parsed.folder;
+  const folderValue = argv.folder;
   if (typeof folderValue === "string" && folderValue.trim().length === 0) {
     console.error("Invalid --folder value: cannot be empty");
     console.error("Use --help for usage information");
     process.exit(1);
   }
 
-  const processAll = parsed["process-all"] === true
-    || (!parsed.since && !parsed["message-id"]);
+  const processAll =
+    argv["process-all"] === true || (!argv.since && !argv["message-id"]);
 
   return {
+    politicianId: typeof politicianId === "number" ? politicianId : undefined,
+    politicianName:
+      typeof politicianName === "string" ? politicianName : undefined,
     processAll,
-    since: typeof parsed.since === "string" ? parsed.since : undefined,
+    since: typeof sinceValue === "string" ? sinceValue : undefined,
     messageId:
-      typeof parsed["message-id"] === "string"
-        ? parsed["message-id"]
-        : undefined,
-    dryRun: parsed["dry-run"] === true,
-    folder: typeof parsed.folder === "string" ? parsed.folder.trim() : undefined,
+      typeof argv["message-id"] === "string" ? argv["message-id"] : undefined,
+    dryRun: argv["dry-run"] === true,
+    folder: typeof folderValue === "string" ? folderValue.trim() : undefined,
+    user: typeof argv.user === "string" ? argv.user : undefined,
+    password: typeof argv.password === "string" ? argv.password : undefined,
   };
 }
 
@@ -196,9 +198,7 @@ function logAllDomainMailboxes(
     const mailbox = mailboxes[i];
     const isCurrent =
       processingLower && mailbox.trim().toLowerCase() === processingLower;
-    console.log(
-      `  ${i + 1}. ${mailbox}${isCurrent ? "  <- current" : ""}`,
-    );
+    console.log(`  ${i + 1}. ${mailbox}${isCurrent ? "  <- current" : ""}`);
   }
   if (processing) {
     console.log(`\nCurrently processing: ${processing}`);
@@ -211,10 +211,13 @@ JMAP Fetch - Automated ingestion from Stalwart mail server
 
 USAGE:
   jmap-fetch [--user <username>] [--password <password>] [options]
+  jmap-fetch [--politician-id <id> | --politician-name <hint>] [options]
 
 OPTIONS:
   --user <username>      JMAP mailbox email (default: JMAP_SERVICE_ACCOUNT_EMAIL env)
   --password <password>  JMAP app password (default: JMAP_SERVICE_ACCOUNT_PASSWORD env)
+  --politician-id <id>    Filter by politician (numeric id)
+  --politician-name <hint> Filter by politician (email exact or partial)
   --folder <name>        Additional mailbox/folder name to fetch from (optional; additive)
   --process-all          Fetch all available messages (default when no filter provided)
   --since <date>         Fetch messages received after date (ISO 8601)
@@ -229,8 +232,8 @@ ENVIRONMENT VARIABLES:
   (Mail account id for this CLI comes from the JMAP session after login.)
   ALL_DOMAIN                      When set (e.g. example.org), impersonate via
                                   RELAY_SERVICE_ACCOUNT_EMAIL / RELAY_SERVICE_ACCOUNT_PASSWORD
-                                  (login: target%relay). Without --user: all DB mailboxes on domain.
-                                  With --user: one mailbox only.
+                                  (login: target%relay). Without --user/--politician: all DB mailboxes on domain.
+                                  With --user/--politician: one mailbox only.
   RELAY_SERVICE_ACCOUNT_EMAIL     Required for ALL_DOMAIN impersonation (impersonator account).
   RELAY_SERVICE_ACCOUNT_PASSWORD  Required for ALL_DOMAIN impersonation (impersonator password).
   SUPABASE_URL           Required Supabase URL
@@ -239,8 +242,7 @@ ENVIRONMENT VARIABLES:
 EXAMPLES:
   jmap-fetch --process-all
   jmap-fetch --since "2024-03-01"
-  jmap-fetch --message-id "specific-id"
-  jmap-fetch --dry-run --since "2024-03-01"
+  jmap-fetch --politician-id 123
   jmap-fetch --user dibora --password mypass --process-all
 `);
 }
@@ -1218,30 +1220,21 @@ async function main() {
     return;
   }
 
-  const parsed: Record<string, string> = {};
-  for (let i = 0; i < args.length; i++) {
-    if (args[i] === "--user" && i + 1 < args.length) {
-      parsed.user = args[i + 1];
-      i++;
-    } else if (args[i] === "--password" && i + 1 < args.length) {
-      parsed.password = args[i + 1];
-      i++;
-    }
-  }
+  const fetchOptions = parseStalwartArgs(args);
 
-  const explicitMailbox = (parsed.user || "").trim();
   const jmapServiceAccount = (process.env.JMAP_SERVICE_ACCOUNT_EMAIL || "").trim();
-  const cliPasswordOverride = (parsed.password || "").trim();
   const appPassword =
-    cliPasswordOverride ||
+    (typeof fetchOptions.password === "string" ? fetchOptions.password.trim() : "") ||
     (process.env.JMAP_SERVICE_ACCOUNT_PASSWORD || "").trim();
   const allDomainRaw = (process.env.ALL_DOMAIN || "").trim();
   const relayCreds = resolveRelayImpersonationCredentials(process.env);
   const impersonationPassword = allDomainRaw
-    ? cliPasswordOverride || relayCreds?.relayPassword || ""
+    ? (typeof fetchOptions.password === "string" ? fetchOptions.password.trim() : "") ||
+      relayCreds?.relayPassword ||
+      ""
     : appPassword;
 
-  if (allDomainRaw && !relayCreds && !cliPasswordOverride) {
+  if (allDomainRaw && !relayCreds && !(typeof fetchOptions.password === "string")) {
     console.error(
       "Error: ALL_DOMAIN mode requires RELAY_SERVICE_ACCOUNT_EMAIL and RELAY_SERVICE_ACCOUNT_PASSWORD.",
     );
@@ -1260,13 +1253,6 @@ async function main() {
       "Error: JMAP_SERVICE_ACCOUNT_PASSWORD environment variable or --password must be set",
     );
     console.error("Create an app password in Stalwart and export it before running CLI.");
-    process.exit(1);
-  }
-
-  if (!allDomainRaw && !explicitMailbox && !jmapServiceAccount) {
-    console.error(
-      "Error: JMAP_SERVICE_ACCOUNT_EMAIL environment variable or --user must be set",
-    );
     process.exit(1);
   }
 
@@ -1293,7 +1279,27 @@ async function main() {
 
     const ai: Ai = new CliAi();
 
-    const fetchOptions = parseStalwartArgs(args);
+    let explicitMailbox = (typeof fetchOptions.user === "string" ? fetchOptions.user.trim() : "");
+    const politicianId = await resolvePoliticianId(db, fetchOptions);
+
+    if (politicianId !== undefined) {
+      const politician = await db.getPoliticianById(politicianId);
+      if (politician) {
+        if (explicitMailbox && explicitMailbox !== politician.email) {
+          console.warn(
+            `Warning: Overriding --user ${explicitMailbox} with politician email ${politician.email}`,
+          );
+        }
+        explicitMailbox = politician.email;
+      }
+    }
+
+    if (!allDomainRaw && !explicitMailbox && !jmapServiceAccount) {
+      console.error(
+        "Error: JMAP_SERVICE_ACCOUNT_EMAIL environment variable, --user, or --politician-* must be set",
+      );
+      process.exit(1);
+    }
 
     if (allDomainRaw && !explicitMailbox) {
       const domainKey = normalizeMailDomain(allDomainRaw);
@@ -1341,7 +1347,7 @@ async function main() {
       const domainKey = normalizeMailDomain(allDomainRaw);
       if (!emailHostedOnDomain(explicitMailbox, domainKey)) {
         console.error(
-          `Error: --user ${explicitMailbox} is not on ALL_DOMAIN ${domainKey}.`,
+          `Error: Target mailbox ${explicitMailbox} is not on ALL_DOMAIN ${domainKey}.`,
         );
         process.exit(1);
       }

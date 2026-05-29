@@ -3,8 +3,13 @@
 import { config as dotenv } from "dotenv";
 import type { DatabaseClient } from "../src/database.js";
 import { DatabaseClient as DatabaseClientImpl } from "../src/database.js";
+import minimist from "minimist";
 import {
-  processReplyImmediately,
+  resolveCampaignId,
+  resolvePoliticianId,
+  type CliFilters,
+} from "../src/cli_shared.js";
+import {
   processScheduledReplies,
   type ProcessingResult,
 } from "../src/reply_worker.js";
@@ -14,155 +19,45 @@ dotenv();
 /** Must match `MAX_RETRY_ATTEMPTS` in `src/reply_worker.ts`. */
 const MAX_RETRY_ATTEMPTS = 10;
 
-export interface SendRepliesOptions {
-  campaignId?: number;
-  campaignName?: string;
-  politicianId?: number;
-  politicianName?: string;
-  dryRun?: boolean;
-}
+export function parseArgs(args: string[]): CliFilters | null {
+  const argv = minimist(args, {
+    string: ["campaign-name", "politician-name"],
+    boolean: ["dry-run", "help"],
+    alias: { h: "help" },
+  });
 
-export function parseArgs(args: string[]): SendRepliesOptions | null {
-  if (args.includes("--help") || args.includes("-h")) {
+  if (argv.help) {
     return null;
   }
 
-  const parsed: Record<string, string | number | boolean> = {};
-  const booleanFlags = new Set(["dry-run"]);
+  const campaignId = argv["campaign-id"];
+  const campaignName = argv["campaign-name"];
+  const politicianId = argv["politician-id"];
+  const politicianName = argv["politician-name"];
 
-  for (let i = 0; i < args.length; i++) {
-    const flag = args[i];
-
-    if (!flag.startsWith("--")) {
-      console.error(`Invalid argument format: ${flag}`);
-      console.error("Use --help for usage information");
-      process.exit(1);
-    }
-
-    const key = flag.substring(2);
-
-    if (booleanFlags.has(key)) {
-      parsed[key] = true;
-      continue;
-    }
-
-    if (i + 1 < args.length && !args[i + 1].startsWith("--")) {
-      const value = args[i + 1];
-
-      if (key === "campaign-id" || key === "politician-id") {
-        const numValue = parseInt(value, 10);
-        if (Number.isNaN(numValue)) {
-          console.error(`Invalid ${key} value: ${value}`);
-          process.exit(1);
-        }
-        parsed[key] = numValue;
-      } else if (key === "campaign-name" || key === "politician-name") {
-        parsed[key] = value;
-      } else {
-        console.error(`Unknown option: --${key}`);
-        console.error("Use --help for usage information");
-        process.exit(1);
-      }
-
-      i++;
-      continue;
-    }
-
-    console.error(`Missing value for argument: ${flag}`);
-    console.error("Use --help for usage information");
-    process.exit(1);
-  }
-
-  if (
-    parsed["campaign-id"] !== undefined &&
-    parsed["campaign-name"] !== undefined
-  ) {
+  if (campaignId !== undefined && campaignName !== undefined) {
     console.error("Use only one of --campaign-id or --campaign-name");
     process.exit(1);
   }
 
-  if (
-    parsed["politician-id"] !== undefined &&
-    parsed["politician-name"] !== undefined
-  ) {
+  if (politicianId !== undefined && politicianName !== undefined) {
     console.error("Use only one of --politician-id or --politician-name");
     process.exit(1);
   }
 
   return {
-    campaignId:
-      typeof parsed["campaign-id"] === "number"
-        ? parsed["campaign-id"]
-        : undefined,
-    campaignName:
-      typeof parsed["campaign-name"] === "string"
-        ? parsed["campaign-name"]
-        : undefined,
-    politicianId:
-      typeof parsed["politician-id"] === "number"
-        ? parsed["politician-id"]
-        : undefined,
+    campaignId: typeof campaignId === "number" ? campaignId : undefined,
+    campaignName: typeof campaignName === "string" ? campaignName : undefined,
+    politicianId: typeof politicianId === "number" ? politicianId : undefined,
     politicianName:
-      typeof parsed["politician-name"] === "string"
-        ? parsed["politician-name"]
-        : undefined,
-    dryRun: parsed["dry-run"] === true,
+      typeof politicianName === "string" ? politicianName : undefined,
+    dryRun: argv["dry-run"] === true,
   };
-}
-
-export async function resolveCampaignId(
-  db: DatabaseClient,
-  options: Pick<SendRepliesOptions, "campaignId" | "campaignName">,
-): Promise<number | undefined> {
-  if (options.campaignId !== undefined) {
-    const campaign = await db.getCampaignById(options.campaignId);
-    if (!campaign) {
-      throw new Error(`Campaign not found: id ${options.campaignId}`);
-    }
-    return campaign.id;
-  }
-
-  if (options.campaignName) {
-    const campaign = await db.findCampaignByHint(options.campaignName);
-    if (!campaign) {
-      throw new Error(
-        `No campaign matched name hint: ${options.campaignName}`,
-      );
-    }
-    return campaign.id;
-  }
-
-  return undefined;
-}
-
-export async function resolvePoliticianId(
-  db: DatabaseClient,
-  options: Pick<SendRepliesOptions, "politicianId" | "politicianName">,
-): Promise<number | undefined> {
-  if (options.politicianId !== undefined) {
-    const politician = await db.getPoliticianById(options.politicianId);
-    if (!politician) {
-      throw new Error(`Politician not found: id ${options.politicianId}`);
-    }
-    return politician.id;
-  }
-
-  if (options.politicianName) {
-    const politician = await db.findPoliticianByEmail(options.politicianName);
-    if (!politician) {
-      throw new Error(
-        `No politician matched name/email hint: ${options.politicianName}`,
-      );
-    }
-    return politician.id;
-  }
-
-  return undefined;
 }
 
 async function processFilteredReplies(
   db: DatabaseClient,
-  options: SendRepliesOptions,
+  options: CliFilters,
   runtimeSecrets: Record<string, string | undefined>,
 ): Promise<ProcessingResult> {
   const campaignId = await resolveCampaignId(db, options);
@@ -178,7 +73,7 @@ async function processFilteredReplies(
 
 export async function previewReadyReplies(
   db: DatabaseClient,
-  options: SendRepliesOptions,
+  options: CliFilters,
 ): Promise<void> {
   const campaignId = await resolveCampaignId(db, options);
   const politicianId = await resolvePoliticianId(db, options);
