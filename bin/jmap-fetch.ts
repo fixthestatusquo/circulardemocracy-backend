@@ -1000,6 +1000,7 @@ function createCliCompatibleDb(db: DatabaseClient): DatabaseClient {
 async function getAlreadyProcessedExternalIds(
   db: DatabaseClient,
   externalIds: string[],
+  politicianId?: number,
 ): Promise<Set<string>> {
   const uniqueIds = Array.from(new Set(externalIds.filter((id) => id.trim().length > 0)));
   if (uniqueIds.length === 0) {
@@ -1011,12 +1012,17 @@ async function getAlreadyProcessedExternalIds(
     return new Set<string>();
   }
 
-  const { data, error } = await supabase
+  let query = supabase
     .from("messages")
     .select("external_id")
     .eq("channel_source", "stalwart")
-    .eq("processing_status", "processed")
-    .in("external_id", uniqueIds);
+    .eq("processing_status", "processed");
+
+  if (politicianId !== undefined) {
+    query = query.eq("politician_id", politicianId);
+  }
+
+  const { data, error } = await query.in("external_id", uniqueIds);
 
   if (error) {
     throw new Error(`Failed to check already processed messages: ${error.message}`);
@@ -1048,6 +1054,14 @@ async function runStalwartIngestion(
     console.log(
       `${prefix}JMAP auth: direct Basic login as ${username} (password: JMAP_SERVICE_ACCOUNT_PASSWORD or --password)`,
     );
+  }
+
+  // Resolve politician ID for deduplication
+  let politicianId = options.politicianId;
+  if (politicianId === undefined) {
+    const mailboxEmail = logMailbox || (impersonationIdx > 0 ? username.slice(0, impersonationIdx) : username);
+    const politician = await db.findPoliticianByEmail(mailboxEmail);
+    politicianId = politician?.id;
   }
 
   console.log(`${prefix}Connecting to Stalwart JMAP at ${jmapWellKnownUrl}...`);
@@ -1120,6 +1134,7 @@ async function runStalwartIngestion(
   const processedExternalIds = await getAlreadyProcessedExternalIds(
     db,
     rawEmails.map((email) => email.id),
+    politicianId,
   );
   const unprocessedRawEmails = rawEmails.filter((email) => !processedExternalIds.has(email.id));
 
@@ -1282,6 +1297,7 @@ async function main() {
     const politicianId = await resolvePoliticianId(db, fetchOptions);
 
     if (politicianId !== undefined) {
+      fetchOptions.politicianId = politicianId;
       const politician = await db.getPoliticianById(politicianId);
       if (politician) {
         if (explicitMailbox && explicitMailbox !== politician.email) {
