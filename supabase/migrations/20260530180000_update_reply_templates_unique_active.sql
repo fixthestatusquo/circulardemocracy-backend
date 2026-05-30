@@ -1,0 +1,1 @@
+DROP INDEX IF EXISTS reply_templates_one_active_per_campaign;
