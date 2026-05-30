@@ -22,6 +22,7 @@ import {
   updateReplyTemplate,
   validateTemplateData,
 } from "../src/template_service";
+import { replaceTokens } from "../src/reply_worker";
 
 // =============================================================================
 // SCHEDULING TESTS
@@ -281,6 +282,44 @@ describe("Email Layout", () => {
       expect(result.htmlBody).toContain("Member of the European Parliament: John Doe");
       expect(result.textBody).toContain("🇪🇺");
       expect(result.textBody).toContain("Member of the European Parliament: John Doe");
+    });
+  });
+
+  describe("replaceTokens", () => {
+    it("should replace {subject}, {sender}, and {date} tokens", () => {
+      const text = "Hello {sender}, regarding {subject} on {date}.";
+      const tokens = {
+        sender: "John Doe",
+        subject: "Climate",
+        date: "2024-01-01",
+      };
+
+      const result = replaceTokens(text, tokens);
+      expect(result).toBe("Hello John Doe, regarding Climate on 2024-01-01.");
+    });
+
+    it("should replace multiple occurrences of the same token", () => {
+      const text = "{sender}, {sender}!";
+      const tokens = { sender: "John" };
+
+      const result = replaceTokens(text, tokens);
+      expect(result).toBe("John, John!");
+    });
+
+    it("should not replace tokens not in the map", () => {
+      const text = "Hello {unknown}.";
+      const tokens = { sender: "John" };
+
+      const result = replaceTokens(text, tokens);
+      expect(result).toBe("Hello {unknown}.");
+    });
+
+    it("should handle empty values", () => {
+      const text = "Subject: {subject}";
+      const tokens = { subject: "" };
+
+      const result = replaceTokens(text, tokens);
+      expect(result).toBe("Subject: ");
     });
   });
 });

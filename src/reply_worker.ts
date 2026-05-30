@@ -113,7 +113,7 @@ export interface ProcessingResult {
   total: number;
   sent: number;
   failed: number;
-  errors: Array<{ message_id: number; error: string }>;
+  errors: Array<{ message_id: number | string; error: string }>;
 }
 
 interface SendContext {
@@ -317,6 +317,7 @@ export async function replyMessage(
     errors: [],
   };
 
+  let internalId: number | string = messageId;
   try {
     const message = await db.getMessageByExternalId(
       messageId,
@@ -328,6 +329,7 @@ export async function replyMessage(
         `Message ${messageId} not found for politician ${politicianId}`,
       );
     }
+    internalId = message.id;
 
     const politician = await getPoliticianById(db, politicianId);
     if (!politician) {
@@ -375,7 +377,7 @@ export async function replyMessage(
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : "Unknown error";
     result.failed = 1;
-    result.errors.push({ message_id: messageId, error: errorMsg });
+    result.errors.push({ message_id: internalId, error: errorMsg });
     return result;
   }
 }
@@ -583,7 +585,7 @@ async function processSingleMessage(
 
   // 10. Log success and finalize
   console.log(
-    `[Reply Worker] ✓ Sent reply for message ${message.id} (Provider ID: ${sendResult.messageId})`,
+    `[Reply Worker] ✓ Sent reply for message ${message.id} (sent ID: ${sendResult.messageId})`,
   );
 
   await db.markMessageReplyDelivered(message.id);
