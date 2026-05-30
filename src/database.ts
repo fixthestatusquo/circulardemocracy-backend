@@ -1509,11 +1509,13 @@ export class DatabaseClient {
     id: number;
     email: string;
     name: string;
+    party: string;
+    position: string;
     reply_to: string | null;
   } | null> {
     const { data, error } = await this.supabase
       .from("politicians")
-      .select("id, email, name, reply_to")
+      .select("id, email, name, reply_to, party,position")
       .eq("id", politicianId)
       .limit(1);
 

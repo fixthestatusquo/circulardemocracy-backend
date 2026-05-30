@@ -41,6 +41,14 @@ export interface EmailMessage {
   subject: string;
   textBody?: string;
   htmlBody?: string;
+  /** The value of the Message-ID header of this email. */
+  headerMessageId?: string;
+  /** The value for the In-Reply-To header. */
+  inReplyTo?: string[];
+  /** The value for the References header. */
+  references?: string[];
+  /** The date the message was received. */
+  receivedAt?: string;
 }
 
 export interface JMAPSendResult {
@@ -427,6 +435,14 @@ export class JMAPClient {
       emailObj.replyTo = [{ email: email.replyTo }];
     }
 
+    // Add threading headers
+    if (email.inReplyTo && email.inReplyTo.length > 0) {
+      emailObj["header:In-Reply-To:asString"] = email.inReplyTo.join(" ");
+    }
+    if (email.references && email.references.length > 0) {
+      emailObj["header:References:asString"] = email.references.join(" ");
+    }
+
     // Build body parts
     const bodyParts: any[] = [];
 
@@ -496,7 +512,14 @@ export class JMAPClient {
           {
             accountId: this.config.accountId,
             ids,
-            properties: ["id", "from", "replyTo", "subject"],
+            properties: [
+              "id",
+              "from",
+              "replyTo",
+              "subject",
+              "receivedAt",
+              "header:Message-ID:asString",
+            ],
           },
           "emailsGet",
         ],
@@ -517,13 +540,15 @@ export class JMAPClient {
       for (const item of body.list || []) {
         const from = item.from?.[0];
         const replyTo = item.replyTo?.[0];
-        
+
         result.set(item.id, {
           from: from?.email || "",
           fromName: from?.name || "",
           to: [], // Not needed for our lookup
           replyTo: replyTo?.email || undefined,
           subject: item.subject || "",
+          headerMessageId: item["header:Message-ID:asString"],
+          receivedAt: item.receivedAt,
         });
       }
 

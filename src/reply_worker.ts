@@ -240,24 +240,13 @@ async function processPoliticianBatch(
       return result;
     }
 
-    // 1. Pre-fetch JMAP emails in bulk to avoid per-message DB lookups
+    // 1. Pre-fetch JMAP emails in bulk to avoid per-message lookups
     const imp = jmapResolve.config.stalwartImpersonation;
     const fetchClientKey = imp ? `imp:${politician.email}` : "relay:default";
-    const jmapClientForFetch = imp
-      ? new JMAPClient({
-          apiUrl: jmapResolve.config.jmapApiUrl,
-          accountId: "",
-          basicUsername: buildStalwartImpersonationLogin(
-            imp.relayAccountEmail,
-            politician.email,
-          ),
-          basicPassword: imp.relayAccountPassword,
-        })
-      : new JMAPClient({
-          apiUrl: jmapResolve.config.jmapApiUrl,
-          accountId: jmapResolve.config.jmapAccountId,
-          bearerToken: jmapResolve.config.jmapBearerToken,
-        });
+    const jmapClientForFetch = createJMAPClient(
+      jmapResolve.config,
+      politician.email,
+    );
     jmapClientCache.set(fetchClientKey, jmapClientForFetch);
 
     try {
@@ -351,22 +340,7 @@ export async function replyMessage(
       throw new Error(jmapResolve.reason);
     }
 
-    const imp = jmapResolve.config.stalwartImpersonation;
-    const server = imp
-      ? new JMAPClient({
-          apiUrl: jmapResolve.config.jmapApiUrl,
-          accountId: "",
-          basicUsername: buildStalwartImpersonationLogin(
-            imp.relayAccountEmail,
-            politician.email,
-          ),
-          basicPassword: imp.relayAccountPassword,
-        })
-      : new JMAPClient({
-          apiUrl: jmapResolve.config.jmapApiUrl,
-          accountId: jmapResolve.config.jmapAccountId,
-          bearerToken: jmapResolve.config.jmapBearerToken,
-        });
+    const server = createJMAPClient(jmapResolve.config, politician.email);
 
     const emails = await server.getEmails([message.external_id]);
     const jmapEmail = emails.get(message.external_id);
@@ -375,7 +349,7 @@ export async function replyMessage(
         `Original message ${message.external_id} not found on JMAP server`,
       );
     }
-    console.log(jmapEmail);
+    const imp = jmapResolve.config.stalwartImpersonation;
     const fetchClientKey = imp ? `imp:${politician.email}` : "relay:default";
 
     const messageToProcess: MessageToProcess = {
@@ -497,7 +471,6 @@ async function processSingleMessage(
 
   // 3. Resolve recipient email
   const jmapEmail = jmapEmailCache?.get(message.external_id);
-  console.log(jmapEmail);
   const senderEmail = jmapEmail?.replyTo || jmapEmail?.from;
   if (!senderEmail) {
     const errorMsg = `Short-term contact email not found for message ${message.id} (JMAP ID ${message.external_id})`;
@@ -550,33 +523,34 @@ async function processSingleMessage(
   const clientKey = imp ? `imp:${outboundIdentity.fromEmail}` : "relay:default";
   let jmapClient = jmapClientCache?.get(clientKey);
   if (!jmapClient) {
-    jmapClient = imp
-      ? new JMAPClient({
-          apiUrl: jmapConfig.jmapApiUrl,
-          accountId: "",
-          basicUsername: buildStalwartImpersonationLogin(
-            imp.relayAccountEmail,
-            outboundIdentity.fromEmail,
-          ),
-          basicPassword: imp.relayAccountPassword,
-        })
-      : new JMAPClient({
-          apiUrl: jmapConfig.jmapApiUrl,
-          accountId: jmapConfig.jmapAccountId,
-          bearerToken: jmapConfig.jmapBearerToken,
-        });
+    jmapClient = createJMAPClient(jmapConfig, outboundIdentity.fromEmail);
     jmapClientCache?.set(clientKey, jmapClient);
   }
 
   const sendContext = await buildSendContext(db, message, outboundIdentity);
-  // 7. Render and build email
+
+  // 7. Resolve template tokens
+  const tokens = {
+    subject: jmapEmail?.subject || "",
+    sender: jmapEmail?.fromName || jmapEmail?.from || "",
+    date: jmapEmail?.receivedAt
+      ? new Date(jmapEmail.receivedAt).toLocaleDateString()
+      : "",
+  };
+
+  const personalizedSubject = replaceTokens(template.subject, tokens);
+  const personalizedBody = replaceTokens(template.body, tokens);
+
+  // 8. Render and build email
   const emailContent = renderEmailLayout({
-    subject: template.subject,
-    markdown_body: template.body,
+    subject: personalizedSubject,
+    markdown_body: personalizedBody,
     layout_type: template.layout_type,
     campaign_name: campaign?.name,
     politician_name: politician.name,
     politician_email: politician.email,
+    politician_party: politician.party,
+    politician_position: politician.position,
   });
 
   const email: EmailMessage = {
@@ -589,7 +563,13 @@ async function processSingleMessage(
     htmlBody: emailContent.htmlBody,
   };
 
-  // 8. Send via JMAP
+  // Add threading headers if we have the original message-id
+  if (jmapEmail?.headerMessageId) {
+    email.inReplyTo = [jmapEmail.headerMessageId];
+    email.references = [jmapEmail.headerMessageId];
+  }
+
+  // 9. Send via JMAP
   const sendResult = await jmapClient.sendEmail(email);
 
   if (!sendResult.success) {
@@ -601,12 +581,27 @@ async function processSingleMessage(
     throw new Error(errorMsg);
   }
 
-  // 9. Log success and finalize
+  // 10. Log success and finalize
   console.log(
     `[Reply Worker] ✓ Sent reply for message ${message.id} (Provider ID: ${sendResult.messageId})`,
   );
 
   await db.markMessageReplyDelivered(message.id);
+}
+
+/**
+ * Replaces tokens in the form of {name} with values from the provided map.
+ */
+export function replaceTokens(
+  text: string,
+  tokens: Record<string, string>,
+): string {
+  let result = text;
+  for (const [key, value] of Object.entries(tokens)) {
+    const regex = new RegExp(`\\{${key}\\}`, "g");
+    result = result.replace(regex, value);
+  }
+  return result;
 }
 
 /**
@@ -706,6 +701,8 @@ async function getPoliticianById(
   id: number;
   email: string;
   name: string;
+  position: string;
+  party: string;
   reply_to: string | null;
 } | null> {
   try {
@@ -810,4 +807,31 @@ function sanitizeErrorMessage(raw: string): string {
   return raw
     .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, "[redacted-email]")
     .slice(0, 500);
+}
+
+/**
+ * Creates a JMAPClient based on configuration and target email (for impersonation).
+ */
+export function createJMAPClient(
+  config: WorkerConfig,
+  targetEmail: string,
+): JMAPClient {
+  const imp = config.stalwartImpersonation;
+  if (imp) {
+    return new JMAPClient({
+      apiUrl: config.jmapApiUrl,
+      accountId: "",
+      basicUsername: buildStalwartImpersonationLogin(
+        imp.relayAccountEmail,
+        targetEmail,
+      ),
+      basicPassword: imp.relayAccountPassword,
+    });
+  }
+
+  return new JMAPClient({
+    apiUrl: config.jmapApiUrl,
+    accountId: config.jmapAccountId,
+    bearerToken: config.jmapBearerToken,
+  });
 }

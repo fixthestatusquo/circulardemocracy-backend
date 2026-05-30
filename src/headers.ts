@@ -6,6 +6,8 @@ export interface HeaderInput {
   campaignName?: string;
   politicianName?: string;
   politicianEmail?: string;
+  politicianPosition?: string;
+  politicianParty?: string;
 }
 
 export interface RenderedHeader {
@@ -66,12 +68,15 @@ export function renderStandardHeader(input: HeaderInput): RenderedHeader {
  */
 export function renderEPHeader(input: HeaderInput): RenderedHeader {
   const { politicianName } = input;
-  const title = politicianName ? `🇪🇺 Member of the European Parliament: ${politicianName}` : "🇪🇺 European Parliament";
+  const title = input.politicianPosition
+    ? `🇪🇺 ${input.politicianPosition}`
+    : "";
 
   // HTML
   const html = `
 <div class="email-header ep-header">
-  <h2 class="politician-title">${escapeHtml(title)}</h2>
+  <h2 class="politician-title">${escapeHtml(politicianName || "MEP")}</h2>
+  <h3 class="title">${escapeHtml(title)}</h3>
 </div>
 <hr class="header-divider">`.trim();
 

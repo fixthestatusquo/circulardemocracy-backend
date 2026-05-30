@@ -17,6 +17,8 @@ export interface EmailLayoutInput {
   campaign_name?: string;
   politician_name?: string;
   politician_email?: string;
+  politician_position?: string;
+  politician_party?: string;
 }
 
 export interface RenderedEmail {
@@ -66,6 +68,8 @@ function renderWithHeader(
     campaignName: input.campaign_name,
     politicianName: input.politician_name,
     politicianEmail: input.politician_email,
+    politicianParty: input.politician_party,
+    politicianPosition: input.politician_position,
   };
 
   switch (input.layout_type) {
@@ -238,4 +242,3 @@ function escapeHtml(text: string): string {
   };
   return text.replace(/[&<>"']/g, (char) => map[char]);
 }
-
