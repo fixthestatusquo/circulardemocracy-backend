@@ -456,7 +456,6 @@ async function processSingleMessage(
     }
     templateCache?.set(message.campaign_id, template);
   }
-  console.log("template to use", template);
   // 2. Apply schedule check
   /*  const replySchedule = await applyReplyScheduleForMessage(db, message.id);
   if (!replySchedule) {
