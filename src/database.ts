@@ -1,4 +1,5 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import type { Database } from "@/types/supabase";
 
 // Database Layer - Supabase REST API Client
 // Handles all database operations for Circular Democracy
@@ -76,7 +77,7 @@ export class DatabaseClient {
     if (config.accessToken) {
       headers.Authorization = `Bearer ${config.accessToken}`;
     }
-    this.supabase = createClient(config.url, config.key, {
+    this.supabase = createClient<Database>(config.url, config.key, {
       auth: {
         persistSession: false,
       },
