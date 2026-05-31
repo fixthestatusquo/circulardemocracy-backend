@@ -31,7 +31,6 @@ const mockDb = {
   getActiveTemplateForCampaign: vi.fn(),
   getMessageForReplyScheduling: vi.fn(),
   upsertSupporter: vi.fn(),
-  storeMessageContact: vi.fn(),
   assignMessageToCluster: vi.fn(),
 } as unknown as DatabaseClient;
 
@@ -81,7 +80,6 @@ vi.mock("../src/database", () => ({
           reply_scheduled_at: null,
         })),
       upsertSupporter: vi.fn().mockResolvedValue(1),
-      storeMessageContact: vi.fn().mockResolvedValue(undefined),
     };
   }),
   hashEmail: vi.fn().mockResolvedValue("hashed-email"),
@@ -793,7 +791,6 @@ describe("Stalwart Webhook", () => {
   describe("Integration Tests", () => {
     beforeEach(() => {
       vi.mocked(mockDb.upsertSupporter).mockResolvedValue(1);
-      vi.mocked(mockDb.storeMessageContact).mockResolvedValue(undefined);
     });
 
     it("should process a complete Stalwart hook payload successfully", async () => {

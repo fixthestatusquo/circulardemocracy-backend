@@ -31,7 +31,6 @@ describe("Reply Worker", () => {
     getCampaignIdsWithActiveReplyTemplate: vi.fn(),
     updateMessageFields: vi.fn(),
     getActiveTemplateForCampaign: vi.fn(),
-    getMessageContactEmail: vi.fn(),
     upsertSupporter: vi.fn(),
     logEmailEvent: vi.fn(),
     markMessageReplyDelivered: vi.fn(),
@@ -196,23 +195,6 @@ describe("Reply Worker", () => {
       received_at: "2024-01-01T00:00:00Z",
       reply_retry_count: 0,
     };
-
-    it("should retrieve contact email from database", async () => {
-      vi.spyOn(mockDb, "getMessageContactEmail").mockResolvedValue(
-        "sender@example.com",
-      );
-
-      const email = await mockDb.getMessageContactEmail(1);
-      expect(email).toBe("sender@example.com");
-      expect(mockDb.getMessageContactEmail).toHaveBeenCalledWith(1);
-    });
-
-    it("should handle missing contact email", async () => {
-      vi.spyOn(mockDb, "getMessageContactEmail").mockResolvedValue(null);
-
-      const email = await mockDb.getMessageContactEmail(1);
-      expect(email).toBeNull();
-    });
 
     it("should retrieve active template for campaign", async () => {
       const mockTemplate = {
@@ -561,9 +543,7 @@ describe("Reply Worker", () => {
         created_at: "2024-01-01T00:00:00Z",
         updated_at: "2024-01-01T00:00:00Z",
       });
-      vi.spyOn(mockDb, "getMessageContactEmail").mockResolvedValue(
-        "sender@example.com",
-      );
+
       vi.spyOn(JMAPClient.prototype, "sendEmail").mockResolvedValue({
         success: true,
         messageId: "jmap-msg-123",
@@ -669,9 +649,7 @@ describe("Reply Worker", () => {
         created_at: "2024-01-01T00:00:00Z",
         updated_at: "2024-01-01T00:00:00Z",
       });
-      vi.spyOn(mockDb, "getMessageContactEmail").mockResolvedValue(
-        "sender@example.com",
-      );
+
       vi.spyOn(JMAPClient.prototype, "sendEmail").mockResolvedValue({
         success: true,
         messageId: "jmap-msg-123",
@@ -789,9 +767,7 @@ describe("Reply Worker", () => {
         created_at: "2024-01-01T00:00:00Z",
         updated_at: "2024-01-01T00:00:00Z",
       });
-      vi.spyOn(mockDb, "getMessageContactEmail").mockResolvedValue(
-        "sender@example.com",
-      );
+
       vi.spyOn(mockDb, "updateMessageRetryCount").mockResolvedValue(undefined);
       vi.spyOn(JMAPClient.prototype, "sendEmail").mockResolvedValue({
         success: true,
@@ -838,16 +814,13 @@ describe("Reply Worker", () => {
       vi.spyOn(mockDb, "getActiveTemplateForCampaign").mockResolvedValue(
         mockTemplate,
       );
-      vi.spyOn(mockDb, "getMessageContactEmail").mockResolvedValue(
-        "sender@example.com",
-      );
+
       vi.spyOn(mockJmapClient, "sendEmail").mockResolvedValue({
         success: true,
         messageId: "jmap-123",
       });
 
       expect(mockDb.getActiveTemplateForCampaign).toBeDefined();
-      expect(mockDb.getMessageContactEmail).toBeDefined();
       expect(mockJmapClient.sendEmail).toBeDefined();
     });
 
@@ -1009,9 +982,7 @@ describe("Reply Worker", () => {
         created_at: "2024-01-01T00:00:00Z",
         updated_at: "2024-01-01T00:00:00Z",
       });
-      vi.spyOn(mockDb, "getMessageContactEmail").mockResolvedValue(
-        "voter@example.com",
-      );
+
       vi.spyOn(JMAPClient.prototype, "sendEmail").mockResolvedValue({
         success: true,
         messageId: "jmap-msg-123",

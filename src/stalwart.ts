@@ -499,14 +499,6 @@ async function processEmailForRecipient(
 
     const messageId = await db.insertMessage(messageData);
 
-    await db.storeMessageContact({
-      messageId,
-      senderHash,
-      senderEmail,
-      senderName: _senderName,
-      capturedAt: new Date(hookData.timestamp * 1000).toISOString(),
-    });
-
     if (classification.campaign_id !== null) {
       await applyReplyScheduleForMessage(db, messageId);
     }

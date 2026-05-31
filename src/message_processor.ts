@@ -172,14 +172,6 @@ export async function processMessage(
 
   const messageId = await db.insertMessage(messageData);
 
-  await db.storeMessageContact({
-    messageId,
-    senderHash,
-    senderEmail: data.sender_email,
-    senderName: data.sender_name,
-    capturedAt: data.timestamp,
-  });
-
   const classification = await db.classifyAndAssignToCluster(
     messageId,
     embedding,

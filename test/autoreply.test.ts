@@ -524,7 +524,6 @@ describe("Message Processor Auto-Reply", () => {
     getActiveTemplateForCampaign: vi.fn(),
     getMessageForReplyScheduling: vi.fn(),
     upsertSupporter: vi.fn(),
-    storeMessageContact: vi.fn(),
     assignMessageToCluster: vi.fn(),
   } as unknown as DatabaseClient;
 
@@ -535,7 +534,6 @@ describe("Message Processor Auto-Reply", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(mockDb.upsertSupporter).mockResolvedValue(1);
-    vi.mocked(mockDb.storeMessageContact).mockResolvedValue(undefined);
     vi.mocked(mockDb.getMessageForReplyScheduling).mockImplementation(
       async (messageId: number) => ({
         id: messageId,
@@ -596,14 +594,6 @@ describe("Message Processor Auto-Reply", () => {
     expect(result.reply_scheduled_at).toBeNull();
     expect(result.send_immediately).toBe(true);
     expect(mockDb.getActiveTemplateForCampaign).toHaveBeenCalledWith(10, 1);
-    expect(mockDb.storeMessageContact).toHaveBeenCalledWith(
-      expect.objectContaining({
-        messageId: 100,
-        senderEmail: "john@example.com",
-        senderName: "John Doe",
-        capturedAt: validInput.timestamp,
-      }),
-    );
     expect(mockDb.upsertSupporter).toHaveBeenCalledWith(
       10,
       1,
@@ -634,7 +624,6 @@ describe("Message Processor Auto-Reply", () => {
     expect(result.reply_scheduled_at).toBeNull();
     expect(mockDb.getActiveTemplateForCampaign).not.toHaveBeenCalled();
     expect(mockDb.upsertSupporter).toHaveBeenCalled();
-    expect(mockDb.storeMessageContact).toHaveBeenCalled();
   });
 
   it("should not schedule reply if no active template exists", async () => {
@@ -658,6 +647,5 @@ describe("Message Processor Auto-Reply", () => {
     expect(result.success).toBe(true);
     expect(result.reply_scheduled_at).toBeNull();
     expect(mockDb.upsertSupporter).toHaveBeenCalled();
-    expect(mockDb.storeMessageContact).toHaveBeenCalled();
   });
 });

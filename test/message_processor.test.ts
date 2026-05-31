@@ -25,7 +25,6 @@ const mockDb = {
   getActiveTemplateForCampaign: vi.fn(),
   getMessageForReplyScheduling: vi.fn(),
   upsertSupporter: vi.fn(),
-  storeMessageContact: vi.fn(),
   assignMessageToCluster: vi.fn(),
 } as unknown as DatabaseClient;
 
@@ -109,7 +108,6 @@ describe("message_processor", () => {
     vi.spyOn(mockDb, "insertMessage").mockResolvedValue(100);
     vi.spyOn(mockDb, "assignMessageToCluster").mockResolvedValue(1);
     vi.spyOn(mockDb, "upsertSupporter").mockResolvedValue(1);
-    vi.spyOn(mockDb, "storeMessageContact").mockResolvedValue(undefined);
 
     const result = await processMessage(mockDb, mockAi as any, validInput);
 
@@ -120,12 +118,5 @@ describe("message_processor", () => {
     expect(mockDb.insertMessage).toHaveBeenCalled();
     expect(mockDb.upsertSupporter).toHaveBeenCalled();
     expect(mockDb.getActiveTemplateForCampaign).toHaveBeenCalledWith(10, 1);
-    expect(mockDb.storeMessageContact).toHaveBeenCalledWith(
-      expect.objectContaining({
-        messageId: 100,
-        senderEmail: "john@example.com",
-        senderName: "John Doe",
-      }),
-    );
   });
 });

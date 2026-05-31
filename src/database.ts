@@ -1049,7 +1049,7 @@ export class DatabaseClient {
   }
 
   // =============================================================================
-  // Reply pipeline: supporters (hash), message_contacts (PII), send logs
+  // Reply pipeline: supporters (hash), send logs
   // =============================================================================
 
   async upsertSupporter(
@@ -1116,114 +1116,6 @@ export class DatabaseClient {
     }
   }
 
-  async storeMessageContact(params: {
-    messageId: number;
-    senderHash: string;
-    senderEmail: string;
-    senderName?: string;
-    capturedAt?: string;
-  }): Promise<void> {
-    const senderEmail = params.senderEmail.trim();
-    if (!senderEmail) {
-      throw new Error(
-        `Cannot store message contact: sender email is missing for message ${params.messageId}`,
-      );
-    }
-
-    try {
-      const { error } = await this.supabase.from("message_contacts").upsert(
-        {
-          message_id: params.messageId,
-          sender_hash: params.senderHash,
-          sender_email: senderEmail,
-          sender_name: params.senderName || null,
-          contact_captured_at: params.capturedAt || new Date().toISOString(),
-        },
-        { onConflict: "message_id" },
-      );
-
-      if (error) {
-        throw error;
-      }
-    } catch (error) {
-      console.error("Error storing message contact:", error);
-      throw new Error("Failed to store short-term message contact");
-    }
-  }
-
-  async getMessageContactEmail(messageId: number): Promise<string | null> {
-    try {
-      const { data, error } = await this.supabase
-        .from("message_contacts")
-        .select("sender_email")
-        .eq("message_id", messageId)
-        .is("purged_at", null)
-        .limit(1);
-
-      if (error) {
-        throw error;
-      }
-
-      if (data && data.length > 0) {
-        return data[0].sender_email as string;
-      }
-
-      const { data: messageRow, error: messageError } = await this.supabase
-        .from("messages")
-        .select("sender_hash, politician_id, campaign_id")
-        .eq("id", messageId)
-        .limit(1);
-
-      if (messageError) {
-        throw messageError;
-      }
-
-      const message = messageRow?.[0];
-      if (
-        !message?.sender_hash ||
-        message.politician_id == null ||
-        message.campaign_id == null
-      ) {
-        return null;
-      }
-
-      const { data: fallbackContacts, error: fallbackError } =
-        await this.supabase
-          .from("message_contacts")
-          .select(
-            "sender_email, contact_captured_at, messages!inner(politician_id, campaign_id)",
-          )
-          .eq("sender_hash", message.sender_hash)
-          .eq("messages.politician_id", message.politician_id)
-          .eq("messages.campaign_id", message.campaign_id)
-          .is("purged_at", null)
-          .order("contact_captured_at", { ascending: false })
-          .limit(1);
-
-      if (fallbackError) {
-        throw fallbackError;
-      }
-
-      const fallbackEmail = fallbackContacts?.[0]?.sender_email as
-        | string
-        | undefined;
-      if (fallbackEmail) {
-        await this.storeMessageContact({
-          messageId,
-          senderHash: message.sender_hash,
-          senderEmail: fallbackEmail,
-          capturedAt: new Date().toISOString(),
-        });
-        return fallbackEmail;
-      }
-
-      return null;
-    } catch (error) {
-      console.error("Error fetching message contact email:", error);
-      return null;
-    }
-  }
-
   async getCampaignTechnicalEmail(campaignId: number): Promise<string | null> {
     try {
       const { data, error } = await this.supabase
@@ -1268,7 +1160,7 @@ export class DatabaseClient {
     );
   }
 
-  /** Sets message reply fields and removes short-term contact row. */
+  /** Sets message reply fields after successful send. */
   async markMessageReplyDelivered(messageId: number): Promise<void> {
     const replySentAt = new Date().toISOString();
 
@@ -1283,16 +1175,6 @@ export class DatabaseClient {
     if (msgError) {
       console.error("Error marking message reply sent:", msgError);
       throw msgError;
-    }
-
-    const { error: contactDeleteError } = await this.supabase
-      .from("message_contacts")
-      .delete()
-      .eq("message_id", messageId);
-
-    if (contactDeleteError) {
-      console.error("Error deleting message_contacts row:", contactDeleteError);
-      throw contactDeleteError;
     }
   }
 

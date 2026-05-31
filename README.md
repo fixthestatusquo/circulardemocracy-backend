@@ -802,7 +802,7 @@ Use the credential type that matches your auth flow:
 After a successful JMAP send, `markMessageReplyDelivered()` in the database layer:
 
 - Sets `messages.reply_sent_at` to the send timestamp
-- Deletes the short-term `message_contacts` row for that message (PII removed after send)
+- Sets `messages.reply_sent_at` to the send timestamp (PII is kept on the message row)
 
 The reply worker only loads rows where `reply_sent_at` is null, the campaign has an active reply template, and `reply_scheduled_at` is due (or null for immediate), so **the same message row is never sent twice** by the worker.
 
