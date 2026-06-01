@@ -352,7 +352,7 @@ npx tsx bin/cli reply --campaign-name "Climate Action"
 npx tsx bin/cli reply --dry-run --campaign-name "Climate Action"
 ```
 
-Uses `processScheduledReplies` and `processReplyImmediately` from `src/reply_worker.ts`. With `ALL_DOMAIN` set in `.env`, outbound mail uses Stalwart impersonation (`target%RELAY_SERVICE_ACCOUNT_EMAIL`); otherwise the Supabase relay JWT path.
+Uses `sendScheduledReplies` from `src/reply_worker.ts`. With `ALL_DOMAIN` set in `.env`, outbound mail uses Stalwart impersonation (`target%RELAY_SERVICE_ACCOUNT_EMAIL`); otherwise the Supabase relay JWT path.
 
 **API Access Examples:**
 

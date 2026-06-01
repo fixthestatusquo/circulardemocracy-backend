@@ -77,8 +77,6 @@ function resolveStalwartJmapWorkerConfig(): WorkerConfig | null {
   };
 }
 
-
-
 export interface MessageToProcess {
   id: number;
   external_id: string;
@@ -105,7 +103,7 @@ interface SendContext {
  * Main worker function to process and send scheduled replies.
  * Groups messages by politician to reuse JMAP authentication/connections.
  */
-export async function processScheduledReplies(
+export async function sendScheduledReplies(
   db: DatabaseClient,
   filters: {
     politicianId?: number;
@@ -150,7 +148,7 @@ export async function processScheduledReplies(
 
     // 4. Process each politician batch
     for (const [politicianId, batch] of byPolitician.entries()) {
-      const politicianResult = await processPoliticianBatch(
+      const politicianResult = await sendPoliticianBatch(
         db,
         politicianId,
         batch,
@@ -176,7 +174,7 @@ export async function processScheduledReplies(
  * Processes all messages for a single politician.
  * Resolves JMAP configuration once and reuses it for the entire batch.
  */
-async function processPoliticianBatch(
+async function sendPoliticianBatch(
   db: DatabaseClient,
   politicianId: number,
   messages: MessageToProcess[],
@@ -246,13 +244,74 @@ async function processPoliticianBatch(
       const chunk = messages.slice(i, i + CONCURRENCY);
       const tasks = chunk.map(async (message) => {
         try {
-          await processSingleMessage(db, message, {
+          const jmapEmail = jmapEmailCache.get(message.external_id);
+          if (!jmapEmail) {
+            throw new Error(`JMAP email not found for ${message.external_id}`);
+          }
+
+          let template = templateCache.get(message.campaign_id);
+          if (!template) {
+            template = await db.getActiveTemplateForCampaign(
+              message.campaign_id,
+              politician.id,
+            );
+            if (!template) {
+              throw new Error(
+                `No active template for campaign ${message.campaign_id}`,
+              );
+            }
+            templateCache.set(message.campaign_id, template);
+          }
+
+          let campaign = campaignCache.get(message.campaign_id);
+          if (!campaign) {
+            campaign = await getCampaignById(db, message.campaign_id);
+            if (!campaign) {
+              throw new Error(`Campaign ${message.campaign_id} not found`);
+            }
+            campaignCache.set(message.campaign_id, campaign);
+          }
+
+          const imp = jmapResolve.config.stalwartImpersonation;
+          const outboundIdentity = resolveOutboundEmailIdentity(
+            {
+              id: politician.id,
+              name: politician.name,
+              email: politician.email,
+              reply_to: politician.reply_to,
+            },
+            {
+              technical_email: campaign.technical_email ?? politician.email,
+              reply_to_email:
+                campaign.reply_to_email ??
+                politician.reply_to ??
+                politician.email,
+            },
+          );
+          if (!outboundIdentity) {
+            throw new Error(
+              `No From/Reply-To for campaign ${message.campaign_id}`,
+            );
+          }
+          const clientKey = imp
+            ? `imp:${outboundIdentity.fromEmail}`
+            : "relay:default";
+          let jmapClient = jmapClientCache.get(clientKey);
+          if (!jmapClient) {
+            jmapClient = createJMAPClient(
+              jmapResolve.config,
+              outboundIdentity.fromEmail,
+            );
+            jmapClientCache.set(clientKey, jmapClient);
+          }
+
+          await sendReply(db, message, {
             politician,
             jmapConfig: jmapResolve.config,
-            campaignCache,
-            templateCache,
-            jmapClientCache,
-            jmapEmailCache,
+            template,
+            campaign,
+            jmapEmail,
+            jmapClient,
           });
           result.sent++;
           console.log(`[Reply Worker] ✓ Sent reply for message ${message.id}`);
@@ -328,9 +387,6 @@ export async function replyMessage(
         `Original message ${message.external_id} not found on JMAP server`,
       );
     }
-    const imp = jmapResolve.config.stalwartImpersonation;
-    const fetchClientKey = imp ? `imp:${politician.email}` : "relay:default";
-
     const messageToProcess: MessageToProcess = {
       id: message.id,
       external_id: message.external_id,
@@ -342,11 +398,26 @@ export async function replyMessage(
       reply_retry_count: (message as any).reply_retry_count ?? 0,
     };
 
-    await processSingleMessage(db, messageToProcess, {
+    const template = await db.getActiveTemplateForCampaign(
+      message.campaign_id,
+      politician.id,
+    );
+    if (!template) {
+      throw new Error(`No active template for campaign ${message.campaign_id}`);
+    }
+
+    const campaign = await getCampaignById(db, message.campaign_id);
+    if (!campaign) {
+      throw new Error(`Campaign ${message.campaign_id} not found`);
+    }
+
+    await sendReply(db, messageToProcess, {
       politician,
       jmapConfig: jmapResolve.config,
-      jmapEmailCache: new Map([[message.external_id, jmapEmail]]),
-      jmapClientCache: new Map([[fetchClientKey, server]]),
+      template,
+      campaign,
+      jmapEmail,
+      jmapClient: server,
     });
 
     result.sent = 1;
@@ -387,88 +458,53 @@ async function getMessagesReadyToSend(
   }
 }
 
-interface BatchProcessingContext {
-  politician: {
-    id: number;
-    email: string;
-    name: string;
-    reply_to: string | null;
-  };
-  jmapConfig: WorkerConfig;
-  campaignCache?: Map<number, any>;
-  templateCache?: Map<number, any>;
-  jmapClientCache?: Map<string, JMAPClient>;
-  jmapEmailCache?: Map<string, EmailMessage>;
-}
-
 /**
- * Processes a single message using pre-resolved context (politician, JMAP auth).
+ * Processes a single message using pre-resolved context.
  */
-async function processSingleMessage(
+async function sendReply(
   db: DatabaseClient,
   message: MessageToProcess,
-  context: BatchProcessingContext,
+  params: {
+    politician: {
+      id: number;
+      email: string;
+      name: string;
+      reply_to: string | null;
+    };
+    jmapConfig: WorkerConfig;
+    template: {
+      subject: string;
+      body: string;
+      layout_type: string;
+      campaign_name?: string;
+    };
+    campaign: {
+      id: number;
+      name: string;
+      technical_email?: string | null;
+      reply_to_email?: string | null;
+    };
+    jmapEmail: EmailMessage;
+    jmapClient: JMAPClient;
+  },
 ): Promise<void> {
+  const { politician, jmapConfig, template, campaign, jmapEmail, jmapClient } =
+    params;
   const {
-    politician,
-    jmapConfig,
-    campaignCache,
-    templateCache,
-    jmapClientCache,
-    jmapEmailCache,
-  } = context;
+    subject: templateSubject,
+    body: templateBody,
+    layout_type,
+  } = template;
 
-  // 1. Get template (cached if in batch)
-  let template = templateCache?.get(message.campaign_id);
-  if (!template) {
-    console.log("fetch template", politician.id, message.campaign_id);
-    template = await db.getActiveTemplateForCampaign(
-      message.campaign_id,
-      politician.id,
-    );
-    if (!template) {
-      const errorMsg = `No active template found for campaign ${message.campaign_id}`;
-      //      await handleSendFailure(db, message, errorMsg); this isn't a processing error, just bug on our side
-      throw new Error(errorMsg);
-    }
-    templateCache?.set(message.campaign_id, template);
-  }
-  // 2. Apply schedule check
-  /*  const replySchedule = await applyReplyScheduleForMessage(db, message.id);
-  if (!replySchedule) {
-    const errorMsg = `Message ${message.id} is not eligible for auto-reply`;
-    await handleSendFailure(db, message, errorMsg);
-    throw new Error(errorMsg);
-  }
-  if (!isReadyToSend(replySchedule.reply_scheduled_at)) {
-    const errorMsg = `Reply for message ${message.id} is scheduled for later`;
-    await handleSendFailure(db, message, errorMsg);
-    throw new Error(errorMsg);
-  }
-*/
-
-  // 3. Resolve recipient email
-  const jmapEmail = jmapEmailCache?.get(message.external_id);
-  const senderEmail = jmapEmail?.replyTo || jmapEmail?.from;
+  // 1. Resolve recipient email
+  const senderEmail = jmapEmail.replyTo || jmapEmail.from;
   if (!senderEmail) {
     const errorMsg = `sender not found for message ${message.id} (JMAP ID ${message.external_id})`;
     await handleSendFailure(db, message, errorMsg);
     throw new Error(errorMsg);
   }
 
-  // 4. Get campaign (cached if in batch)
-  let campaign = campaignCache?.get(message.campaign_id);
-  if (!campaign) {
-    campaign = await getCampaignById(db, message.campaign_id);
-    if (!campaign) {
-      const errorMsg = `Campaign ${message.campaign_id} not found`;
-      await handleSendFailure(db, message, errorMsg);
-      throw new Error(errorMsg);
-    }
-    campaignCache?.set(message.campaign_id, campaign);
-  }
-
-  // 5. Resolve outbound identity
+  // 2. Resolve outbound identity
   const outboundIdentity = resolveOutboundEmailIdentity(
     {
       id: politician.id,
@@ -497,32 +533,24 @@ async function processSingleMessage(
     }
   }
 
-  // 6. Resolve/Reuse JMAP client
-  const clientKey = imp ? `imp:${outboundIdentity.fromEmail}` : "relay:default";
-  let jmapClient = jmapClientCache?.get(clientKey);
-  if (!jmapClient) {
-    jmapClient = createJMAPClient(jmapConfig, outboundIdentity.fromEmail);
-    jmapClientCache?.set(clientKey, jmapClient);
-  }
-
-  // 7. Resolve template tokens
+  // 3. Resolve template tokens
   const tokens = {
-    subject: jmapEmail?.subject || "",
-    sender: jmapEmail?.fromName || jmapEmail?.from || "",
-    date: jmapEmail?.receivedAt
+    subject: jmapEmail.subject || "",
+    sender: jmapEmail.fromName || jmapEmail.from || "",
+    date: jmapEmail.receivedAt
       ? new Date(jmapEmail.receivedAt).toLocaleDateString()
       : "",
   };
 
-  const personalizedSubject = replaceTokens(template.subject, tokens);
-  const personalizedBody = replaceTokens(template.body, tokens);
+  const personalizedSubject = replaceTokens(templateSubject, tokens);
+  const personalizedBody = replaceTokens(templateBody, tokens);
 
-  // 8. Render and build email
+  // 4. Render and build email
   const emailContent = renderEmailLayout({
     subject: personalizedSubject,
     markdown_body: personalizedBody,
-    layout_type: template.layout_type,
-    campaign_name: campaign?.name,
+    layout_type: layout_type as any,
+    campaign_name: campaign.name,
     politician_name: politician.name,
     politician_email: politician.email,
     politician_party: politician.party,
@@ -540,7 +568,7 @@ async function processSingleMessage(
   };
 
   // Add threading headers if we have the original message-id
-  if (jmapEmail?.messageId) {
+  if (jmapEmail.messageId) {
     email.inReplyTo = jmapEmail.messageId;
     email.references = jmapEmail.messageId;
   }

@@ -10,7 +10,7 @@ import {
   type CliFilters,
 } from "../src/cli_shared.js";
 import {
-  processScheduledReplies,
+  sendScheduledReplies,
 replyMessage,
   type ProcessingResult,
 } from "../src/reply_worker.js";
@@ -74,7 +74,7 @@ export function parseArgs(args: string[]): CliFilters  {
   };
 }
 
-async function processFilteredReplies(
+async function sendFilteredReplies(
   db: DatabaseClient,
   options: CliFilters,
 ): Promise<ProcessingResult> {
@@ -93,7 +93,7 @@ async function processFilteredReplies(
     limit: options.limit,
   });
 
-  return processScheduledReplies(db, {
+  return sendScheduledReplies(db, {
     campaignId,
     politicianId,
     limit: options.limit,
@@ -205,7 +205,7 @@ async function main(): Promise<void> {
       return;
     }
 
-    const result = await processFilteredReplies(db, options);
+    const result = await sendFilteredReplies(db, options);
     console.log(JSON.stringify(result, null, 2));
 
     if (result.failed > 0) {

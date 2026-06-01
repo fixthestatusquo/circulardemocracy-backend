@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { JMAPClient } from "../src/jmap_client";
 import {
   processReplyImmediately,
-  processScheduledReplies,
+  sendScheduledReplies,
 } from "../src/reply_worker";
 
 // =============================================================================
@@ -321,7 +321,7 @@ describe("Reply Worker", () => {
       vi.spyOn(mockDb, "getActiveTemplateForCampaign").mockResolvedValue(null);
       vi.spyOn(mockDb, "updateMessageRetryCount").mockResolvedValue(undefined);
 
-      const result = await processScheduledReplies(mockDb);
+      const result = await sendScheduledReplies(mockDb);
 
       expect(result.failed).toBe(1);
       expect(mockDb.updateMessageRetryCount).toHaveBeenCalledWith(
@@ -371,7 +371,7 @@ describe("Reply Worker", () => {
       vi.spyOn(mockDb, "markMessageAsFailed").mockResolvedValue(undefined);
       vi.spyOn(mockDb, "updateMessageRetryCount").mockResolvedValue(undefined);
 
-      const result = await processScheduledReplies(mockDb);
+      const result = await sendScheduledReplies(mockDb);
 
       expect(result.failed).toBe(1);
       expect(mockDb.markMessageAsFailed).toHaveBeenCalledWith(
@@ -574,7 +574,7 @@ describe("Reply Worker", () => {
         },
       );
 
-      const result = await processScheduledReplies(mockDb);
+      const result = await sendScheduledReplies(mockDb);
 
       expect(result.sent).toBe(1);
       expect(mockDb.markMessageReplyDelivered).toHaveBeenCalledWith(1);
@@ -680,7 +680,7 @@ describe("Reply Worker", () => {
         },
       );
 
-      const result = await processScheduledReplies(mockDb);
+      const result = await sendScheduledReplies(mockDb);
 
       expect(result.sent).toBe(1);
       expect(JMAPClient.prototype.sendEmail).toHaveBeenCalledWith(
@@ -799,7 +799,7 @@ describe("Reply Worker", () => {
         },
       );
 
-      const result = await processScheduledReplies(mockDb);
+      const result = await sendScheduledReplies(mockDb);
 
       expect(result.failed).toBe(1);
       expect(result.errors[0].error).toContain("No From/Reply-To");
