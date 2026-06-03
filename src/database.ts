@@ -1451,6 +1451,369 @@ export class DatabaseClient {
     return classification;
   }
 
+  // =============================================================================
+  // BATCH CLASSIFICATION & CLUSTERING
+  // =============================================================================
+
+  /**
+   * Classify multiple messages at once.
+   * Campaign hint lookups are batched into a single query;
+   * vector similarity searches run concurrently via Promise.all.
+   */
+  async batchClassifyMessages(
+    entries: Array<{
+      embedding: number[];
+      politicianId: number;
+      campaignHint?: string;
+    }>
+  ): Promise<ClassificationResult[]> {
+    const results: ClassificationResult[] = new Array(entries.length).fill(null);
+
+    // Step 1: Batch campaign hint lookup — one query for all unique hints
+    const hintedEntries = entries
+      .map((e, i) => ({ ...e, originalIndex: i }))
+      .filter((e) => !!e.campaignHint);
+
+    const hintsDone = new Set<number>();
+
+    if (hintedEntries.length > 0) {
+      const { data: allCampaigns } = await this.supabase
+        .from("campaigns")
+        .select("id, name, slug")
+        .in("status", ["active", "unconfirmed"]);
+
+      for (const entry of hintedEntries) {
+        const hint = entry.campaignHint!.toLowerCase();
+        const match = (allCampaigns || []).find(
+          (c) =>
+            c.name?.toLowerCase().includes(hint) ||
+            c.slug?.toLowerCase().includes(hint),
+        );
+        if (match) {
+          results[entry.originalIndex] = {
+            campaign_id: match.id,
+            campaign_slug: match.slug || match.name,
+            confidence: 0.95,
+          };
+          hintsDone.add(entry.originalIndex);
+        }
+      }
+    }
+
+    // Step 2: For remaining entries, run findSimilarCampaigns concurrently
+    const vectorEntries = entries
+      .map((e, i) => ({ embedding: e.embedding, originalIndex: i }))
+      .filter((_, i) => !hintsDone.has(i));
+
+    if (vectorEntries.length > 0) {
+      const vectorResults = await Promise.all(
+        vectorEntries.map(({ embedding }) =>
+          this.findSimilarCampaigns(embedding, 3),
+        ),
+      );
+
+      for (let j = 0; j < vectorEntries.length; j++) {
+        const { originalIndex } = vectorEntries[j];
+        const similar = vectorResults[j];
+        if (similar.length > 0 && similar[0].distance < 0.1) {
+          results[originalIndex] = {
+            campaign_id: similar[0].id,
+            campaign_slug: similar[0].slug,
+            confidence: 1 - similar[0].distance,
+          };
+        } else {
+          results[originalIndex] = {
+            campaign_id: null,
+            campaign_slug: null,
+            confidence: 0.1,
+          };
+        }
+      }
+    }
+
+    // Fill any remaining nulls (guard for correctness)
+    for (let i = 0; i < results.length; i++) {
+      if (!results[i]) {
+        results[i] = { campaign_id: null, campaign_slug: null, confidence: 0.1 };
+      }
+    }
+
+    return results;
+  }
+
+  /**
+   * Assign multiple messages to clusters under a single global lock window.
+   * Handles intra-batch similarity so two messages in the same batch that
+   * are similar to each other end up in the same cluster.
+   */
+  async batchAssignToClusters(
+    messageIds: number[],
+    embeddings: number[][],
+    _politicianId: number,
+  ): Promise<(number | null)[]> {
+    if (messageIds.length === 0) return [];
+
+    const lockAcquired = await this.acquireGlobalClusteringLock();
+    if (!lockAcquired) {
+      console.log("  ⏳ Could not acquire global clustering lock, retrying...");
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      return this.batchAssignToClusters(messageIds, embeddings, _politicianId);
+    }
+
+    try {
+      const n = messageIds.length;
+      const clusterIds: (number | null)[] = new Array(n).fill(null);
+      const orphans: Array<{ msgIdx: number; msgId: number; embedding: number[] }> = [];
+
+      // Phase 1: Try to match each embedding to an existing cluster
+      for (let i = 0; i < n; i++) {
+        const similarClusters = await this.findSimilarClusters(embeddings[i], 50);
+
+        if (similarClusters.length > 0) {
+          const selectedCluster = [...similarClusters].sort((a, b) => {
+            if (b.messageCount !== a.messageCount) {
+              return b.messageCount - a.messageCount;
+            }
+            return a.distance - b.distance;
+          })[0];
+
+          clusterIds[i] = selectedCluster.clusterId;
+        } else {
+          orphans.push({ msgIdx: i, msgId: messageIds[i], embedding: embeddings[i] });
+        }
+      }
+
+      // Phase 2: For orphans, check similarity against all unclustered messages
+      // and also against other orphans in this batch
+      for (let oi = 0; oi < orphans.length; oi++) {
+        if (clusterIds[orphans[oi].msgIdx] !== null) continue;
+
+        const similarMessages = await this.findSimilarMessages(
+          orphans[oi].embedding,
+          50,
+        );
+        const closeMatches = similarMessages.filter(
+          (m) => m.id !== orphans[oi].msgId && m.distance < 0.1,
+        );
+
+        const existingClusterMatch = closeMatches.find(
+          (m) => m.cluster_id !== null,
+        );
+
+        if (existingClusterMatch?.cluster_id) {
+          clusterIds[orphans[oi].msgIdx] = existingClusterMatch.cluster_id;
+        } else {
+          // Check intra-batch: are there other orphans close to this one?
+          const closeOrphans = orphans.filter(
+            (other, oj) =>
+              oj !== oi &&
+              clusterIds[other.msgIdx] === null &&
+              this._cosineDistance(orphans[oi].embedding, other.embedding) < 0.1,
+          );
+
+          if (closeOrphans.length > 0) {
+            const groupEmbeddings = [
+              orphans[oi].embedding,
+              ...closeOrphans.map((co) => co.embedding),
+            ];
+            const groupMessageIds = [
+              orphans[oi].msgId,
+              ...closeOrphans.map((co) => co.msgId),
+            ];
+            const centroid = this.calculateCentroid(groupEmbeddings);
+            const centroidStr = centroid
+              ? `[${centroid.join(",")}]`
+              : `[${orphans[oi].embedding.join(",")}]`;
+
+            const { data: newCluster } = await this.supabase
+              .from("message_clusters")
+              .insert({
+                centroid_vector: centroidStr,
+                message_count: groupMessageIds.length,
+                status: "forming",
+              })
+              .select("id")
+              .single();
+
+            if (newCluster?.id) {
+              clusterIds[orphans[oi].msgIdx] = newCluster.id;
+              for (const co of closeOrphans) {
+                clusterIds[co.msgIdx] = newCluster.id;
+              }
+            }
+          } else {
+            const { data: newCluster } = await this.supabase
+              .from("message_clusters")
+              .insert({
+                centroid_vector: `[${orphans[oi].embedding.join(",")}]`,
+                message_count: 1,
+                status: "forming",
+              })
+              .select("id")
+              .single();
+
+            if (newCluster?.id) {
+              clusterIds[orphans[oi].msgIdx] = newCluster.id;
+            }
+          }
+        }
+      }
+
+      // Phase 3: Bulk UPDATE all messages with their cluster_ids
+      const clusterUpdates = new Map<number | null, number[]>();
+      for (let i = 0; i < n; i++) {
+        const cid = clusterIds[i];
+        if (!clusterUpdates.has(cid)) clusterUpdates.set(cid, []);
+        clusterUpdates.get(cid)!.push(messageIds[i]);
+      }
+
+      for (const [cid, ids] of clusterUpdates) {
+        if (cid === null) continue;
+        await this.supabase
+          .from("messages")
+          .update({ cluster_id: cid })
+          .in("id", ids);
+      }
+
+      // Phase 4: Update centroids and check readiness for affected clusters
+      const affectedClusterIds = new Set(
+        clusterIds.filter((c): c is number => c !== null),
+      );
+      for (const cid of affectedClusterIds) {
+        await this.updateClusterCentroid(cid);
+        await this.checkClusterReadiness(cid);
+      }
+
+      return clusterIds;
+    } catch (error) {
+      console.error("Error in batchAssignToClusters:", error);
+      return new Array(messageIds.length).fill(null);
+    } finally {
+      await this.releaseGlobalClusteringLock();
+    }
+  }
+
+  /**
+   * Compute duplicate ranks for multiple messages in a single query.
+   * Returns a map keyed by `${senderHash}:${politicianId}:${campaignId}`.
+   */
+  async batchGetDuplicateRanks(
+    entries: Array<{
+      senderHash: string;
+      politicianId: number;
+      campaignId: number;
+    }>,
+  ): Promise<Map<string, number>> {
+    const result = new Map<string, number>();
+    if (entries.length === 0) return result;
+
+    const senderHashes = [...new Set(entries.map((e) => e.senderHash))];
+    const campaignIds = [...new Set(entries.map((e) => e.campaignId))];
+    const politicianId = entries[0].politicianId;
+
+    try {
+      const { data, error } = await this.supabase
+        .from("messages")
+        .select("sender_hash, campaign_id")
+        .eq("politician_id", politicianId)
+        .in("sender_hash", senderHashes)
+        .in("campaign_id", campaignIds);
+
+      if (error) throw error;
+
+      const counter = new Map<string, number>();
+      for (const row of data || []) {
+        const key = `${row.sender_hash}:${politicianId}:${row.campaign_id}`;
+        counter.set(key, (counter.get(key) || 0) + 1);
+      }
+
+      for (const entry of entries) {
+        const key = `${entry.senderHash}:${entry.politicianId}:${entry.campaignId}`;
+        result.set(key, counter.get(key) || 0);
+      }
+    } catch (error) {
+      console.error("Error in batchGetDuplicateRanks:", error);
+    }
+
+    return result;
+  }
+
+  /**
+   * Upsert multiple supporters in a single operation.
+   */
+  async batchUpsertSupporters(
+    entries: Array<{
+      campaignId: number;
+      politicianId: number;
+      senderHash: string;
+      firstMessageAt: string;
+    }>,
+  ): Promise<void> {
+    if (entries.length === 0) return;
+
+    try {
+      const now = new Date().toISOString();
+      const rows = entries.map((e) => ({
+        campaign_id: e.campaignId,
+        politician_id: e.politicianId,
+        sender_hash: e.senderHash,
+        first_message_at: e.firstMessageAt,
+        last_message_at: now,
+      }));
+
+      await this.supabase
+        .from("supporters")
+        .upsert(rows, { onConflict: "campaign_id,politician_id,sender_hash" });
+    } catch (error) {
+      console.error("Error in batchUpsertSupporters:", error);
+    }
+  }
+
+  /**
+   * Update multiple message rows with different field values.
+   * Groups updates by identical field sets to minimize HTTP calls.
+   */
+  async batchUpdateMessageFields(
+    updates: Array<{
+      messageId: number;
+      fields: Record<string, unknown>;
+    }>,
+  ): Promise<void> {
+    if (updates.length === 0) return;
+
+    const groups = new Map<string, { fields: Record<string, unknown>; ids: number[] }>();
+    for (const u of updates) {
+      const key = JSON.stringify(u.fields);
+      if (!groups.has(key)) {
+        groups.set(key, { fields: { ...u.fields }, ids: [] });
+      }
+      groups.get(key)!.ids.push(u.messageId);
+    }
+
+    await Promise.all(
+      [...groups.values()].map(({ fields, ids }) =>
+        this.supabase
+          .from("messages")
+          .update(fields)
+          .in("id", ids),
+      ),
+    );
+  }
+
+  /** Cosine distance between two embeddings (used for intra-batch comparison). */
+  private _cosineDistance(a: number[], b: number[]): number {
+    let dot = 0;
+    let normA = 0;
+    let normB = 0;
+    for (let i = 0; i < a.length; i++) {
+      dot += a[i] * b[i];
+      normA += a[i] * a[i];
+      normB += b[i] * b[i];
+    }
+    if (normA === 0 || normB === 0) return 1;
+    return 1 - dot / (Math.sqrt(normA) * Math.sqrt(normB));
+  }
+
   async classifyMessage(
     embedding: number[],
     _politicianId: number,

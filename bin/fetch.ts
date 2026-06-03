@@ -7,6 +7,7 @@ import {
   resolveMailAccountIdFromSession,
 } from "../src/jmap_client.js";
 import { processMessage, PoliticianNotFoundError, type Ai, type MessageInput } from "../src/message_processor.js";
+import { processMessage, processMessageBatch, PoliticianNotFoundError, type Ai, type MessageInput } from "../src/message_processor.js";
 import {
   resolvePoliticianId,
   type CliFilters,
@@ -133,6 +134,7 @@ function parseStalwartArgs(args: string[]): StalwartFetchOptions {
       "folder",
       "user",
       "password",
+      "limit",
     ],
     boolean: ["process-all", "dry-run", "help"],
     alias: { h: "help" },
@@ -168,12 +170,21 @@ function parseStalwartArgs(args: string[]): StalwartFetchOptions {
   const processAll =
     argv["process-all"] === true || (!argv.since && !argv["message-id"]);
 
+  const limitValue = argv.limit;
+  const limit =
+    typeof limitValue === "string"
+      ? Number.parseInt(limitValue, 10)
+      : typeof limitValue === "number"
+        ? limitValue
+        : undefined;
+
   return {
     politicianId: typeof politicianId === "number" ? politicianId : undefined,
     politicianName:
       typeof politicianName === "string" ? politicianName : undefined,
     processAll,
     since: typeof sinceValue === "string" ? sinceValue : undefined,
+    limit: limit && Number.isFinite(limit) && limit > 0 ? limit : undefined,
     messageId:
       typeof argv["message-id"] === "string" ? argv["message-id"] : undefined,
     dryRun: argv["dry-run"] === true,
@@ -208,6 +219,7 @@ OPTIONS:
   --process-all          Fetch all available messages (default when no filter provided)
   --since <date>         Fetch messages received after date (ISO 8601)
   --message-id <id>      Fetch one specific message (JMAP ID or Message-ID header)
+  --limit <n>            Process at most <n> messages (default: all)
   --dry-run              Preview converted messages without processing/storage or folder moves
   -h, --help             Show this help message
 
@@ -960,16 +972,36 @@ function createCliCompatibleDb(db: DatabaseClient): DatabaseClient {
       return await tryInsert(insertPayload);
     } catch (firstError) {
       const errorText = toErrorText(firstError).toLowerCase();
-      const senderColumnsMissing =
-        errorText.includes("is_reply") || errorText.includes("sender_flag");
 
-      if (!senderColumnsMissing) {
-        throw new Error("Failed to store message in database");
+      // Unique constraint violation — message already exists, not a real failure
+      if (errorText.includes("23505") || errorText.includes("duplicate key")) {
+        // Fetch the existing message id and return it
+        const externalId = insertPayload.external_id as string;
+        const { data: existing } = await supabase
+          .from("messages")
+          .select("id")
+          .eq("external_id", externalId)
+          .limit(1);
+        if (existing && existing.length > 0) {
+          return existing[0].id as number;
+        }
+        throw new Error(`Duplicate message ${externalId} but could not find existing id`);
+      }
+
+      const missingColumn =
+        errorText.includes("is_reply") ||
+        errorText.includes("sender_flag") ||
+        errorText.includes("reply_scheduled_at");
+
+      if (!missingColumn) {
+        console.error("Error inserting message:", toErrorText(firstError));
+        throw new Error(`Failed to store message in database: ${toErrorText(firstError)}`);
       }
 
       const fallbackPayload = { ...insertPayload };
       delete fallbackPayload.is_reply;
       delete fallbackPayload.sender_flag;
+      delete fallbackPayload.reply_scheduled_at;
 
       try {
         return await tryInsert(fallbackPayload);
@@ -987,22 +1019,21 @@ async function getAlreadyProcessedExternalIds(
   db: DatabaseClient,
   externalIds: string[],
   politicianId?: number,
-): Promise<Set<string>> {
+): Promise<Map<string, { campaign_slug: string | null }>> {
   const uniqueIds = Array.from(new Set(externalIds.filter((id) => id.trim().length > 0)));
   if (uniqueIds.length === 0) {
-    return new Set<string>();
+    return new Map();
   }
 
   const supabase = (db as any).supabase;
   if (!supabase) {
-    return new Set<string>();
+    return new Map();
   }
 
   let query = supabase
     .from("messages")
-    .select("external_id")
-    .eq("channel_source", "stalwart")
-    .eq("processing_status", "unanswered");
+    .select("external_id, campaigns!inner(slug)")
+    .eq("channel_source", "stalwart");
 
   if (politicianId !== undefined) {
     query = query.eq("politician_id", politicianId);
@@ -1014,7 +1045,12 @@ async function getAlreadyProcessedExternalIds(
     throw new Error(`Failed to check already processed messages: ${error.message}`);
   }
 
-  return new Set((data || []).map((row: { external_id: string }) => row.external_id));
+  const result = new Map<string, { campaign_slug: string | null }>();
+  for (const row of data || []) {
+    const slug = row.campaigns?.slug ?? null;
+    result.set(row.external_id, { campaign_slug: slug });
+  }
+  return result;
 }
 
 async function runStalwartIngestion(
@@ -1105,15 +1141,15 @@ async function runStalwartIngestion(
     );
   }
 
-  const processedExternalIds = await getAlreadyProcessedExternalIds(
+  const alreadyProcessed = await getAlreadyProcessedExternalIds(
     db,
     rawEmails.map((email) => email.id),
     politicianId,
   );
-  const unprocessedRawEmails = rawEmails.filter((email) => !processedExternalIds.has(email.id));
+  const unprocessedRawEmails = rawEmails.filter((email) => !alreadyProcessed.has(email.id));
 
-  if (processedExternalIds.size > 0) {
-    console.log(`Skipping ${processedExternalIds.size} already processed message(s).`);
+  if (alreadyProcessed.size > 0) {
+    console.log(`Skipping ${alreadyProcessed.size} already processed message(s).`);
   }
 
   const validMessages: MessageInput[] = [];
@@ -1128,16 +1164,19 @@ async function runStalwartIngestion(
     }
   }
 
+  if (options.limit && validMessages.length > options.limit) {
+    console.log(
+      `${prefix}Limiting to ${options.limit} of ${validMessages.length} valid messages (--limit flag).`,
+    );
+    validMessages.length = options.limit;
+  }
+
   console.log(
     `${prefix}Fetched ${rawEmails.length} message(s); ${unprocessedRawEmails.length} unprocessed, ${validMessages.length} valid, ${skippedCount} skipped`,
   );
 
   if (options.dryRun) {
     printStalwartDryRun(validMessages);
-    return true;
-  }
-
-  if (validMessages.length === 0) {
     return true;
   }
 
@@ -1149,43 +1188,120 @@ async function runStalwartIngestion(
     moved: 0,
   };
 
-  for (const messageInput of validMessages) {
+  // Move already-processed messages out of the inbox so they don't
+  // keep coming back on every fetch.  We know their campaign from the DB.
+  for (const rawEmail of rawEmails) {
+    const info = alreadyProcessed.get(rawEmail.id);
+    if (!info) continue;
+    const folderPath = generateFolderPath(info.campaign_slug);
     try {
-      const result = await processMessage(db, ai, messageInput);
-      if (result.success) {
-        summary.processed += 1;
-        console.log(
-          `Processed ${messageInput.external_id} -> campaign=${result.campaign_slug || "unknown"} confidence=${result.confidence ?? "n/a"}`,
-        );
-        const folderPath = generateFolderPath(result.campaign_slug);
-        try {
-          let mailboxId = mailboxCache.get(folderPath);
-          if (!mailboxId) {
-            mailboxId = await ensureMailboxExists(session.apiUrl, authHeader, accountId, folderPath);
-            mailboxCache.set(folderPath, mailboxId);
+      let mailboxId = mailboxCache.get(folderPath);
+      if (!mailboxId) {
+        mailboxId = await ensureMailboxExists(session.apiUrl, authHeader, accountId, folderPath);
+        mailboxCache.set(folderPath, mailboxId);
+      }
+      await moveEmailToMailbox(session.apiUrl, authHeader, accountId, rawEmail.id, mailboxId);
+      summary.moved += 1;
+      console.log(`Moved already-processed ${rawEmail.id} -> folder=${folderPath}`);
+    } catch (moveError) {
+      const reason = moveError instanceof Error ? moveError.message : "Unknown error";
+      console.warn(`Failed to move already-processed ${rawEmail.id}: ${reason}`);
+    }
+  }
+
+  if (validMessages.length === 0) {
+    console.log(`${prefix}No new messages to process.`);
+    console.log(`${prefix}Moved to folders: ${summary.moved}`);
+    return true;
+  }
+
+  // Use batch path for 2+ messages, single-message path for 1.
+  // The per-message path retains getMessageByExternalId duplicate detection
+  // which is more precise than the batch pre-filter.
+  if (validMessages.length > 1) {
+    try {
+      const batchResults = await processMessageBatch(db, ai, validMessages);
+      for (let i = 0; i < batchResults.length; i++) {
+        const result = batchResults[i];
+        const messageInput = validMessages[i];
+
+        if (result.success) {
+          summary.processed += 1;
+          console.log(
+            `Processed ${messageInput.external_id} -> campaign=${result.campaign_slug || "unknown"} confidence=${result.confidence ?? "n/a"}`,
+          );
+          const folderPath = generateFolderPath(result.campaign_slug);
+          try {
+            let mailboxId = mailboxCache.get(folderPath);
+            if (!mailboxId) {
+              mailboxId = await ensureMailboxExists(session.apiUrl, authHeader, accountId, folderPath);
+              mailboxCache.set(folderPath, mailboxId);
+            }
+            await moveEmailToMailbox(session.apiUrl, authHeader, accountId, messageInput.external_id, mailboxId);
+            summary.moved += 1;
+            console.log(`Moved ${messageInput.external_id} -> folder=${folderPath}`);
+          } catch (moveError) {
+            const reason = moveError instanceof Error ? moveError.message : "Unknown error";
+            console.warn(`Failed to move ${messageInput.external_id}: ${reason}`);
           }
-          await moveEmailToMailbox(session.apiUrl, authHeader, accountId, messageInput.external_id, mailboxId);
-          summary.moved += 1;
-          console.log(`Moved ${messageInput.external_id} -> folder=${folderPath}`);
-        } catch (moveError) {
-          const reason = moveError instanceof Error ? moveError.message : "Unknown error";
-          console.warn(`Failed to move ${messageInput.external_id}: ${reason}`);
+        } else if (result.status === "duplicate") {
+          summary.duplicates += 1;
+          console.log(`Duplicate ${messageInput.external_id}`);
+        } else {
+          summary.failed += 1;
+          console.log(`Failed ${messageInput.external_id}: ${(result.errors || []).join(", ")}`);
         }
-      } else if (result.status === "duplicate") {
-        summary.duplicates += 1;
-        console.log(`Duplicate ${messageInput.external_id}`);
-      } else {
-        summary.failed += 1;
-        console.log(`Failed ${messageInput.external_id}: ${(result.errors || []).join(", ")}`);
       }
     } catch (error) {
       if (error instanceof PoliticianNotFoundError) {
-        summary.politicianNotFound += 1;
-        console.log(`Politician not found for ${messageInput.external_id}: ${error.message}`);
+        summary.politicianNotFound += validMessages.length;
+        console.log(`Politician not found: ${error.message}`);
       } else {
-        summary.failed += 1;
+        summary.failed += validMessages.length;
         const reason = error instanceof Error ? error.message : "Unknown error";
-        console.log(`Error processing ${messageInput.external_id}: ${reason}`);
+        console.log(`Error processing batch: ${reason}`);
+      }
+    }
+  } else {
+    // Single-message path — uses original per-message processMessage
+    for (const messageInput of validMessages) {
+      try {
+        const result = await processMessage(db, ai, messageInput);
+        if (result.success) {
+          summary.processed += 1;
+          console.log(
+            `Processed ${messageInput.external_id} -> campaign=${result.campaign_slug || "unknown"} confidence=${result.confidence ?? "n/a"}`,
+          );
+          const folderPath = generateFolderPath(result.campaign_slug);
+          try {
+            let mailboxId = mailboxCache.get(folderPath);
+            if (!mailboxId) {
+              mailboxId = await ensureMailboxExists(session.apiUrl, authHeader, accountId, folderPath);
+              mailboxCache.set(folderPath, mailboxId);
+            }
+            await moveEmailToMailbox(session.apiUrl, authHeader, accountId, messageInput.external_id, mailboxId);
+            summary.moved += 1;
+            console.log(`Moved ${messageInput.external_id} -> folder=${folderPath}`);
+          } catch (moveError) {
+            const reason = moveError instanceof Error ? moveError.message : "Unknown error";
+            console.warn(`Failed to move ${messageInput.external_id}: ${reason}`);
+          }
+        } else if (result.status === "duplicate") {
+          summary.duplicates += 1;
+          console.log(`Duplicate ${messageInput.external_id}`);
+        } else {
+          summary.failed += 1;
+          console.log(`Failed ${messageInput.external_id}: ${(result.errors || []).join(", ")}`);
+        }
+      } catch (error) {
+        if (error instanceof PoliticianNotFoundError) {
+          summary.politicianNotFound += 1;
+          console.log(`Politician not found for ${messageInput.external_id}: ${error.message}`);
+        } else {
+          summary.failed += 1;
+          const reason = error instanceof Error ? error.message : "Unknown error";
+          console.log(`Error processing ${messageInput.external_id}: ${reason}`);
+        }
       }
     }
   }
