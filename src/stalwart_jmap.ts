@@ -1,18 +1,18 @@
 /**
- * Stalwart JMAP helpers: Basic auth, impersonation login, and ALL_DOMAIN utilities.
+ * Stalwart JMAP helpers: Basic auth, impersonation login, and DEFAULT_DOMAIN utilities.
  */
 
 export interface StalwartImpersonationConfig {
-  /** Lowercase domain without leading `@`, e.g. `example.org`. */
-  allDomainLower: string;
-  /** Relay service account (`RELAY_SERVICE_ACCOUNT_EMAIL`). */
-  relayAccountEmail: string;
-  relayAccountPassword: string;
+  /** Lowercase default mail domain without leading `@`, e.g. `example.org`. */
+  defaultDomainLower: string;
+  /** Stalwart admin account (`JMAP_ADMIN_EMAIL`). */
+  adminEmail: string;
+  adminPassword: string;
 }
 
-export interface RelayImpersonationCredentials {
-  relayEmail: string;
-  relayPassword: string;
+export interface JmapAdminCredentials {
+  adminEmail: string;
+  adminPassword: string;
 }
 
 export function encodeBasicAuth(username: string, password: string): string {
@@ -21,15 +21,15 @@ export function encodeBasicAuth(username: string, password: string): string {
 }
 
 /**
- * Stalwart impersonation login: `{@link targetMailbox}%{@link relayAccount}`.
- * Password must be {@link relayAccount}'s login password (`RELAY_SERVICE_ACCOUNT_PASSWORD`).
+ * Stalwart impersonation login: `{@link targetMailbox}%{@link adminAccount}`.
+ * Password must be {@link adminAccount}'s login password (`JMAP_ADMIN_PASSWORD`).
  * @see https://stalw.art/docs/auth/authorization/administrator
  */
 export function buildStalwartImpersonationLogin(
-  relayAccount: string,
+  adminAccount: string,
   targetMailbox: string,
 ): string {
-  return `${targetMailbox.trim()}%${relayAccount.trim()}`;
+  return `${targetMailbox.trim()}%${adminAccount.trim()}`;
 }
 
 export function normalizeMailDomain(domain: string): string {
@@ -44,14 +44,14 @@ export function emailHostedOnDomain(
   return e.endsWith(`@${domainLower}`);
 }
 
-/** Credentials for `target%relay` impersonation from `.env` relay service account. */
-export function resolveRelayImpersonationCredentials(
+/** Credentials for `target%admin` impersonation from `JMAP_ADMIN_EMAIL` / `JMAP_ADMIN_PASSWORD`. */
+export function resolveJmapAdminCredentials(
   env: Record<string, string | undefined | null>,
-): RelayImpersonationCredentials | null {
-  const relayEmail = String(env.RELAY_SERVICE_ACCOUNT_EMAIL ?? "").trim();
-  const relayPassword = String(env.RELAY_SERVICE_ACCOUNT_PASSWORD ?? "").trim();
-  if (!relayEmail || !relayPassword) {
+): JmapAdminCredentials | null {
+  const adminEmail = String(env.JMAP_ADMIN_EMAIL ?? "").trim();
+  const adminPassword = String(env.JMAP_ADMIN_PASSWORD ?? "").trim();
+  if (!adminEmail || !adminPassword) {
     return null;
   }
-  return { relayEmail, relayPassword };
+  return { adminEmail, adminPassword };
 }

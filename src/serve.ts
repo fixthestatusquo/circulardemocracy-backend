@@ -19,11 +19,9 @@ serve(
         AI: null as any, // Not available in dev mode
         JMAP_URL: process.env.JMAP_URL || "",
         SUPABASE_ANON_KEY: process.env.SUPABASE_ANON_KEY || "",
-        RELAY_SERVICE_ACCOUNT_EMAIL:
-          process.env.RELAY_SERVICE_ACCOUNT_EMAIL || "",
-        RELAY_SERVICE_ACCOUNT_PASSWORD:
-          process.env.RELAY_SERVICE_ACCOUNT_PASSWORD || "",
-        ALL_DOMAIN: process.env.ALL_DOMAIN || "",
+        JMAP_ADMIN_EMAIL: process.env.JMAP_ADMIN_EMAIL || "",
+        JMAP_ADMIN_PASSWORD: process.env.JMAP_ADMIN_PASSWORD || "",
+        DEFAULT_DOMAIN: process.env.DEFAULT_DOMAIN || "",
       });
     },
     port: 3000,

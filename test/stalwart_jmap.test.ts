@@ -4,7 +4,7 @@ import {
   emailHostedOnDomain,
   encodeBasicAuth,
   normalizeMailDomain,
-  resolveRelayImpersonationCredentials,
+  resolveJmapAdminCredentials,
 } from "../src/stalwart_jmap";
 
 describe("encodeBasicAuth", () => {
@@ -16,28 +16,28 @@ describe("encodeBasicAuth", () => {
 });
 
 describe("buildStalwartImpersonationLogin", () => {
-  it("joins target and relay with %", () => {
+  it("joins target and admin with %", () => {
     expect(
-      buildStalwartImpersonationLogin("relay@example.com", "user@example.com"),
-    ).toBe("user@example.com%relay@example.com");
+      buildStalwartImpersonationLogin("admin@example.com", "user@example.com"),
+    ).toBe("user@example.com%admin@example.com");
   });
 });
 
-describe("resolveRelayImpersonationCredentials", () => {
-  it("returns relay email and password from env", () => {
+describe("resolveJmapAdminCredentials", () => {
+  it("returns admin email and password from env", () => {
     expect(
-      resolveRelayImpersonationCredentials({
-        RELAY_SERVICE_ACCOUNT_EMAIL: "relay@example.com",
-        RELAY_SERVICE_ACCOUNT_PASSWORD: "relay-pass",
+      resolveJmapAdminCredentials({
+        JMAP_ADMIN_EMAIL: "admin@example.com",
+        JMAP_ADMIN_PASSWORD: "admin-pass",
       }),
     ).toEqual({
-      relayEmail: "relay@example.com",
-      relayPassword: "relay-pass",
+      adminEmail: "admin@example.com",
+      adminPassword: "admin-pass",
     });
   });
 
-  it("returns null when relay credentials are missing", () => {
-    expect(resolveRelayImpersonationCredentials({})).toBeNull();
+  it("returns null when admin credentials are missing", () => {
+    expect(resolveJmapAdminCredentials({})).toBeNull();
   });
 });
 

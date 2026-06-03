@@ -1085,9 +1085,9 @@ Message Reprocessing:
 
 Reply sending (test):
   reply [--campaign-id <id> | --campaign-name <hint>] [--dry-run]
-    Uses sendScheduledReplies / processReplyImmediately from reply_worker (same as Cloudflare cron).
+    Uses sendScheduledReplies / replyMessage from reply_worker (same as Cloudflare cron).
     --dry-run previews eligible replies and per-campaign counts without sending mail.
-    Set ALL_DOMAIN + RELAY_* in .env for Stalwart impersonation; otherwise Supabase relay JWT.
+    Set DEFAULT_DOMAIN + JMAP_ADMIN_* in .env for Stalwart impersonation on that domain; otherwise Supabase relay JWT.
 
 API Options:
   -m, --method     HTTP method (GET, POST, PUT, DELETE) [default: GET]

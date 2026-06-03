@@ -25,11 +25,11 @@ SUPABASE_KEY=your-supabase-key
 # Single outbound JMAP relay service account (required):
 JMAP_URL=https://mail.example.org
 SUPABASE_ANON_KEY=your-supabase-anon-key
-RELAY_SERVICE_ACCOUNT_EMAIL=relay-user@example.org
-RELAY_SERVICE_ACCOUNT_PASSWORD=relay-user-password
+JMAP_ADMIN_EMAIL=admin@example.org
+JMAP_ADMIN_PASSWORD=admin-login-password
 
 # Optional: Stalwart impersonation for outbound sends (see README)
-ALL_DOMAIN=example.org
+DEFAULT_DOMAIN=example.org
 ```
 
 ### 2. Database Migration Setup
@@ -56,15 +56,15 @@ Outbound replies use one global service account for authentication:
 
 - `JMAP_URL` (base mail server; the worker uses `JMAP_URL/.well-known/jmap` for the JMAP session document)
 - `SUPABASE_ANON_KEY`
-- `RELAY_SERVICE_ACCOUNT_EMAIL`
-- `RELAY_SERVICE_ACCOUNT_PASSWORD`
-- `ALL_DOMAIN` (optional) — Stalwart impersonation domain; when unset, `SUPABASE_ANON_KEY` is required for relay JWT
+- `JMAP_ADMIN_EMAIL`
+- `JMAP_ADMIN_PASSWORD`
+- `DEFAULT_DOMAIN` (optional) — default hosted mail domain for Stalwart impersonation; when unset, `SUPABASE_ANON_KEY` is required for relay JWT
 
 ### Optional Variables
 
 ### Configure Service Account Credentials
 
-Set `JMAP_URL`, `RELAY_SERVICE_ACCOUNT_EMAIL`, and `RELAY_SERVICE_ACCOUNT_PASSWORD` in the same runtime as the API (`.env` locally, Worker secrets in production).
+Set `JMAP_URL`, `JMAP_ADMIN_EMAIL`, and `JMAP_ADMIN_PASSWORD` in the same runtime as the API (`.env` locally, Worker secrets in production).
 
 ### Reply sends (brief)
 
@@ -89,8 +89,8 @@ npx wrangler secret put SUPABASE_URL
 npx wrangler secret put SUPABASE_KEY
 npx wrangler secret put JMAP_URL
 npx wrangler secret put SUPABASE_ANON_KEY
-npx wrangler secret put RELAY_SERVICE_ACCOUNT_EMAIL
-npx wrangler secret put RELAY_SERVICE_ACCOUNT_PASSWORD
+npx wrangler secret put JMAP_ADMIN_EMAIL
+npx wrangler secret put JMAP_ADMIN_PASSWORD
 
 # 3. Deploy the worker
 npm run deploy

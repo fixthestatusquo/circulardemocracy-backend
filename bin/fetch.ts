@@ -16,7 +16,7 @@ import {
   emailHostedOnDomain,
   encodeBasicAuth,
   normalizeMailDomain,
-  resolveRelayImpersonationCredentials,
+  resolveJmapAdminCredentials,
 } from "../src/stalwart_jmap.js";
 import { z } from "zod";
 import Turndown from "turndown";
@@ -216,12 +216,12 @@ ENVIRONMENT VARIABLES:
   JMAP_SERVICE_ACCOUNT_PASSWORD   Required app password for JMAP basic auth
   JMAP_URL                        Required. Mail server base URL (no path); session URL is JMAP_URL + "/.well-known/jmap"
   (Mail account id for this CLI comes from the JMAP session after login.)
-  ALL_DOMAIN                      When set (e.g. example.org), impersonate via
-                                  RELAY_SERVICE_ACCOUNT_EMAIL / RELAY_SERVICE_ACCOUNT_PASSWORD
+  DEFAULT_DOMAIN                  When set (e.g. example.org), impersonate via
+                                  JMAP_ADMIN_EMAIL / JMAP_ADMIN_PASSWORD
                                   (login: target%relay). Without --user/--politician: all DB mailboxes on domain.
                                   With --user/--politician: one mailbox only.
-  RELAY_SERVICE_ACCOUNT_EMAIL     Required for ALL_DOMAIN impersonation (impersonator account).
-  RELAY_SERVICE_ACCOUNT_PASSWORD  Required for ALL_DOMAIN impersonation (impersonator password).
+  JMAP_ADMIN_EMAIL                Required for DEFAULT_DOMAIN impersonation (admin account).
+  JMAP_ADMIN_PASSWORD             Required for DEFAULT_DOMAIN impersonation (admin password).
   SUPABASE_URL           Required Supabase URL
   SUPABASE_KEY           Required Supabase key
 
@@ -1213,29 +1213,29 @@ async function main() {
   const appPassword =
     (typeof fetchOptions.password === "string" ? fetchOptions.password.trim() : "") ||
     (process.env.JMAP_SERVICE_ACCOUNT_PASSWORD || "").trim();
-  const allDomainRaw = (process.env.ALL_DOMAIN || "").trim();
-  const relayCreds = resolveRelayImpersonationCredentials(process.env);
-  const impersonationPassword = allDomainRaw
+  const defaultDomainRaw = (process.env.DEFAULT_DOMAIN || "").trim();
+  const adminCreds = resolveJmapAdminCredentials(process.env);
+  const impersonationPassword = defaultDomainRaw
     ? (typeof fetchOptions.password === "string" ? fetchOptions.password.trim() : "") ||
-      relayCreds?.relayPassword ||
+      adminCreds?.adminPassword ||
       ""
     : appPassword;
 
-  if (allDomainRaw && !relayCreds && !(typeof fetchOptions.password === "string")) {
+  if (defaultDomainRaw && !adminCreds && !(typeof fetchOptions.password === "string")) {
     console.error(
-      "Error: ALL_DOMAIN mode requires RELAY_SERVICE_ACCOUNT_EMAIL and RELAY_SERVICE_ACCOUNT_PASSWORD.",
+      "Error: DEFAULT_DOMAIN mode requires JMAP_ADMIN_EMAIL and JMAP_ADMIN_PASSWORD.",
     );
     process.exit(1);
   }
 
-  if (allDomainRaw && !impersonationPassword) {
+  if (defaultDomainRaw && !impersonationPassword) {
     console.error(
-      "Error: ALL_DOMAIN impersonation needs RELAY_SERVICE_ACCOUNT_PASSWORD or --password.",
+      "Error: DEFAULT_DOMAIN impersonation needs JMAP_ADMIN_PASSWORD or --password.",
     );
     process.exit(1);
   }
 
-  if (!allDomainRaw && !appPassword) {
+  if (!defaultDomainRaw && !appPassword) {
     console.error(
       "Error: JMAP_SERVICE_ACCOUNT_PASSWORD environment variable or --password must be set",
     );
@@ -1282,31 +1282,31 @@ async function main() {
       }
     }
 
-    if (!allDomainRaw && !explicitMailbox && !jmapServiceAccount) {
+    if (!defaultDomainRaw && !explicitMailbox && !jmapServiceAccount) {
       console.error(
         "Error: JMAP_SERVICE_ACCOUNT_EMAIL environment variable, --user, or --politician-* must be set",
       );
       process.exit(1);
     }
 
-    if (allDomainRaw && !explicitMailbox) {
-      const domainKey = normalizeMailDomain(allDomainRaw);
+    if (defaultDomainRaw && !explicitMailbox) {
+      const domainKey = normalizeMailDomain(defaultDomainRaw);
       const mailboxes = await db.listStalwartMailboxAddressesForDomain(domainKey);
       if (mailboxes.length === 0) {
         console.error(
-          `Error: ALL_DOMAIN is set (${domainKey}) but no politician or campaign technical addresses match that domain in the database.`,
+          `Error: DEFAULT_DOMAIN is set (${domainKey}) but no politician or campaign technical addresses match that domain in the database.`,
         );
         process.exit(1);
       }
       console.log(
-        `ALL_DOMAIN mode: ingesting ${mailboxes.length} mailbox(es) on @${domainKey} using Stalwart impersonation.`,
+        `DEFAULT_DOMAIN mode: ingesting ${mailboxes.length} mailbox(es) on @${domainKey} using Stalwart impersonation.`,
       );
       logAllDomainMailboxes(domainKey, mailboxes);
       let allOk = true;
       for (let i = 0; i < mailboxes.length; i++) {
         const mailbox = mailboxes[i];
         const principal = buildStalwartImpersonationLogin(
-          relayCreds!.relayEmail,
+          adminCreds!.adminEmail,
           mailbox,
         );
         const ok = await runStalwartIngestion(
@@ -1328,23 +1328,23 @@ async function main() {
     let ingestPrincipal = explicitMailbox || jmapServiceAccount;
     let logMailbox: string | undefined;
 
-    if (allDomainRaw && explicitMailbox) {
-      const domainKey = normalizeMailDomain(allDomainRaw);
+    if (defaultDomainRaw && explicitMailbox) {
+      const domainKey = normalizeMailDomain(defaultDomainRaw);
       if (!emailHostedOnDomain(explicitMailbox, domainKey)) {
         console.error(
-          `Error: Target mailbox ${explicitMailbox} is not on ALL_DOMAIN ${domainKey}.`,
+          `Error: Target mailbox ${explicitMailbox} is not on DEFAULT_DOMAIN ${domainKey}.`,
         );
         process.exit(1);
       }
       ingestPrincipal = buildStalwartImpersonationLogin(
-        relayCreds!.relayEmail,
+        adminCreds!.adminEmail,
         explicitMailbox,
       );
       logMailbox = explicitMailbox;
       const domainMailboxes =
         await db.listStalwartMailboxAddressesForDomain(domainKey);
       console.log(
-        `ALL_DOMAIN mode: ingesting single mailbox ${explicitMailbox} via Stalwart impersonation.`,
+        `DEFAULT_DOMAIN mode: ingesting single mailbox ${explicitMailbox} via Stalwart impersonation.`,
       );
       logAllDomainMailboxes(domainKey, domainMailboxes, explicitMailbox);
     }
@@ -1354,7 +1354,7 @@ async function main() {
       ai,
       fetchOptions,
       ingestPrincipal,
-      allDomainRaw ? impersonationPassword : appPassword,
+      defaultDomainRaw ? impersonationPassword : appPassword,
       jmapWellKnown,
       logMailbox,
     );

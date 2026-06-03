@@ -16,10 +16,10 @@ export async function getSupabaseRelayAccessToken(): Promise<string | null> {
 
   const supabaseUrl = String(process.env.SUPABASE_URL || "").trim();
   const supabaseAnonKey = String(process.env.SUPABASE_ANON_KEY || "").trim();
-  const relayEmail = String(process.env.RELAY_SERVICE_ACCOUNT_EMAIL || "").trim();
-  const relayPassword = String(process.env.RELAY_SERVICE_ACCOUNT_PASSWORD || "").trim();
+  const adminEmail = String(process.env.JMAP_ADMIN_EMAIL || "").trim();
+  const adminPassword = String(process.env.JMAP_ADMIN_PASSWORD || "").trim();
 
-  if (!supabaseUrl || !supabaseAnonKey || !relayEmail || !relayPassword) {
+  if (!supabaseUrl || !supabaseAnonKey || !adminEmail || !adminPassword) {
     return null;
   }
 
@@ -32,8 +32,8 @@ export async function getSupabaseRelayAccessToken(): Promise<string | null> {
         apikey: supabaseAnonKey,
       },
       body: JSON.stringify({
-        email: relayEmail,
-        password: relayPassword,
+        email: adminEmail,
+        password: adminPassword,
       }),
     },
   );

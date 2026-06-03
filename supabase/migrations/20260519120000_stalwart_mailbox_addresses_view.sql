@@ -1,4 +1,4 @@
--- View for ALL_DOMAIN JMAP ingestion: mailbox addresses with email_domain for indexed filtering.
+-- View for DEFAULT_DOMAIN ingestion: mailbox addresses with email_domain for indexed filtering.
 
 BEGIN;
 
