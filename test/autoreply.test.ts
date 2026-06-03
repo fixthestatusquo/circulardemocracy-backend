@@ -22,6 +22,7 @@ import {
   updateReplyTemplate,
   validateTemplateData,
 } from "../src/template_service";
+import { replaceTokens } from "../src/reply_worker";
 
 // =============================================================================
 // SCHEDULING TESTS
@@ -267,6 +268,60 @@ describe("Email Layout", () => {
       expect(result.htmlBody).toContain("&lt;script&gt;");
     });
   });
+
+  describe("EP layout", () => {
+    it("should include EU flag and politician name", () => {
+      const result = renderEmailLayout({
+        subject: "Test Subject",
+        markdown_body: "Content",
+        layout_type: "EP",
+        politician_name: "John Doe",
+      });
+
+      expect(result.htmlBody).toContain("🇪🇺");
+      expect(result.htmlBody).toContain("Member of the European Parliament: John Doe");
+      expect(result.textBody).toContain("🇪🇺");
+      expect(result.textBody).toContain("Member of the European Parliament: John Doe");
+    });
+  });
+
+  describe("replaceTokens", () => {
+    it("should replace {subject}, {sender}, and {date} tokens", () => {
+      const text = "Hello {sender}, regarding {subject} on {date}.";
+      const tokens = {
+        sender: "John Doe",
+        subject: "Climate",
+        date: "2024-01-01",
+      };
+
+      const result = replaceTokens(text, tokens);
+      expect(result).toBe("Hello John Doe, regarding Climate on 2024-01-01.");
+    });
+
+    it("should replace multiple occurrences of the same token", () => {
+      const text = "{sender}, {sender}!";
+      const tokens = { sender: "John" };
+
+      const result = replaceTokens(text, tokens);
+      expect(result).toBe("John, John!");
+    });
+
+    it("should not replace tokens not in the map", () => {
+      const text = "Hello {unknown}.";
+      const tokens = { sender: "John" };
+
+      const result = replaceTokens(text, tokens);
+      expect(result).toBe("Hello {unknown}.");
+    });
+
+    it("should handle empty values", () => {
+      const text = "Subject: {subject}";
+      const tokens = { subject: "" };
+
+      const result = replaceTokens(text, tokens);
+      expect(result).toBe("Subject: ");
+    });
+  });
 });
 
 // =============================================================================
@@ -449,7 +504,7 @@ describe("Template Service", () => {
       const result = await updateReplyTemplate(mockDb, 10, { active: true });
 
       expect(result.success).toBe(true);
-      expect(mockDb.deactivateOtherTemplates).toHaveBeenCalledWith(1, 10);
+      expect(mockDb.deactivateOtherTemplates).toHaveBeenCalledWith(1, 1, 10);
     });
   });
 });
@@ -469,7 +524,6 @@ describe("Message Processor Auto-Reply", () => {
     getActiveTemplateForCampaign: vi.fn(),
     getMessageForReplyScheduling: vi.fn(),
     upsertSupporter: vi.fn(),
-    storeMessageContact: vi.fn(),
     assignMessageToCluster: vi.fn(),
   } as unknown as DatabaseClient;
 
@@ -480,7 +534,6 @@ describe("Message Processor Auto-Reply", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(mockDb.upsertSupporter).mockResolvedValue(1);
-    vi.mocked(mockDb.storeMessageContact).mockResolvedValue(undefined);
     vi.mocked(mockDb.getMessageForReplyScheduling).mockImplementation(
       async (messageId: number) => ({
         id: messageId,
@@ -491,7 +544,7 @@ describe("Message Processor Auto-Reply", () => {
         duplicate_rank: 0,
         reply_sent_at: null,
         reply_scheduled_at: null,
-        processing_status: "processed",
+        processing_status: "unanswered",
       }),
     );
   });
@@ -540,14 +593,7 @@ describe("Message Processor Auto-Reply", () => {
     expect(result.success).toBe(true);
     expect(result.reply_scheduled_at).toBeNull();
     expect(result.send_immediately).toBe(true);
-    expect(mockDb.storeMessageContact).toHaveBeenCalledWith(
-      expect.objectContaining({
-        messageId: 100,
-        senderEmail: "john@example.com",
-        senderName: "John Doe",
-        capturedAt: validInput.timestamp,
-      }),
-    );
+    expect(mockDb.getActiveTemplateForCampaign).toHaveBeenCalledWith(10, 1);
     expect(mockDb.upsertSupporter).toHaveBeenCalledWith(
       10,
       1,
@@ -578,7 +624,6 @@ describe("Message Processor Auto-Reply", () => {
     expect(result.reply_scheduled_at).toBeNull();
     expect(mockDb.getActiveTemplateForCampaign).not.toHaveBeenCalled();
     expect(mockDb.upsertSupporter).toHaveBeenCalled();
-    expect(mockDb.storeMessageContact).toHaveBeenCalled();
   });
 
   it("should not schedule reply if no active template exists", async () => {
@@ -602,6 +647,5 @@ describe("Message Processor Auto-Reply", () => {
     expect(result.success).toBe(true);
     expect(result.reply_scheduled_at).toBeNull();
     expect(mockDb.upsertSupporter).toHaveBeenCalled();
-    expect(mockDb.storeMessageContact).toHaveBeenCalled();
   });
 });

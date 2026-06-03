@@ -10,31 +10,39 @@ import {
   type CliFilters,
 } from "../src/cli_shared.js";
 import {
-  processScheduledReplies,
+  sendScheduledReplies,
+replyMessage,
   type ProcessingResult,
 } from "../src/reply_worker.js";
 
-dotenv();
+dotenv({ quiet: true });
 
-/** Must match `MAX_RETRY_ATTEMPTS` in `src/reply_worker.ts`. */
+/** Must match `MAX_RETRY_ATTEMPTS` in `src/reply_worker.ts`. @todo import from there*/
 const MAX_RETRY_ATTEMPTS = 10;
 
-export function parseArgs(args: string[]): CliFilters | null {
+export function parseArgs(args: string[]): CliFilters  {
   const argv = minimist(args, {
-    string: ["campaign-name", "politician-name"],
+    string: ["campaign-name", "politician-name", "campaign-id","politician-id","limit","politician-name","message"],
     boolean: ["dry-run", "help"],
     alias: { h: "help" },
+    unknown: (d: string) => {
+      const allowed = []; //merge with boolean and string?
+      if (d[0] !== "-" ) return true;
+      if (allowed.includes(d.split("=")[0].slice(2))) return true;
+      console.error("unknown param", d);
+      return false;
+    },
   });
 
   if (argv.help) {
-    return null;
+    printUsage();
+    process.exit(1);
   }
 
   const campaignId = argv["campaign-id"];
   const campaignName = argv["campaign-name"];
-  const politicianId = argv["politician-id"];
+  const politicianId = Number(argv["politician-id"]) || undefined;
   const politicianName = argv["politician-name"];
-
   if (campaignId !== undefined && campaignName !== undefined) {
     console.error("Use only one of --campaign-id or --campaign-name");
     process.exit(1);
@@ -45,6 +53,15 @@ export function parseArgs(args: string[]): CliFilters | null {
     process.exit(1);
   }
 
+  if (argv.limit !== undefined && politicianId === undefined) {
+    console.error("--limit requires --politician-id");
+    process.exit(1);
+  }
+  if (argv.messageId !== undefined && politicianId === undefined) {
+    console.error("--message requires --politician-id");
+    process.exit(1);
+  }
+
   return {
     campaignId: typeof campaignId === "number" ? campaignId : undefined,
     campaignName: typeof campaignName === "string" ? campaignName : undefined,
@@ -52,22 +69,34 @@ export function parseArgs(args: string[]): CliFilters | null {
     politicianName:
       typeof politicianName === "string" ? politicianName : undefined,
     dryRun: argv["dry-run"] === true,
+    limit: Number(argv.limit) || undefined,
+    messageId: argv.message,
   };
 }
 
-async function processFilteredReplies(
+async function sendFilteredReplies(
   db: DatabaseClient,
   options: CliFilters,
-  runtimeSecrets: Record<string, string | undefined>,
 ): Promise<ProcessingResult> {
+  if (options.messageId !== undefined && options.politicianId !== undefined) {
+    console.log(`Processing specific message: ${options.messageId} for ${options.politicianId}`);
+    return replyMessage(db, 
+      options.messageId, options.politicianId);
+  }
+
   const campaignId = await resolveCampaignId(db, options);
   const politicianId = await resolvePoliticianId(db, options);
 
-  console.log("Processing replies with filters:", { campaignId, politicianId });
-
-  return processScheduledReplies(db, runtimeSecrets, {
+  console.log("Processing replies with filters:", {
     campaignId,
     politicianId,
+    limit: options.limit,
+  });
+
+  return sendScheduledReplies(db, {
+    campaignId,
+    politicianId,
+    limit: options.limit,
   });
 }
 
@@ -75,13 +104,23 @@ export async function previewReadyReplies(
   db: DatabaseClient,
   options: CliFilters,
 ): Promise<void> {
-  const campaignId = await resolveCampaignId(db, options);
-  const politicianId = await resolvePoliticianId(db, options);
+  let allReady: any[] = [];
+    const politicianId = await resolvePoliticianId(db, options);
+  if (options.messageId !== undefined) {
+    const msg = await db.getMessageByExternalId
+      (options.messageId, 
+        "stalwart", 
+        options.politicianId || -1);
+    allReady = msg ? [msg] : [];
+  } else {
+    const campaignId = await resolveCampaignId(db, options);
 
-  const allReady = await db.getMessagesReadyToSend(MAX_RETRY_ATTEMPTS, {
-    campaignId,
-    politicianId,
-  });
+    allReady = await db.getMessagesReadyToSend(MAX_RETRY_ATTEMPTS, {
+      campaignId,
+      politicianId,
+      limit: options.limit,
+    });
+  }
 
   console.log("DRY RUN - No replies will be sent.\n");
 
@@ -112,22 +151,26 @@ export async function previewReadyReplies(
   console.log(
     `\nTotal: ${allReady.length} message(s) ready to send across ${byCampaign.size} campaign(s)`,
   );
+  console.log(allReady.map(m => `${m.external_id} ${m.received_at}`));
 }
 
 function printUsage() {
   console.log(`
-Send Replies - Test outbound auto-replies using the production reply worker
+Reply - Send outbound auto-replies using the production reply worker
 
 USAGE:
-  send-replies
-  send-replies [--campaign-id <id> | --campaign-name <hint>]
-  send-replies [--politician-id <id> | --politician-name <hint>]
+  reply
+  reply [--campaign-id <id> | --campaign-name <hint>]
+  reply [--politician-id <id> | --politician-name <hint>] [--limit <n>]
+  reply [--message <id>]
 
 OPTIONS:
   --campaign-id <id>      Filter by campaign (numeric id)
   --campaign-name <hint>  Filter by campaign (name/slug ilike match)
   --politician-id <id>    Filter by politician (numeric id)
   --politician-name <hint> Filter by politician (email exact or partial)
+  --limit <n>             Limit the number of emails processed (requires --politician-id)
+  --message <id>          Process only this specific message ID
   --dry-run               Preview what would be sent without sending mail
   -h, --help              Show this help message
 
@@ -154,20 +197,15 @@ async function main(): Promise<void> {
   }
 
   const options = parseArgs(args);
-  if (!options) {
-    return;
-  }
 
   try {
     const db = new DatabaseClientImpl({ url: supabaseUrl, key: supabaseKey });
-    const runtimeSecrets = process.env as Record<string, string | undefined>;
-
     if (options.dryRun) {
       await previewReadyReplies(db, options);
       return;
     }
 
-    const result = await processFilteredReplies(db, options, runtimeSecrets);
+    const result = await sendFilteredReplies(db, options);
     console.log(JSON.stringify(result, null, 2));
 
     if (result.failed > 0) {

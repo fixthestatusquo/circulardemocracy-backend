@@ -7,6 +7,7 @@ export interface PoliticianIdentityRow {
   id: number;
   name: string;
   email: string;
+  reply_to?: string | null;
 }
 
 export interface CampaignIdentityRow {
@@ -35,6 +36,7 @@ export function resolveOutboundEmailIdentity(
   ).trim();
   const replyToEmail = (
     campaign.reply_to_email?.trim() ||
+    politician.reply_to?.trim() ||
     politician.email?.trim() ||
     ""
   ).trim();

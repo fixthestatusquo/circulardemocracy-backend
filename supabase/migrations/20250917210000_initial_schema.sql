@@ -68,7 +68,7 @@ CREATE TABLE messages (
     
     -- Processing metadata
     duplicate_rank INTEGER DEFAULT 0, -- 0 = first message from this sender, 1+ = subsequent
-    processing_status VARCHAR(20) DEFAULT 'processed', -- 'processed', 'failed', 'manual_review'
+    processing_status VARCHAR(20) DEFAULT 'unanswered', -- 'unanswered', 'failed', 'manual_review'
     
     -- Reply tracking
     reply_sent_at TIMESTAMP WITH TIME ZONE,

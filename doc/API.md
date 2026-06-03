@@ -62,7 +62,7 @@ Content-Type: `application/json`
 
 **Responses:**
 
-- **200**: Message processed successfully
+- **200**: Message unanswered successfully
 - **400**: Invalid input data
 - **401**: Unauthorized - Invalid or missing Supabase JWT
 - **403**: Forbidden

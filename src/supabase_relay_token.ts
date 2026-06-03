@@ -1,5 +1,3 @@
-type RuntimeSecretBindings = Record<string, string | undefined>;
-
 interface TokenState {
   accessToken: string | null;
   expiresAtMs: number;
@@ -10,18 +8,16 @@ const tokenState: TokenState = {
   expiresAtMs: 0,
 };
 
-export async function getSupabaseRelayAccessToken(
-  env: RuntimeSecretBindings,
-): Promise<string | null> {
+export async function getSupabaseRelayAccessToken(): Promise<string | null> {
   const now = Date.now();
   if (tokenState.accessToken && now < tokenState.expiresAtMs - 30_000) {
     return tokenState.accessToken;
   }
 
-  const supabaseUrl = String(env.SUPABASE_URL || "").trim();
-  const supabaseAnonKey = String(env.SUPABASE_ANON_KEY || "").trim();
-  const adminEmail = String(env.JMAP_ADMIN_EMAIL || "").trim();
-  const adminPassword = String(env.JMAP_ADMIN_PASSWORD || "").trim();
+  const supabaseUrl = String(process.env.SUPABASE_URL || "").trim();
+  const supabaseAnonKey = String(process.env.SUPABASE_ANON_KEY || "").trim();
+  const adminEmail = String(process.env.JMAP_ADMIN_EMAIL || "").trim();
+  const adminPassword = String(process.env.JMAP_ADMIN_PASSWORD || "").trim();
 
   if (!supabaseUrl || !supabaseAnonKey || !adminEmail || !adminPassword) {
     return null;

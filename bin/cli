@@ -1032,7 +1032,7 @@ Commands:
   create-campaign-from-cluster  Assign cluster to campaign (match, merge, or create + messages)
   closest-campaigns     Find closest campaigns for a message
   reprocess-messages    Reprocess and reclassify existing messages
-  send-replies          Send pending/scheduled auto-replies (reply worker)
+  reply                 Send pending/scheduled auto-replies (reply worker)
   <endpoint>            API endpoint path (e.g., campaigns, users/:id)
 
 Outbound JMAP (reply worker): set JMAP_URL to the mail server base URL; session URL is
@@ -1084,8 +1084,8 @@ Message Reprocessing:
       --password <pass>     JMAP app password (default: JMAP_SERVICE_ACCOUNT_PASSWORD env)
 
 Reply sending (test):
-  send-replies [--campaign-id <id> | --campaign-name <hint>] [--dry-run]
-    Uses processScheduledReplies / processReplyImmediately from reply_worker (same as Cloudflare cron).
+  reply [--campaign-id <id> | --campaign-name <hint>] [--dry-run]
+    Uses sendScheduledReplies / replyMessage from reply_worker (same as Cloudflare cron).
     --dry-run previews eligible replies and per-campaign counts without sending mail.
     Set DEFAULT_DOMAIN + JMAP_ADMIN_* in .env for Stalwart impersonation on that domain; otherwise Supabase relay JWT.
 
@@ -1109,10 +1109,10 @@ Examples:
   ./cli closest-campaigns --message "I support GMO demeter policy" --limit 5
   ./cli reprocess-messages --process-all
   ./cli reprocess-messages --campaign-id 5 --limit 100
-  ./cli send-replies
-  ./cli send-replies --dry-run
-  ./cli send-replies --campaign-id 5
-  ./cli send-replies --campaign-name "Climate Action"
+  ./cli reply
+  ./cli reply --dry-run
+  ./cli reply --campaign-id 5
+  ./cli reply --campaign-name "Climate Action"
   ./cli campaigns --name=example --status=active
   ./cli campaigns/:id --id=123 --name=updated --method=PUT
   ./cli --list-servers
@@ -1225,11 +1225,11 @@ if (command === 'reprocess-messages') {
   process.exit(0);
 }
 
-if (command === 'send-replies') {
+if (command === 'reply' || command === 'send-replies') {
   const { spawn } = await import('child_process');
   const args = process.argv.slice(3);
 
-  const child = spawn('npx', ['tsx', 'bin/send-replies.ts', ...args], {
+  const child = spawn('npx', ['tsx', 'bin/reply.ts', ...args], {
     stdio: 'inherit',
     env: process.env
   });

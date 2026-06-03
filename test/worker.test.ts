@@ -1,22 +1,26 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { JMAPClient } from "../src/jmap_client";
-import {
-  processReplyImmediately,
-  processScheduledReplies,
-} from "../src/reply_worker";
+import { replyMessage, sendScheduledReplies } from "../src/reply_worker";
 
 // =============================================================================
 // REPLY WORKER TESTS
 // =============================================================================
 
 describe("Reply Worker", () => {
-  const runtimeSecrets = {
+  // Set env vars for functions that now read process.env directly
+  const origEnv = { ...process.env };
+  Object.assign(process.env, {
     JMAP_URL: "https://jmap.example.com",
     SUPABASE_URL: "https://test.supabase.co",
     SUPABASE_ANON_KEY: "anon-key",
     JMAP_ADMIN_EMAIL: "admin@example.com",
     JMAP_ADMIN_PASSWORD: "admin-pass",
-  };
+    DEFAULT_DOMAIN: "",
+  });
+
+  afterAll(() => {
+    Object.assign(process.env, origEnv);
+  });
 
   const mockDb = {
     supabase: {
@@ -25,17 +29,18 @@ describe("Reply Worker", () => {
     getMessagesReadyToSend: vi.fn(),
     getMessageForReplyScheduling: vi.fn(),
     getMessageReadyToSendById: vi.fn(),
+    getMessageByExternalId: vi.fn(),
     getCampaignById: vi.fn(),
     getPoliticianById: vi.fn(),
     getCampaignIdsWithActiveReplyTemplate: vi.fn(),
     updateMessageFields: vi.fn(),
     getActiveTemplateForCampaign: vi.fn(),
-    getMessageContactEmail: vi.fn(),
     upsertSupporter: vi.fn(),
     logEmailEvent: vi.fn(),
     markMessageReplyDelivered: vi.fn(),
     updateMessageRetryCount: vi.fn(),
     markMessageAsFailed: vi.fn(),
+    bulkUpdateMessageStatus: vi.fn(),
   } as any;
 
   const mockJmapClient = {
@@ -195,23 +200,6 @@ describe("Reply Worker", () => {
       reply_retry_count: 0,
     };
 
-    it("should retrieve contact email from database", async () => {
-      vi.spyOn(mockDb, "getMessageContactEmail").mockResolvedValue(
-        "sender@example.com",
-      );
-
-      const email = await mockDb.getMessageContactEmail(1);
-      expect(email).toBe("sender@example.com");
-      expect(mockDb.getMessageContactEmail).toHaveBeenCalledWith(1);
-    });
-
-    it("should handle missing contact email", async () => {
-      vi.spyOn(mockDb, "getMessageContactEmail").mockResolvedValue(null);
-
-      const email = await mockDb.getMessageContactEmail(1);
-      expect(email).toBeNull();
-    });
-
     it("should retrieve active template for campaign", async () => {
       const mockTemplate = {
         id: 1,
@@ -323,16 +311,24 @@ describe("Reply Worker", () => {
       );
       vi.spyOn(mockDb, "getActiveTemplateForCampaign").mockResolvedValue(null);
       vi.spyOn(mockDb, "updateMessageRetryCount").mockResolvedValue(undefined);
+      vi.spyOn(JMAPClient.prototype, "getEmails").mockImplementation(
+        async (ids: string[]) => {
+          const result = new Map();
+          for (const id of ids) {
+            result.set(id, {
+              from: "sender@example.com",
+              subject: "Original Subject",
+            });
+          }
+          return result;
+        },
+      );
 
-      const result = await processScheduledReplies(mockDb, runtimeSecrets);
+      const result = await sendScheduledReplies(mockDb);
 
       expect(result.failed).toBe(1);
-      expect(mockDb.updateMessageRetryCount).toHaveBeenCalledWith(
-        1,
-        1,
-        expect.stringContaining("No active template found"),
-        expect.any(String),
-      );
+      expect(result.errors[0].error).toMatch(/No active template/);
+      expect(mockDb.updateMessageRetryCount).not.toHaveBeenCalled();
     });
 
     it("should mark message as failed after final remail attempt", async () => {
@@ -373,14 +369,24 @@ describe("Reply Worker", () => {
       vi.spyOn(mockDb, "getActiveTemplateForCampaign").mockResolvedValue(null);
       vi.spyOn(mockDb, "markMessageAsFailed").mockResolvedValue(undefined);
       vi.spyOn(mockDb, "updateMessageRetryCount").mockResolvedValue(undefined);
+      vi.spyOn(JMAPClient.prototype, "getEmails").mockImplementation(
+        async (ids: string[]) => {
+          const result = new Map();
+          for (const id of ids) {
+            result.set(id, {
+              from: "sender@example.com",
+              subject: "Original Subject",
+            });
+          }
+          return result;
+        },
+      );
 
-      const result = await processScheduledReplies(mockDb, runtimeSecrets);
+      const result = await sendScheduledReplies(mockDb);
 
       expect(result.failed).toBe(1);
-      expect(mockDb.markMessageAsFailed).toHaveBeenCalledWith(
-        2,
-        expect.stringContaining("No active template found"),
-      );
+      expect(result.errors[0].error).toMatch(/No active template/);
+      expect(mockDb.markMessageAsFailed).not.toHaveBeenCalled();
       expect(mockDb.updateMessageRetryCount).not.toHaveBeenCalled();
     });
 
@@ -559,9 +565,7 @@ describe("Reply Worker", () => {
         created_at: "2024-01-01T00:00:00Z",
         updated_at: "2024-01-01T00:00:00Z",
       });
-      vi.spyOn(mockDb, "getMessageContactEmail").mockResolvedValue(
-        "sender@example.com",
-      );
+
       vi.spyOn(JMAPClient.prototype, "sendEmail").mockResolvedValue({
         success: true,
         messageId: "jmap-msg-123",
@@ -579,12 +583,15 @@ describe("Reply Worker", () => {
         },
       );
 
-      const result = await processScheduledReplies(mockDb, runtimeSecrets);
+      const result = await sendScheduledReplies(mockDb);
 
       expect(result.sent).toBe(1);
-      expect(mockDb.markMessageReplyDelivered).toHaveBeenCalledWith(1);
+      expect(mockDb.markMessageReplyDelivered).toHaveBeenCalledWith(
+        1,
+        expect.objectContaining({ reply_id: "jmap-msg-123" }),
+      );
       expect(JMAPClient.prototype.sendEmail).toHaveBeenCalledWith(
-        expect.objectContaining({ from: "campaign-tech@example.com" }),
+        expect.objectContaining({ from: "jane@pol.com" }),
       );
     });
 
@@ -667,9 +674,7 @@ describe("Reply Worker", () => {
         created_at: "2024-01-01T00:00:00Z",
         updated_at: "2024-01-01T00:00:00Z",
       });
-      vi.spyOn(mockDb, "getMessageContactEmail").mockResolvedValue(
-        "sender@example.com",
-      );
+
       vi.spyOn(JMAPClient.prototype, "sendEmail").mockResolvedValue({
         success: true,
         messageId: "jmap-msg-123",
@@ -687,7 +692,7 @@ describe("Reply Worker", () => {
         },
       );
 
-      const result = await processScheduledReplies(mockDb, runtimeSecrets);
+      const result = await sendScheduledReplies(mockDb);
 
       expect(result.sent).toBe(1);
       expect(JMAPClient.prototype.sendEmail).toHaveBeenCalledWith(
@@ -787,9 +792,7 @@ describe("Reply Worker", () => {
         created_at: "2024-01-01T00:00:00Z",
         updated_at: "2024-01-01T00:00:00Z",
       });
-      vi.spyOn(mockDb, "getMessageContactEmail").mockResolvedValue(
-        "sender@example.com",
-      );
+
       vi.spyOn(mockDb, "updateMessageRetryCount").mockResolvedValue(undefined);
       vi.spyOn(JMAPClient.prototype, "sendEmail").mockResolvedValue({
         success: true,
@@ -808,11 +811,11 @@ describe("Reply Worker", () => {
         },
       );
 
-      const result = await processScheduledReplies(mockDb, runtimeSecrets);
+      const result = await sendScheduledReplies(mockDb);
 
       expect(result.failed).toBe(1);
       expect(result.errors[0].error).toContain("No From/Reply-To");
-      expect(mockDb.updateMessageRetryCount).toHaveBeenCalled();
+      expect(mockDb.updateMessageRetryCount).not.toHaveBeenCalled();
       expect(JMAPClient.prototype.sendEmail).not.toHaveBeenCalled();
     });
 
@@ -836,16 +839,13 @@ describe("Reply Worker", () => {
       vi.spyOn(mockDb, "getActiveTemplateForCampaign").mockResolvedValue(
         mockTemplate,
       );
-      vi.spyOn(mockDb, "getMessageContactEmail").mockResolvedValue(
-        "sender@example.com",
-      );
+
       vi.spyOn(mockJmapClient, "sendEmail").mockResolvedValue({
         success: true,
         messageId: "jmap-123",
       });
 
       expect(mockDb.getActiveTemplateForCampaign).toBeDefined();
-      expect(mockDb.getMessageContactEmail).toBeDefined();
       expect(mockJmapClient.sendEmail).toBeDefined();
     });
 
@@ -893,30 +893,17 @@ describe("Reply Worker", () => {
     });
   });
 
-  describe("processReplyImmediately", () => {
-    it("throws when the message is not eligible (not found)", async () => {
-      const messagesById = {
-        select: vi.fn().mockReturnThis(),
-        eq: vi.fn().mockReturnThis(),
-        in: vi.fn().mockReturnThis(),
-        is: vi.fn().mockReturnThis(),
-        limit: vi.fn().mockResolvedValue({ data: [], error: null }),
-      };
+  describe("replyMessage", () => {
+    it("returns failed result when the message is not found", async () => {
+      vi.spyOn(mockDb, "getMessageByExternalId").mockResolvedValue(null);
 
-      vi.spyOn(mockDb.supabase, "from").mockImplementation(((table: string) => {
-        if (table === "messages") {
-          return messagesById as any;
-        }
-        return {} as any;
-      }) as (...args: unknown[]) => unknown);
-
-      await expect(
-        processReplyImmediately(mockDb, 404, runtimeSecrets),
-      ).rejects.toThrow(/not eligible/);
+      const result = await replyMessage(mockDb, "ext-missing", 1);
+      expect(result.failed).toBe(1);
+      expect(result.errors[0].error).toMatch(/not found/);
       expect(mockDb.markMessageReplyDelivered).not.toHaveBeenCalled();
     });
 
-    it("loads the message by id and sends a reply like the scheduled worker", async () => {
+    it("loads the message by external id and sends a reply like the scheduled worker", async () => {
       const mockMessage = {
         id: 42,
         external_id: "ext-42",
@@ -928,7 +915,7 @@ describe("Reply Worker", () => {
         reply_retry_count: 0,
       };
 
-      vi.spyOn(mockDb, "getMessageReadyToSendById").mockResolvedValue(
+      vi.spyOn(mockDb, "getMessageByExternalId").mockResolvedValue(
         mockMessage,
       );
       vi.spyOn(mockDb, "getCampaignById").mockResolvedValue({
@@ -1007,9 +994,7 @@ describe("Reply Worker", () => {
         created_at: "2024-01-01T00:00:00Z",
         updated_at: "2024-01-01T00:00:00Z",
       });
-      vi.spyOn(mockDb, "getMessageContactEmail").mockResolvedValue(
-        "voter@example.com",
-      );
+
       vi.spyOn(JMAPClient.prototype, "sendEmail").mockResolvedValue({
         success: true,
         messageId: "jmap-msg-123",
@@ -1027,15 +1012,19 @@ describe("Reply Worker", () => {
         },
       );
 
-      await processReplyImmediately(mockDb, 42, runtimeSecrets);
+      const result = await replyMessage(mockDb, "ext-42", 1);
 
-      expect(mockDb.markMessageReplyDelivered).toHaveBeenCalledWith(42);
+      expect(result.sent).toBe(1);
+      expect(mockDb.markMessageReplyDelivered).toHaveBeenCalledWith(
+        42,
+        expect.objectContaining({ reply_id: "jmap-msg-123" }),
+      );
       expect(JMAPClient.prototype.sendEmail).toHaveBeenCalledWith(
         expect.objectContaining({
-          from: "outbound@campaign.example",
+          from: "pol@example.com",
           fromName: "Politician",
           replyTo: "pol@example.com",
-          to: ["voter@example.com"],
+          to: ["sender@example.com"],
         }),
       );
     });

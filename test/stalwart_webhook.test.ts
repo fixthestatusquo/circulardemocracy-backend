@@ -31,7 +31,6 @@ const mockDb = {
   getActiveTemplateForCampaign: vi.fn(),
   getMessageForReplyScheduling: vi.fn(),
   upsertSupporter: vi.fn(),
-  storeMessageContact: vi.fn(),
   assignMessageToCluster: vi.fn(),
 } as unknown as DatabaseClient;
 
@@ -81,7 +80,6 @@ vi.mock("../src/database", () => ({
           reply_scheduled_at: null,
         })),
       upsertSupporter: vi.fn().mockResolvedValue(1),
-      storeMessageContact: vi.fn().mockResolvedValue(undefined),
     };
   }),
   hashEmail: vi.fn().mockResolvedValue("hashed-email"),
@@ -91,6 +89,19 @@ describe("Stalwart Webhook", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockEnv.AI.run.mockResolvedValue({ data: [[0.1, 0.2, 0.3]] });
+    vi.mocked(mockDb.getMessageForReplyScheduling).mockImplementation(
+      async (messageId: number) => ({
+        id: messageId,
+        campaign_id: 5,
+        politician_id: 1,
+        sender_hash: "hashed-email",
+        received_at: new Date().toISOString(),
+        duplicate_rank: 0,
+        reply_sent_at: null,
+        reply_scheduled_at: null,
+        processing_status: "unanswered",
+      }),
+    );
   });
 
   describe("Schema Translation", () => {
@@ -655,7 +666,7 @@ describe("Stalwart Webhook", () => {
     it("should map successful processing to accept with campaign folder", () => {
       const result: StalwartProcessingResult = {
         success: true,
-        status: "processed",
+        status: "unanswered",
         message_id: 100,
         campaign_id: 5,
         campaign_name: "Climate Action",
@@ -735,7 +746,7 @@ describe("Stalwart Webhook", () => {
     it("should handle successful processing without campaign name", () => {
       const result: StalwartProcessingResult = {
         success: true,
-        status: "processed",
+        status: "unanswered",
         message_id: 100,
         senderFlag: "normal",
       };
@@ -763,7 +774,7 @@ describe("Stalwart Webhook", () => {
     it("should preserve sender flag in result but not in response", () => {
       const result: StalwartProcessingResult = {
         success: true,
-        status: "processed",
+        status: "unanswered",
         message_id: 100,
         campaign_name: "Test Campaign",
         senderFlag: "replyToDiffers",
@@ -780,7 +791,6 @@ describe("Stalwart Webhook", () => {
   describe("Integration Tests", () => {
     beforeEach(() => {
       vi.mocked(mockDb.upsertSupporter).mockResolvedValue(1);
-      vi.mocked(mockDb.storeMessageContact).mockResolvedValue(undefined);
     });
 
     it("should process a complete Stalwart hook payload successfully", async () => {
@@ -832,11 +842,12 @@ describe("Stalwart Webhook", () => {
       const result = await processStalwartHook(mockDb, mockAi as any, payload);
 
       expect(result.success).toBe(true);
-      expect(result.status).toBe("processed");
+      expect(result.status).toBe("unanswered");
       expect(result.message_id).toBe(100);
       expect(result.campaign_id).toBe(5);
       expect(result.campaign_name).toBe("Climate Action");
       expect(result.senderFlag).toBe("normal");
+      expect(mockDb.getActiveTemplateForCampaign).toHaveBeenCalledWith(5, 1);
 
       expect(mockDb.insertMessage).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -1010,11 +1021,12 @@ describe("Stalwart Webhook", () => {
 
       expect(result.campaign_hint).toBe("climate");
       expect(result.success).toBe(true);
-      expect(result.status).toBe("processed");
+      expect(result.status).toBe("unanswered");
       expect(result.message_id).toBe(100);
       expect(result.campaign_id).toBe(5);
       expect(result.campaign_name).toBe("Climate Action");
       expect(result.senderFlag).toBe("normal");
+      expect(mockDb.getActiveTemplateForCampaign).toHaveBeenCalledWith(5, 1);
 
       expect(mockDb.insertMessage).toHaveBeenCalledWith(
         expect.objectContaining({

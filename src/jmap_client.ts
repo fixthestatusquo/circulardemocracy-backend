@@ -41,6 +41,14 @@ export interface EmailMessage {
   subject: string;
   textBody?: string;
   htmlBody?: string;
+  /** The value for the In-Reply-To header. */
+  inReplyTo?: string[];
+  /** The value for the References header. */
+  references?: string[];
+  /** The date the message was received. */
+  receivedAt?: string;
+  sentAt?: string;
+  messageId?: [string];
 }
 
 export interface JMAPSendResult {
@@ -397,7 +405,7 @@ export class JMAPClient {
 
       throw new Error("Unexpected JMAP response format");
     } catch (_error) {
-      console.error("JMAP send failed");
+      console.error("JMAP send failed", _error);
       return {
         success: false,
         error: "JMAP send failed",
@@ -426,6 +434,10 @@ export class JMAPClient {
     if (email.replyTo) {
       emailObj.replyTo = [{ email: email.replyTo }];
     }
+
+    // Add threading headers
+    emailObj.inReplyTo = email.inReplyTo;
+    emailObj.references = email.references;
 
     // Build body parts
     const bodyParts: any[] = [];
@@ -496,7 +508,15 @@ export class JMAPClient {
           {
             accountId: this.config.accountId,
             ids,
-            properties: ["id", "from", "replyTo", "subject"],
+            properties: [
+              "id",
+              "from",
+              "replyTo",
+              "subject",
+              "receivedAt",
+              "sentAt",
+              "messageId",
+            ],
           },
           "emailsGet",
         ],
@@ -517,13 +537,16 @@ export class JMAPClient {
       for (const item of body.list || []) {
         const from = item.from?.[0];
         const replyTo = item.replyTo?.[0];
-        
+
         result.set(item.id, {
           from: from?.email || "",
           fromName: from?.name || "",
           to: [], // Not needed for our lookup
           replyTo: replyTo?.email || undefined,
           subject: item.subject || "",
+          messageId: item.messageId,
+          sentAt: item.sentAt,
+          receivedAt: item.receivedAt,
         });
       }
 

@@ -31,7 +31,6 @@ const { mockDbInstance } = vi.hoisted(() => ({
     getActiveTemplateForCampaign: vi.fn(),
     getMessageForReplyScheduling: vi.fn(),
     upsertSupporter: vi.fn(),
-    storeMessageContact: vi.fn(),
     assignMessageToCluster: vi.fn(),
   },
 }));
@@ -96,7 +95,6 @@ describe("Messages API Integration", () => {
     process.env.SUPABASE_KEY = env.SUPABASE_KEY;
     mockDbInstance.getUserPoliticianIds.mockResolvedValue([1]);
     mockDbInstance.upsertSupporter.mockResolvedValue(1);
-    mockDbInstance.storeMessageContact.mockResolvedValue(undefined);
     const apiModule = await import("../src/api");
     app = apiModule.default;
   });
@@ -220,7 +218,6 @@ describe("Messages API Integration", () => {
     });
     mockDbInstance.insertMessage.mockResolvedValue(100);
     mockDbInstance.assignMessageToCluster.mockResolvedValue(1);
-    mockDbInstance.storeMessageContact.mockResolvedValue(undefined);
     (env.AI.run as ReturnType<typeof vi.fn>).mockResolvedValue({
       data: [[0.1, 0.2]],
     });
@@ -235,8 +232,12 @@ describe("Messages API Integration", () => {
     });
     const res = await app.fetch(req, env);
     expect(res.status).toBe(200);
+    expect(mockDbInstance.getActiveTemplateForCampaign).toHaveBeenCalledWith(
+      10,
+      1,
+    );
     const body = (await res.json()) as { status: string; message_id: number };
-    expect(body.status).toBe("processed");
+    expect(body.status).toBe("unanswered");
     expect(body.message_id).toBe(100);
   });
 });

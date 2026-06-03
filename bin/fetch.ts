@@ -24,7 +24,7 @@ import { config as dotenv } from "dotenv";
 import { pipeline, type FeatureExtractionPipeline } from "@xenova/transformers";
 
 // Load `.env` once; all config is read from `process.env` below (no env.ts wrapper).
-dotenv();
+dotenv({ quiet: true });
 
 const MessageInputSchema = z.object({
   external_id: z
@@ -183,35 +183,21 @@ function parseStalwartArgs(args: string[]): StalwartFetchOptions {
   };
 }
 
-function logDefaultDomainMailboxes(
+function logAllDomainMailboxes(
   domainKey: string,
   mailboxes: string[],
   processing?: string,
 ): void {
-  console.log(`Accounts on @${domainKey} (${mailboxes.length}):`);
-  if (mailboxes.length === 0) {
-    console.log("  (none)");
-    return;
-  }
-  const processingLower = processing?.trim().toLowerCase();
-  for (let i = 0; i < mailboxes.length; i++) {
-    const mailbox = mailboxes[i];
-    const isCurrent =
-      processingLower && mailbox.trim().toLowerCase() === processingLower;
-    console.log(`  ${i + 1}. ${mailbox}${isCurrent ? "  <- current" : ""}`);
-  }
-  if (processing) {
-    console.log(`\nCurrently processing: ${processing}`);
-  }
+  console.log(`Accounts on @${domainKey} (${mailboxes.length})\n ${mailboxes.join(",")}`);
 }
 
 function printUsage() {
   console.log(`
-JMAP Fetch - Automated ingestion from Stalwart mail server
+Fetch - Automated ingestion from Stalwart mail server
 
 USAGE:
-  jmap-fetch [--user <username>] [--password <password>] [options]
-  jmap-fetch [--politician-id <id> | --politician-name <hint>] [options]
+  fetch [--user <username>] [--password <password>] [options]
+  fetch [--politician-id <id> | --politician-name <hint>] [options]
 
 OPTIONS:
   --user <username>      JMAP mailbox email (default: JMAP_SERVICE_ACCOUNT_EMAIL env)
@@ -230,20 +216,20 @@ ENVIRONMENT VARIABLES:
   JMAP_SERVICE_ACCOUNT_PASSWORD   Required app password for JMAP basic auth
   JMAP_URL                        Required. Mail server base URL (no path); session URL is JMAP_URL + "/.well-known/jmap"
   (Mail account id for this CLI comes from the JMAP session after login.)
-  DEFAULT_DOMAIN             Default hosted mail domain (e.g. example.org). Impersonate via
+  DEFAULT_DOMAIN                  When set (e.g. example.org), impersonate via
                                   JMAP_ADMIN_EMAIL / JMAP_ADMIN_PASSWORD
-                                  (login: target%admin). Without --user/--politician: all DB mailboxes on domain.
+                                  (login: target%relay). Without --user/--politician: all DB mailboxes on domain.
                                   With --user/--politician: one mailbox only.
-  JMAP_ADMIN_EMAIL                Stalwart admin for impersonation (and Supabase password-grant when domain unset).
-  JMAP_ADMIN_PASSWORD             Password for JMAP_ADMIN_EMAIL (admin login, not app password).
+  JMAP_ADMIN_EMAIL                Required for DEFAULT_DOMAIN impersonation (admin account).
+  JMAP_ADMIN_PASSWORD             Required for DEFAULT_DOMAIN impersonation (admin password).
   SUPABASE_URL           Required Supabase URL
   SUPABASE_KEY           Required Supabase key
 
 EXAMPLES:
-  jmap-fetch --process-all
-  jmap-fetch --since "2024-03-01"
-  jmap-fetch --politician-id 123
-  jmap-fetch --user dibora --password mypass --process-all
+  fetch --process-all
+  fetch --since "2024-03-01"
+  fetch --politician-id 123
+  fetch --user dibora --password mypass --process-all
 `);
 }
 
@@ -900,7 +886,7 @@ function createCliCompatibleDb(db: DatabaseClient): DatabaseClient {
       if (hintCampaign) {
         return {
           campaign_id: hintCampaign.id,
-          campaign_name: hintCampaign.name,
+          campaign_slug: hintCampaign.name,
           confidence: 0.95,
         };
       }
@@ -912,7 +898,7 @@ function createCliCompatibleDb(db: DatabaseClient): DatabaseClient {
       if (best.distance < 0.1) {
         return {
           campaign_id: best.id,
-          campaign_name: best.name,
+          campaign_slug: best.name,
           confidence: 1 - best.distance,
         };
       }
@@ -920,7 +906,7 @@ function createCliCompatibleDb(db: DatabaseClient): DatabaseClient {
 
     return {
       campaign_id: null,
-      campaign_name: null,
+      campaign_slug: null,
       confidence: 0.1,
     };
   };
@@ -1016,7 +1002,7 @@ async function getAlreadyProcessedExternalIds(
     .from("messages")
     .select("external_id")
     .eq("channel_source", "stalwart")
-    .eq("processing_status", "processed");
+    .eq("processing_status", "unanswered");
 
   if (politicianId !== undefined) {
     query = query.eq("politician_id", politicianId);
@@ -1044,15 +1030,9 @@ async function runStalwartIngestion(
   const prefix = logMailbox ? `[${logMailbox}] ` : "";
   const impersonationIdx = username.indexOf("%");
 
-  if (impersonationIdx > 0) {
-    const target = username.slice(0, impersonationIdx);
-    const impersonator = username.slice(impersonationIdx + 1);
+  if (!(impersonationIdx > 0)) {
     console.log(
-      `${prefix}JMAP auth: Stalwart impersonation login "${target}%${impersonator}" (password: JMAP_ADMIN_PASSWORD)`,
-    );
-  } else {
-    console.log(
-      `${prefix}JMAP auth: direct Basic login as ${username} (password: JMAP_SERVICE_ACCOUNT_PASSWORD or --password)`,
+      `${prefix}direct Basic login as ${username}`,
     );
   }
 
@@ -1064,7 +1044,6 @@ async function runStalwartIngestion(
     politicianId = politician?.id;
   }
 
-  console.log(`${prefix}Connecting to Stalwart JMAP at ${jmapWellKnownUrl}...`);
   const session = await fetchJmapSession(jmapWellKnownUrl, authHeader);
   const accountId = resolveMailAccountIdFromSession(session);
   const inboxMailboxId = await resolveInboxMailboxId(
@@ -1118,11 +1097,6 @@ async function runStalwartIngestion(
       },
     );
   } else if (options.processAll) {
-    if (options.folder) {
-      console.log(`Fetching inbound messages from Inbox + ${options.folder}...`);
-    } else {
-      console.log("Fetching inbound inbox messages from Stalwart...");
-    }
     rawEmails = await fetchAllEmails(
       session.apiUrl,
       authHeader,
@@ -1164,7 +1138,6 @@ async function runStalwartIngestion(
   }
 
   if (validMessages.length === 0) {
-    console.log(`${prefix}No valid messages to process.`);
     return true;
   }
 
@@ -1182,9 +1155,9 @@ async function runStalwartIngestion(
       if (result.success) {
         summary.processed += 1;
         console.log(
-          `Processed ${messageInput.external_id} -> campaign=${result.campaign_name || "unknown"} confidence=${result.confidence ?? "n/a"}`,
+          `Processed ${messageInput.external_id} -> campaign=${result.campaign_slug || "unknown"} confidence=${result.confidence ?? "n/a"}`,
         );
-        const folderPath = generateFolderPath(result.campaign_name);
+        const folderPath = generateFolderPath(result.campaign_slug);
         try {
           let mailboxId = mailboxCache.get(folderPath);
           if (!mailboxId) {
@@ -1240,9 +1213,7 @@ async function main() {
   const appPassword =
     (typeof fetchOptions.password === "string" ? fetchOptions.password.trim() : "") ||
     (process.env.JMAP_SERVICE_ACCOUNT_PASSWORD || "").trim();
-  const defaultDomainRaw = (
-    process.env.DEFAULT_DOMAIN || ""
-  ).trim();
+  const defaultDomainRaw = (process.env.DEFAULT_DOMAIN || "").trim();
   const adminCreds = resolveJmapAdminCredentials(process.env);
   const impersonationPassword = defaultDomainRaw
     ? (typeof fetchOptions.password === "string" ? fetchOptions.password.trim() : "") ||
@@ -1250,11 +1221,7 @@ async function main() {
       ""
     : appPassword;
 
-  if (
-    defaultDomainRaw &&
-    !adminCreds &&
-    !(typeof fetchOptions.password === "string")
-  ) {
+  if (defaultDomainRaw && !adminCreds && !(typeof fetchOptions.password === "string")) {
     console.error(
       "Error: DEFAULT_DOMAIN mode requires JMAP_ADMIN_EMAIL and JMAP_ADMIN_PASSWORD.",
     );
@@ -1263,7 +1230,7 @@ async function main() {
 
   if (defaultDomainRaw && !impersonationPassword) {
     console.error(
-      "Error: DEFAULT_DOMAIN mode needs JMAP_ADMIN_PASSWORD or --password.",
+      "Error: DEFAULT_DOMAIN impersonation needs JMAP_ADMIN_PASSWORD or --password.",
     );
     process.exit(1);
   }
@@ -1332,15 +1299,12 @@ async function main() {
         process.exit(1);
       }
       console.log(
-        `JMAP default domain @${domainKey}: ingesting ${mailboxes.length} mailbox(es).`,
+        `DEFAULT_DOMAIN mode: ingesting ${mailboxes.length} mailbox(es) on @${domainKey} using Stalwart impersonation.`,
       );
-      logDefaultDomainMailboxes(domainKey, mailboxes);
+      logAllDomainMailboxes(domainKey, mailboxes);
       let allOk = true;
       for (let i = 0; i < mailboxes.length; i++) {
         const mailbox = mailboxes[i];
-        console.log(
-          `\n[${i + 1}/${mailboxes.length}] Currently processing: ${mailbox}`,
-        );
         const principal = buildStalwartImpersonationLogin(
           adminCreds!.adminEmail,
           mailbox,
@@ -1380,9 +1344,9 @@ async function main() {
       const domainMailboxes =
         await db.listStalwartMailboxAddressesForDomain(domainKey);
       console.log(
-        `JMAP default domain: ingesting single mailbox ${explicitMailbox}.`,
+        `DEFAULT_DOMAIN mode: ingesting single mailbox ${explicitMailbox} via Stalwart impersonation.`,
       );
-      logDefaultDomainMailboxes(domainKey, domainMailboxes, explicitMailbox);
+      logAllDomainMailboxes(domainKey, domainMailboxes, explicitMailbox);
     }
 
     const success = await runStalwartIngestion(

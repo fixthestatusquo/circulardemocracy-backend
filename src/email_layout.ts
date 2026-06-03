@@ -1,9 +1,14 @@
 // Email Layout Renderer - Renders email templates with different layouts
-// Supports text_only and standard_header layouts
+// Supports text_only, standard_header, and EP layouts
 
 import { renderMarkdownToHtml, renderMarkdownToPlainText } from "./markdown";
+import {
+  renderStandardHeader,
+  renderEPHeader,
+  type RenderedHeader,
+} from "./headers";
 
-export type LayoutType = "text_only" | "standard_header";
+export type LayoutType = "text_only" | "standard_header" | "EP";
 
 export interface EmailLayoutInput {
   subject: string;
@@ -12,6 +17,8 @@ export interface EmailLayoutInput {
   campaign_name?: string;
   politician_name?: string;
   politician_email?: string;
+  politician_position?: string;
+  politician_party?: string;
 }
 
 export interface RenderedEmail {
@@ -30,11 +37,7 @@ export function renderEmailLayout(input: EmailLayoutInput): RenderedEmail {
     return renderTextOnlyLayout(input.subject, textBody);
   }
 
-  if (input.layout_type === "standard_header") {
-    return renderStandardHeaderLayout(input, textBody);
-  }
-
-  throw new Error(`Unknown layout type: ${input.layout_type}`);
+  return renderWithHeader(input, textBody);
 }
 
 /**
@@ -52,108 +55,45 @@ function renderTextOnlyLayout(
 }
 
 /**
- * Renders standard header layout with campaign info and HTML
+ * Renders a layout with a header (standard, EP, etc.)
  */
-function renderStandardHeaderLayout(
+function renderWithHeader(
   input: EmailLayoutInput,
   textBody: string,
 ): RenderedEmail {
-  const htmlBody = renderMarkdownToHtml(input.markdown_body);
+  const htmlContent = renderMarkdownToHtml(input.markdown_body);
 
-  // Build header section
-  const headerHtml = buildHeaderSection(
-    input.campaign_name,
-    input.politician_name,
-    input.politician_email,
-  );
+  let header: RenderedHeader;
+  const headerInput = {
+    campaignName: input.campaign_name,
+    politicianName: input.politician_name,
+    politicianEmail: input.politician_email,
+    politicianParty: input.politician_party,
+    politicianPosition: input.politician_position,
+  };
+
+  switch (input.layout_type) {
+    case "standard_header":
+      header = renderStandardHeader(headerInput);
+      break;
+    case "EP":
+      header = renderEPHeader(headerInput);
+      break;
+    default:
+      throw new Error(`Unknown layout type: ${input.layout_type}`);
+  }
 
   // Wrap in full email template
-  const fullHtml = wrapInEmailTemplate(input.subject, headerHtml, htmlBody);
+  const fullHtml = wrapInEmailTemplate(input.subject, header.html, htmlContent);
 
   // Add header to text version as well
-  const headerText = buildHeaderText(
-    input.campaign_name,
-    input.politician_name,
-    input.politician_email,
-  );
-  const fullTextBody = headerText ? `${headerText}\n\n${textBody}` : textBody;
+  const fullTextBody = header.text ? `${header.text}\n\n${textBody}` : textBody;
 
   return {
     subject: input.subject,
     textBody: fullTextBody,
     htmlBody: fullHtml,
   };
-}
-
-/**
- * Builds HTML header section with campaign info
- */
-function buildHeaderSection(
-  campaignName?: string,
-  politicianName?: string,
-  politicianEmail?: string,
-): string {
-  if (!campaignName && !politicianName && !politicianEmail) {
-    return "";
-  }
-
-  let headerHtml = '<div class="email-header">';
-
-  if (campaignName) {
-    headerHtml += `<h2 class="campaign-name">${escapeHtml(campaignName)}</h2>`;
-  }
-
-  if (politicianName || politicianEmail) {
-    headerHtml += '<div class="contact-info">';
-
-    if (politicianName) {
-      headerHtml += `<p class="politician-name">${escapeHtml(politicianName)}</p>`;
-    }
-
-    if (politicianEmail) {
-      headerHtml += `<p class="politician-email"><a href="mailto:${escapeHtml(politicianEmail)}">${escapeHtml(politicianEmail)}</a></p>`;
-    }
-
-    headerHtml += "</div>";
-  }
-
-  headerHtml += "</div>";
-  headerHtml += '<hr class="header-divider">';
-
-  return headerHtml;
-}
-
-/**
- * Builds plain text header section
- */
-function buildHeaderText(
-  campaignName?: string,
-  politicianName?: string,
-  politicianEmail?: string,
-): string {
-  if (!campaignName && !politicianName && !politicianEmail) {
-    return "";
-  }
-
-  const lines: string[] = [];
-
-  if (campaignName) {
-    lines.push(campaignName);
-  }
-
-  if (politicianName) {
-    lines.push(politicianName);
-  }
-
-  if (politicianEmail) {
-    lines.push(politicianEmail);
-  }
-
-  if (lines.length === 0) {
-    return "";
-  }
-
-  return `${lines.join("\n")}\n${"-".repeat(50)}`;
 }
 
 /**
@@ -196,6 +136,12 @@ function wrapInEmailTemplate(
       font-size: 24px;
       font-weight: 600;
       margin: 0 0 10px 0;
+    }
+    .ep-header .politician-title {
+      color: #003399; /* Euro blue */
+      font-size: 20px;
+      font-weight: 600;
+      margin: 0;
     }
     .contact-info {
       color: #666;

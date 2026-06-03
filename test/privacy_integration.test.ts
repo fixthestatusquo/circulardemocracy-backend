@@ -126,7 +126,7 @@ describe("Privacy-First Integration Tests", () => {
         language: "auto",
         received_at: "2026-03-12T19:00:00Z",
         duplicate_rank: 0,
-        processing_status: "processed",
+        processing_status: "unanswered",
         sender_flag: "normal",
         stalwart_message_id: "stalwart-msg-12345",
         stalwart_account_id: "politician@gov.com",
@@ -195,7 +195,7 @@ describe("Privacy-First Integration Tests", () => {
         language: "auto",
         received_at: new Date().toISOString(),
         duplicate_rank: 0,
-        processing_status: "processed",
+        processing_status: "unanswered",
         stalwart_message_id: emailData.messageId,
         stalwart_account_id: "politician@gov.com",
       };
@@ -239,7 +239,7 @@ describe("Privacy-First Integration Tests", () => {
         language: "en",
         received_at: new Date().toISOString(),
         duplicate_rank: 0,
-        processing_status: "processed",
+        processing_status: "unanswered",
         stalwart_message_id: "msg-123",
         stalwart_account_id: "politician@gov.com",
       } as any;
@@ -262,7 +262,7 @@ describe("Privacy-First Integration Tests", () => {
         language: "en",
         received_at: new Date().toISOString(),
         duplicate_rank: 0,
-        processing_status: "processed",
+        processing_status: "unanswered",
       };
 
       const emailPayload = {
@@ -277,7 +277,7 @@ describe("Privacy-First Integration Tests", () => {
         language: "en",
         received_at: new Date().toISOString(),
         duplicate_rank: 0,
-        processing_status: "processed",
+        processing_status: "unanswered",
         stalwart_message_id: "msg-456",
         stalwart_account_id: "pol@gov.com",
       };

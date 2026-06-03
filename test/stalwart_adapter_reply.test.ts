@@ -177,7 +177,7 @@ describe("Stalwart Adapter - Reply Detection", () => {
     it("should route replies to [campaign]/replied folder", () => {
       const result: StalwartProcessingResult = {
         success: true,
-        status: "processed",
+        status: "unanswered",
         message_id: 100,
         campaign_id: 5,
         campaign_name: "Climate Action",
@@ -196,7 +196,7 @@ describe("Stalwart Adapter - Reply Detection", () => {
     it("should route new messages to [campaign]/inbox folder", () => {
       const result: StalwartProcessingResult = {
         success: true,
-        status: "processed",
+        status: "unanswered",
         message_id: 100,
         campaign_id: 5,
         campaign_name: "Climate Action",
@@ -215,7 +215,7 @@ describe("Stalwart Adapter - Reply Detection", () => {
     it("should route replies without isReply flag to inbox (default)", () => {
       const result: StalwartProcessingResult = {
         success: true,
-        status: "processed",
+        status: "unanswered",
         message_id: 100,
         campaign_id: 5,
         campaign_name: "Healthcare Reform",

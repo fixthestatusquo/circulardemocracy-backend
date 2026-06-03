@@ -219,7 +219,7 @@ describe("Stalwart API (/mta-hook)", () => {
       /^(Test-Campaign|System\/Unprocessed|Unclassified)$/,
     );
     expect(data.modifications.headers["X-CircularDemocracy-Status"]).toBe(
-      "processed",
+      "unanswered",
     );
   });
 

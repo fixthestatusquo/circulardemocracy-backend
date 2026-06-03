@@ -343,7 +343,7 @@ export class Api<SecurityDataType> extends HttpClient<SecurityDataType> {
         {
           success: boolean;
           message_id?: number;
-          status: "processed" | "failed" | "politician_not_found" | "duplicate";
+          status: "unanswered" | "failed" | "politician_not_found" | "duplicate";
           campaign_id?: number;
           campaign_name?: string;
           /**
@@ -364,7 +364,7 @@ export class Api<SecurityDataType> extends HttpClient<SecurityDataType> {
             success: boolean;
             message_id?: number;
             status:
-              | "processed"
+              | "unanswered"
               | "failed"
               | "politician_not_found"
               | "duplicate";

@@ -234,7 +234,7 @@ Receives a citizen message, classifies it by campaign, and stores it for politic
 {
   "success": true,
   "message_id": 0,
-  "status": "processed",
+  "status": "unanswered",
   "campaign_id": 0,
   "campaign_name": "string",
   "confidence": 1,
@@ -249,7 +249,7 @@ Receives a citizen message, classifies it by campaign, and stores it for politic
 
 |Status|Meaning|Description|Schema|
 |---|---|---|---|
-|200|[OK](https://tools.ietf.org/html/rfc7231#section-6.3.1)|Message processed successfully|Inline|
+|200|[OK](https://tools.ietf.org/html/rfc7231#section-6.3.1)|Message unanswered successfully|Inline|
 |400|[Bad Request](https://tools.ietf.org/html/rfc7231#section-6.5.1)|Invalid input data|Inline|
 |404|[Not Found](https://tools.ietf.org/html/rfc7231#section-6.5.4)|Politician not found|Inline|
 |409|[Conflict](https://tools.ietf.org/html/rfc7231#section-6.5.8)|Duplicate message|Inline|
@@ -274,7 +274,7 @@ Status Code **200**
 
 |Property|Value|
 |---|---|
-|status|processed|
+|status|unanswered|
 |status|failed|
 |status|politician_not_found|
 |status|duplicate|
@@ -304,7 +304,7 @@ Status Code **404**
 
 |Property|Value|
 |---|---|
-|status|processed|
+|status|unanswered|
 |status|failed|
 |status|politician_not_found|
 |status|duplicate|
@@ -326,7 +326,7 @@ Status Code **409**
 
 |Property|Value|
 |---|---|
-|status|processed|
+|status|unanswered|
 |status|failed|
 |status|politician_not_found|
 |status|duplicate|

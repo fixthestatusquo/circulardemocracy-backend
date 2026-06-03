@@ -39,10 +39,10 @@ export interface MessageInput {
 
 export interface MessageProcessingResult {
   success: boolean;
-  status: "processed" | "failed" | "politician_not_found" | "duplicate";
+  status: "unanswered" | "failed" | "politician_not_found" | "duplicate";
   message_id?: number;
   campaign_id?: number;
-  campaign_name?: string;
+  campaign_slug?: string;
   confidence?: number;
   duplicate_rank?: number;
   reply_scheduled_at?: string | null;
@@ -53,6 +53,8 @@ export interface MessageProcessingResult {
 /**
  * Applies send timing from the campaign's active template when the message is eligible:
  * campaign assigned, duplicate_rank 0, not yet sent. Returns null when no auto-reply applies.
+ *
+ * What the heck is going on here
  */
 export async function applyReplyScheduleForMessage(
   db: DatabaseClient,
@@ -71,7 +73,10 @@ export async function applyReplyScheduleForMessage(
     return null;
   }
 
-  const activeTemplate = await db.getActiveTemplateForCampaign(row.campaign_id);
+  const activeTemplate = await db.getActiveTemplateForCampaign(
+    row.campaign_id,
+    row.politician_id,
+  );
   if (!activeTemplate) {
     return null;
   }
@@ -113,6 +118,8 @@ export async function processMessage(
   );
 
   if (existingMessage) {
+    console.log("existing message", existingMessage);
+    process.exit(1);
     let campaignName = "Unknown";
     let campaignId = existingMessage.campaign_id;
 
@@ -121,7 +128,7 @@ export async function processMessage(
         ? existingMessage.campaigns[0]
         : existingMessage.campaigns;
       if (camp) {
-        campaignName = camp.name;
+        campaignName = camp.slug;
         campaignId = camp.id;
       }
     }
@@ -131,7 +138,7 @@ export async function processMessage(
       status: "duplicate",
       message_id: existingMessage.id,
       campaign_id: campaignId ?? undefined,
-      campaign_name: campaignName ?? undefined,
+      campaign_slug: campaignName ?? undefined,
       duplicate_rank: existingMessage.duplicate_rank,
       errors: [`Message with external_id ${data.external_id} already exists`],
     };
@@ -158,22 +165,12 @@ export async function processMessage(
     language: "auto",
     received_at: data.timestamp,
     duplicate_rank: 0,
-    processing_status: isReply ? "followup" : "processed",
+    processing_status: isReply ? "followup" : "unanswered",
     reply_scheduled_at: null,
     sender_flag: data.sender_flag,
-    stalwart_message_id: undefined,
-    stalwart_account_id: undefined,
   };
 
   const messageId = await db.insertMessage(messageData);
-
-  await db.storeMessageContact({
-    messageId,
-    senderHash,
-    senderEmail: data.sender_email,
-    senderName: data.sender_name,
-    capturedAt: data.timestamp,
-  });
 
   const classification = await db.classifyAndAssignToCluster(
     messageId,
@@ -181,7 +178,8 @@ export async function processMessage(
     politician.id,
     data.campaign_hint,
   );
-
+  console.log("new", classification);
+  process.exit(1);
   let duplicateRank = 0;
   if (classification.campaign_id !== null) {
     duplicateRank = await db.getDuplicateRank(
@@ -210,9 +208,9 @@ export async function processMessage(
   return {
     success: true,
     message_id: messageId,
-    status: "processed",
+    status: "unanswered",
     campaign_id: classification.campaign_id ?? undefined,
-    campaign_name: classification.campaign_name ?? undefined,
+    campaign_slug: classification.campaign_slug ?? undefined,
     confidence: classification.confidence,
     duplicate_rank: duplicateRank,
     reply_scheduled_at: replySchedule?.reply_scheduled_at ?? null,

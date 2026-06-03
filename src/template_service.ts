@@ -10,10 +10,11 @@ export interface TemplateValidationError {
 
 export interface CreateTemplateInput {
   campaign_id: number;
+  politician_id: number;
   name: string;
   subject: string;
   body: string;
-  layout_type: "text_only" | "standard_header";
+  layout_type: "text_only" | "standard_header" | "EP";
   send_timing: "immediate" | "office_hours" | "scheduled";
   scheduled_for?: string;
   active: boolean;
@@ -23,7 +24,7 @@ export interface UpdateTemplateInput {
   name?: string;
   subject?: string;
   body?: string;
-  layout_type?: "text_only" | "standard_header";
+  layout_type?: "text_only" | "standard_header" | "EP";
   send_timing?: "immediate" | "office_hours" | "scheduled";
   scheduled_for?: string;
   active?: boolean;
@@ -94,7 +95,10 @@ export async function createReplyTemplate(
 
     // If this template is being set as active, deactivate other templates for this campaign
     if (payload.active) {
-      await db.deactivateOtherTemplates(payload.campaign_id);
+      await db.deactivateOtherTemplates(
+        payload.campaign_id,
+        payload.politician_id,
+      );
     }
 
     // Create the template using Supabase client
@@ -152,6 +156,7 @@ export async function updateReplyTemplate(
     if (updates.active === true) {
       await db.deactivateOtherTemplates(
         existingTemplate.campaign_id,
+        existingTemplate.politician_id,
         templateId,
       );
     }
@@ -187,9 +192,10 @@ export async function updateReplyTemplate(
 export async function ensureSingleActiveTemplate(
   db: DatabaseClient,
   campaignId: number,
+  politicianId: number,
   activeTemplateId: number,
 ): Promise<void> {
-  await db.deactivateOtherTemplates(campaignId, activeTemplateId);
+  await db.deactivateOtherTemplates(campaignId, politicianId, activeTemplateId);
 }
 
 /**

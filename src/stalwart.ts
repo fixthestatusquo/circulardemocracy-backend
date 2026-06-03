@@ -491,21 +491,13 @@ async function processEmailForRecipient(
       language: "auto", // TODO: detect language
       received_at: new Date(hookData.timestamp * 1000).toISOString(),
       duplicate_rank: duplicateRank,
-      processing_status: isReply ? "followup" : "processed",
+      processing_status: isReply ? "followup" : "unanswered",
       sender_flag: senderFlag,
       stalwart_message_id: hookData.messageId,
       stalwart_account_id: recipientEmail, // JMAP account is the politician's email
     };
 
     const messageId = await db.insertMessage(messageData);
-
-    await db.storeMessageContact({
-      messageId,
-      senderHash,
-      senderEmail,
-      senderName: _senderName,
-      capturedAt: new Date(hookData.timestamp * 1000).toISOString(),
-    });
 
     if (classification.campaign_id !== null) {
       await applyReplyScheduleForMessage(db, messageId);
@@ -532,7 +524,7 @@ async function processEmailForRecipient(
           "X-CircularDemocracy-Message-ID": hookData.messageId,
           "X-CircularDemocracy-Politician": politician.name,
           "X-CircularDemocracy-Status": classification.campaign_name
-            ? "processed"
+            ? "unanswered"
             : "unclassified",
         },
       },

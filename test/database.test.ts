@@ -341,7 +341,7 @@ describe("DatabaseClient", () => {
         language: "en",
         received_at: "2024-01-01T00:00:00Z",
         duplicate_rank: 0,
-        processing_status: "processed",
+        processing_status: "unanswered",
       };
 
       mockFetch.mockResolvedValueOnce(createMockResponse([{ id: 42 }]));
@@ -349,6 +349,33 @@ describe("DatabaseClient", () => {
       const result = await db.insertMessage(mockMessage);
 
       expect(result).toBe(42);
+    });
+  });
+
+  describe("getMessagesReadyToSend", () => {
+    it("should fetch messages with correct ordering and filters", async () => {
+      // Mock campaign IDs lookup
+      vi.spyOn(db, "getCampaignIdsWithActiveReplyTemplate").mockResolvedValue([
+        10,
+      ]);
+
+      const mockMessages = [
+        { id: 1, received_at: "2024-01-01T12:00:00Z" },
+        { id: 2, received_at: "2024-01-01T10:00:00Z" },
+      ];
+
+      mockFetch.mockResolvedValueOnce(createMockResponse(mockMessages));
+
+      const result = await db.getMessagesReadyToSend(10, { politicianId: 4 });
+
+      expect(result).toEqual(mockMessages);
+      const url = mockFetch.mock.calls[0][0] as string;
+
+      expect(url).toContain("https://test.supabase.co/rest/v1/messages");
+      expect(url).toContain("processing_status=eq.unanswered");
+      expect(url).toContain("politician_id=eq.4");
+      expect(url).toContain("campaign_id=in.%2810%29");
+      expect(url).toContain("order=received_at.asc");
     });
   });
 });

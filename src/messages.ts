@@ -81,7 +81,7 @@ const MessageInputSchema = z.object({
 const MessageResponseSchema = z.object({
   success: z.boolean(),
   message_id: z.number().optional(),
-  status: z.enum(["processed", "failed", "politician_not_found", "duplicate"]),
+  status: z.enum(["unanswered", "failed", "politician_not_found", "duplicate"]),
   campaign_id: z.number().optional(),
   campaign_name: z.string().optional(),
   confidence: z.number().min(0).max(1).optional(),
@@ -133,7 +133,7 @@ const messageRoute = createRoute({
           schema: MessageResponseSchema,
         },
       },
-      description: "Message processed successfully",
+      description: "Message unanswered successfully",
     },
     400: {
       content: {

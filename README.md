@@ -21,7 +21,7 @@ For performance reasons, it should be noted that it's quite common that the same
 - **REST API**: Integration with NGO campaign tools and citizen engagement platforms
 - **CLI Tools**: 
   - `mail` - Manual message import for testing and development
-  - `jmap-fetch` - Automated JMAP ingestion from Stalwart mail server
+  - `fetch` - Automated JMAP ingestion from Stalwart mail server
 - **Email Integration**: Direct email processing via Stalwart mail server with MTA hooks
 - **Unified Processing**: All messages flow through the same classification and routing system
 
@@ -44,7 +44,7 @@ For performance reasons, it should be noted that it's quite common that the same
 
 - **Template Management**: Politicians can create custom reply templates for different campaigns (API + dashboard)
 - **Scheduled Responses**: Template timing (`immediate`, `office_hours`, `scheduled`) sets `reply_scheduled_at`; the cron reply worker sends when due
-- **No HTTP send triggers**: Ingest APIs schedule replies only; JMAP send runs on Cloudflare cron or `bin/cli send-replies` for testing
+- **No HTTP send triggers**: Ingest APIs schedule replies only; JMAP send runs on Cloudflare cron or `bin/cli reply` for testing
 - **Personalization**: Support for headers, contact details, and politician branding
 - **Delivery Tracking**: Each send is recorded in `reply_send_logs`; successful sends set `messages.reply_sent_at` so the worker does not pick the same message again
 - **Inbound auto-reply once per supporter/campaign**: Only the first classified message for a given sender hash + politician + campaign (`duplicate_rank === 0`) is scheduled for an automatic template reply; later messages from the same supporter in that campaign are not auto-replied by this path
@@ -229,15 +229,15 @@ export SUPABASE_ANON_KEY="your-supabase-anon-key"
 # Mail server base URL (no path). Session URL is ${JMAP_URL%/}/.well-known/jmap
 export JMAP_URL="https://mail.example.org"
 
-# Stalwart admin / Supabase user for outbound JMAP (impersonation or password-grant JWT)
+# Supabase relay identity (password grant) used by the reply worker to obtain a JWT for JMAP send
 export JMAP_ADMIN_EMAIL="admin@yourdomain.com"
 export JMAP_ADMIN_PASSWORD="admin-login-password"
 
-# Default hosted mail domain (e.g. example.org). When set, outbound sends use Stalwart impersonation
+# Optional: when set (e.g. example.org), outbound sends use Stalwart impersonation
 # (fromAddress%JMAP_ADMIN_EMAIL) instead of the Supabase relay JWT
 export DEFAULT_DOMAIN="example.org"
 
-# For JMAP CLIs only (`jmap-fetch`, `reprocess-messages`): mailbox basic auth
+# For JMAP CLIs only (`fetch`, `reprocess-messages`): mailbox basic auth
 export JMAP_SERVICE_ACCOUNT_EMAIL="mailbox@yourdomain.com"
 export JMAP_SERVICE_ACCOUNT_PASSWORD="your-jmap-app-password"
 
@@ -284,9 +284,9 @@ npx tsx bin/cli <command> [options]
 
 **Message Processing:**
 
-- `jmap-fetch`: Fetch new mail from Stalwart and process/store/classify it
+- `fetch`: Fetch new mail from Stalwart and process/store/classify it
 - `reprocess-messages`: Recompute embeddings/classification for already stored messages
-- `send-replies`: Send pending/scheduled auto-replies via the production reply worker (for testing JMAP send / impersonation)
+- `reply`: Send pending/scheduled auto-replies via the production reply worker (for testing JMAP send / impersonation)
 - `<endpoint>`: Direct API endpoint access (e.g., campaigns, users/:id)
 
 **Politician Management Examples:**
@@ -341,18 +341,18 @@ npx tsx bin/cli reprocess-messages --process-all --no-move-to-folders
 
 ```bash
 # Process all messages ready to send (pending/scheduled, reply_sent_at null)
-npx tsx bin/cli send-replies
+npx tsx bin/cli reply
 
 # Preview counts per campaign without sending
-npx tsx bin/cli send-replies --dry-run
+npx tsx bin/cli reply --dry-run
 
 # All ready replies for a campaign (by id or name hint)
-npx tsx bin/cli send-replies --campaign-id 5
-npx tsx bin/cli send-replies --campaign-name "Climate Action"
-npx tsx bin/cli send-replies --dry-run --campaign-name "Climate Action"
+npx tsx bin/cli reply --campaign-id 5
+npx tsx bin/cli reply --campaign-name "Climate Action"
+npx tsx bin/cli reply --dry-run --campaign-name "Climate Action"
 ```
 
-Uses `processScheduledReplies` and `processReplyImmediately` from `src/reply_worker.ts`. With `DEFAULT_DOMAIN` set in `.env`, outbound mail uses Stalwart impersonation (`target%JMAP_ADMIN_EMAIL`); otherwise the Supabase relay JWT path.
+Uses `sendScheduledReplies` and `replyMessage` from `src/reply_worker.ts`. With `DEFAULT_DOMAIN` set in `.env`, outbound mail uses Stalwart impersonation (`target%JMAP_ADMIN_EMAIL`); otherwise the Supabase relay JWT path.
 
 **API Access Examples:**
 
@@ -422,14 +422,14 @@ npm run mail -- \
   --campaign-name "Clean Water"
 ```
 
-#### 3. JMAP Automated Ingestion (`jmap-fetch`)
+#### 3. JMAP Automated Ingestion (`fetch`)
 
 For automated ingestion from Stalwart mail server using JMAP protocol.
 
 **Usage:**
 
 ```bash
-npm run jmap-fetch -- [--user <username>] [--password <password>] [options]
+npm run fetch -- [--user <username>] [--password <password>] [options]
 ```
 
 **Options:**
@@ -449,35 +449,35 @@ npm run jmap-fetch -- [--user <username>] [--password <password>] [options]
 - Fetch scope is Inbox by default; when `--folder` is provided, fetch scope becomes Inbox + that folder.
 - Normal runs automatically move each successfully processed message to a campaign folder in Stalwart.
 - If no campaign match is found, the message is stored with `campaign_id = null` and moved to the `Unclassified` folder.
-- Messages already marked as processed in the database are skipped (idempotent behavior).
+- Messages already marked as unanswered in the database are skipped (idempotent behavior).
 - Dry runs never move messages.
 
 **Examples:**
 
 ```bash
 # Fetch all messages
-npm run jmap-fetch -- --process-all
+npm run fetch -- --process-all
 
 # Fetch messages since a specific date
-npm run jmap-fetch -- --since "2024-03-01"
+npm run fetch -- --since "2024-03-01"
 
 # Fetch from Inbox + an additional folder
-npm run jmap-fetch -- --process-all --folder "Junk Mail"
+npm run fetch -- --process-all --folder "Junk Mail"
 
 # Fetch a specific message
-npm run jmap-fetch -- --message-id "specific-id"
+npm run fetch -- --message-id "specific-id"
 
 # Dry run to preview without processing
-npm run jmap-fetch -- --dry-run --since "2024-03-01"
+npm run fetch -- --dry-run --since "2024-03-01"
 
 # Optional: override credentials from environment variables
-npm run jmap-fetch -- --user dibora --password mypass --process-all
+npm run fetch -- --user dibora --password mypass --process-all
 
 ```
 
 #### 4. Message Reprocessing (`reprocess-messages`)
 
-Recompute embeddings and classifications for existing messages. When JMAP is used, the mail account id comes from the session after login (same as `jmap-fetch`).
+Recompute embeddings and classifications for existing messages. When JMAP is used, the mail account id comes from the session after login (same as `fetch`).
 
 **Usage:**
 
@@ -523,7 +523,7 @@ npx tsx bin/cli --help
 npm run mail -- --help
 
 # JMAP fetch help
-npm run jmap-fetch -- --help
+npm run fetch -- --help
 
 # Reprocess messages help (use direct execution for detailed help)
 npx tsx bin/reprocess-messages.ts --help
@@ -741,7 +741,7 @@ Reply sending uses one service account for JMAP authentication across all politi
 - `SUPABASE_ANON_KEY` — required when `DEFAULT_DOMAIN` is unset (Supabase relay JWT for JMAP)
 - `DEFAULT_DOMAIN` (optional) — when set, sends use Stalwart Basic-auth impersonation (`target%JMAP_ADMIN_EMAIL`) instead of the relay JWT
 
-At runtime, the reply worker and `bin/send-replies` resolve these from Worker bindings (`c.env`) or `.env` (`process.env`) in development. The cron schedule is configured in `wrangler.toml` (every 5 minutes).
+At runtime, the reply worker and `bin/reply.ts` resolve these from Worker bindings (`c.env`) or `.env` (`process.env`) in development. The cron schedule is configured in `wrangler.toml` (every 5 minutes).
 
 ## Stalwart Master Account Setup (Supabase IdP)
 
@@ -802,7 +802,7 @@ Use the credential type that matches your auth flow:
 After a successful JMAP send, `markMessageReplyDelivered()` in the database layer:
 
 - Sets `messages.reply_sent_at` to the send timestamp
-- Deletes the short-term `message_contacts` row for that message (PII removed after send)
+- Sets `messages.reply_sent_at` to the send timestamp (PII is kept on the message row)
 
 The reply worker only loads rows where `reply_sent_at` is null, the campaign has an active reply template, and `reply_scheduled_at` is due (or null for immediate), so **the same message row is never sent twice** by the worker.
 
@@ -820,7 +820,7 @@ The same `external_id` + `channel_source` cannot create two rows; duplicates ret
 
 **Outbound sends**
 
-Template replies are sent only by the scheduled reply worker (cron), which processes messages in Supabase that are ready to send. HTTP APIs do not trigger JMAP sends. Use `bin/cli send-replies` for local testing (same code path as cron).
+Template replies are sent only by the scheduled reply worker (cron), which processes messages in Supabase that are ready to send. HTTP APIs do not trigger JMAP sends. Use `bin/cli reply` for local testing (same code path as cron).
 
 ## Related Projects
 

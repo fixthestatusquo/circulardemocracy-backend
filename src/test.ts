@@ -64,7 +64,7 @@ class MockDatabaseClient extends DatabaseClient {
         language: "en",
         received_at: new Date().toISOString(),
         duplicate_rank: 1,
-        processing_status: "processed",
+        processing_status: "unanswered",
         // biome-ignore lint/suspicious/noExplicitAny: Mocking complex join result
         campaigns: { id: 2, name: "Existing Campaign" } as any,
       };
@@ -124,8 +124,8 @@ async function runTest() {
     const result = await processMessage(db, ai, validMessage);
     console.log("Result:", JSON.stringify(result, null, 2));
 
-    if (result.success && result.status === "processed") {
-      console.log("✅ Valid message processed successfully");
+    if (result.success && result.status === "unanswered") {
+      console.log("✅ Valid message unanswered successfully");
     } else {
       console.error("❌ Valid message failed");
       process.exit(1);

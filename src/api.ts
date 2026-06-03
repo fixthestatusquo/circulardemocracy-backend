@@ -8,7 +8,7 @@ import type { Ai } from "./message_processor";
 import messagesApp from "./messages";
 import politiciansApp from "./politicians";
 import replyTemplatesApp from "./reply_templates";
-import { type MailSendBindings, processScheduledReplies } from "./reply_worker";
+import { type MailSendBindings, sendScheduledReplies } from "./reply_worker";
 
 // Define types for env and app
 interface Env extends MailSendBindings {
@@ -94,8 +94,7 @@ export async function handleScheduledEvent(env: Env): Promise<void> {
       key: env.SUPABASE_KEY,
     });
 
-    const runtimeSecrets = env as unknown as Record<string, string | undefined>;
-    const result = await processScheduledReplies(db, runtimeSecrets);
+    const result = await sendScheduledReplies(db);
 
     console.log("[Reply Worker] Processing complete:", {
       total: result.total,

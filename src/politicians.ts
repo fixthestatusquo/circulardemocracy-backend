@@ -35,6 +35,7 @@ const PoliticianSchema = z.object({
   id: z.number(),
   name: z.string(),
   email: z.string().email(),
+  reply_to: z.string().email().nullable(),
   party: z.string().nullable(),
   country: z.string().nullable(),
   region: z.string().nullable(),
@@ -66,12 +67,12 @@ app.openapi(listPoliticiansRoute, async (c) => {
   let data: any[];
   if (auth.role === "admin") {
     data = await db.request<any[]>(
-      "/politicians?select=id,name,email,party,country,region,position,active",
+      "/politicians?select=id,name,email,reply_to,party,country,region,position,active",
     );
   } else if (auth.politicianIds.length > 0) {
     const idList = auth.politicianIds.join(",");
     data = await db.request<any[]>(
-      `/politicians?id=in.(${idList})&select=id,name,email,party,country,region,position,active`,
+      `/politicians?id=in.(${idList})&select=id,name,email,reply_to,party,country,region,position,active`,
     );
   } else {
     data = [];
@@ -106,7 +107,7 @@ app.openapi(getPoliticianRoute, async (c) => {
     return c.json({ error: "Forbidden" }, 403);
   }
   const data = await db.request<any[]>(
-    `/politicians?id=eq.${id}&select=id,name,email,party,country,region,position,active&limit=1`,
+    `/politicians?id=eq.${id}&select=id,name,email,reply_to,party,country,region,position,active&limit=1`,
   );
   if (!data || data.length === 0) {
     return c.json({ error: "Not found" }, 404);

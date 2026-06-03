@@ -1,4 +1,5 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import type { Database } from "@/types/supabase";
 
 // Database Layer - Supabase REST API Client
 // Handles all database operations for Circular Democracy
@@ -13,6 +14,7 @@ export interface Politician {
   id: number;
   name: string;
   email: string;
+  reply_to?: string | null;
   additional_emails: string[];
   active: boolean;
 }
@@ -49,11 +51,12 @@ export interface MessageInsert {
 export interface ReplyTemplate {
   id: number;
   campaign_id: number;
+  politician_id: number;
   name: string;
   subject: string;
   body: string;
   active: boolean;
-  layout_type: "text_only" | "standard_header";
+  layout_type: "text_only" | "standard_header" | "EP";
   send_timing: "immediate" | "office_hours" | "scheduled";
   scheduled_for?: string | null;
   created_at: string;
@@ -62,7 +65,7 @@ export interface ReplyTemplate {
 
 export interface ClassificationResult {
   campaign_id: number | null;
-  campaign_name: string | null;
+  campaign_slug: string | null;
   confidence: number;
 }
 
@@ -74,7 +77,7 @@ export class DatabaseClient {
     if (config.accessToken) {
       headers.Authorization = `Bearer ${config.accessToken}`;
     }
-    this.supabase = createClient(config.url, config.key, {
+    this.supabase = createClient<Database>(config.url, config.key, {
       auth: {
         persistSession: false,
       },
@@ -194,7 +197,7 @@ export class DatabaseClient {
       // First try exact email match
       const { data: exactMatch, error: exactError } = await this.supabase
         .from("politicians")
-        .select("id,name,email,additional_emails,active")
+        .select("id,name,email,reply_to,additional_emails,active")
         .eq("email", email)
         .eq("active", true);
 
@@ -208,7 +211,7 @@ export class DatabaseClient {
       // Then try additional_emails array search
       const { data: arrayMatch, error: arrayError } = await this.supabase
         .from("politicians")
-        .select("id,name,email,additional_emails,active")
+        .select("id,name,email,reply_to,additional_emails,active")
         .contains("additional_emails", [email])
         .eq("active", true);
 
@@ -830,7 +833,7 @@ export class DatabaseClient {
     try {
       const { data, error } = await this.supabase
         .from("messages")
-        .select("*, campaigns(id, name)")
+        .select("*, campaigns(id, name, slug)")
         .eq("external_id", externalId)
         .eq("politician_id", politicianId)
         .eq("channel_source", channelSource)
@@ -896,13 +899,15 @@ export class DatabaseClient {
 
   async deactivateOtherTemplates(
     campaignId: number,
+    politicianId: number,
     excludeTemplateId?: number,
   ): Promise<void> {
     try {
       let query = this.supabase
         .from("reply_templates")
         .update({ active: false })
-        .eq("campaign_id", campaignId);
+        .eq("campaign_id", campaignId)
+        .eq("politician_id", politicianId);
 
       if (excludeTemplateId) {
         query = query.neq("id", excludeTemplateId);
@@ -1044,7 +1049,7 @@ export class DatabaseClient {
   }
 
   // =============================================================================
-  // Reply pipeline: supporters (hash), message_contacts (PII), send logs
+  // Reply pipeline: supporters (hash), send logs
   // =============================================================================
 
   async upsertSupporter(
@@ -1111,114 +1116,6 @@ export class DatabaseClient {
     }
   }
 
-  async storeMessageContact(params: {
-    messageId: number;
-    senderHash: string;
-    senderEmail: string;
-    senderName?: string;
-    capturedAt?: string;
-  }): Promise<void> {
-    const senderEmail = params.senderEmail.trim();
-    if (!senderEmail) {
-      throw new Error(
-        `Cannot store message contact: sender email is missing for message ${params.messageId}`,
-      );
-    }
-
-    try {
-      const { error } = await this.supabase.from("message_contacts").upsert(
-        {
-          message_id: params.messageId,
-          sender_hash: params.senderHash,
-          sender_email: senderEmail,
-          sender_name: params.senderName || null,
-          contact_captured_at: params.capturedAt || new Date().toISOString(),
-        },
-        { onConflict: "message_id" },
-      );
-
-      if (error) {
-        throw error;
-      }
-    } catch (error) {
-      console.error("Error storing message contact:", error);
-      throw new Error("Failed to store short-term message contact");
-    }
-  }
-
-  async getMessageContactEmail(messageId: number): Promise<string | null> {
-    try {
-      const { data, error } = await this.supabase
-        .from("message_contacts")
-        .select("sender_email")
-        .eq("message_id", messageId)
-        .is("purged_at", null)
-        .limit(1);
-
-      if (error) {
-        throw error;
-      }
-
-      if (data && data.length > 0) {
-        return data[0].sender_email as string;
-      }
-
-      const { data: messageRow, error: messageError } = await this.supabase
-        .from("messages")
-        .select("sender_hash, politician_id, campaign_id")
-        .eq("id", messageId)
-        .limit(1);
-
-      if (messageError) {
-        throw messageError;
-      }
-
-      const message = messageRow?.[0];
-      if (
-        !message?.sender_hash ||
-        message.politician_id == null ||
-        message.campaign_id == null
-      ) {
-        return null;
-      }
-
-      const { data: fallbackContacts, error: fallbackError } =
-        await this.supabase
-          .from("message_contacts")
-          .select(
-            "sender_email, contact_captured_at, messages!inner(politician_id, campaign_id)",
-          )
-          .eq("sender_hash", message.sender_hash)
-          .eq("messages.politician_id", message.politician_id)
-          .eq("messages.campaign_id", message.campaign_id)
-          .is("purged_at", null)
-          .order("contact_captured_at", { ascending: false })
-          .limit(1);
-
-      if (fallbackError) {
-        throw fallbackError;
-      }
-
-      const fallbackEmail = fallbackContacts?.[0]?.sender_email as
-        | string
-        | undefined;
-      if (fallbackEmail) {
-        await this.storeMessageContact({
-          messageId,
-          senderHash: message.sender_hash,
-          senderEmail: fallbackEmail,
-          capturedAt: new Date().toISOString(),
-        });
-        return fallbackEmail;
-      }
-
-      return null;
-    } catch (error) {
-      console.error("Error fetching message contact email:", error);
-      return null;
-    }
-  }
-
   async getCampaignTechnicalEmail(campaignId: number): Promise<string | null> {
     try {
       const { data, error } = await this.supabase
@@ -1263,31 +1160,32 @@ export class DatabaseClient {
     );
   }
 
-  /** Sets message reply fields and removes short-term contact row. */
-  async markMessageReplyDelivered(messageId: number): Promise<void> {
+  /** Sets message reply fields after successful send. */
+  async markMessageReplyDelivered(
+    messageId: number,
+    options?: { reply_id?: string; reply_template_id?: number },
+  ): Promise<void> {
     const replySentAt = new Date().toISOString();
+    const updateData: Record<string, string | number | null> = {
+      reply_sent_at: replySentAt,
+      processing_status: "replied",
+    };
+
+    if (options?.reply_id !== undefined) {
+      updateData.reply_id = options.reply_id;
+    }
+    if (options?.reply_template_id !== undefined) {
+      updateData.reply_template_id = options.reply_template_id;
+    }
 
     const { error: msgError } = await this.supabase
       .from("messages")
-      .update({
-        reply_sent_at: replySentAt,
-        processing_status: "replied",
-      })
+      .update(updateData)
       .eq("id", messageId);
 
     if (msgError) {
       console.error("Error marking message reply sent:", msgError);
       throw msgError;
-    }
-
-    const { error: contactDeleteError } = await this.supabase
-      .from("message_contacts")
-      .delete()
-      .eq("message_id", messageId);
-
-    if (contactDeleteError) {
-      console.error("Error deleting message_contacts row:", contactDeleteError);
-      throw contactDeleteError;
     }
   }
 
@@ -1427,7 +1325,11 @@ export class DatabaseClient {
 
   async getMessagesReadyToSend(
     maxRetryAttempts: number,
-    filters: { politicianId?: number; campaignId?: number } = {},
+    filters: {
+      politicianId?: number;
+      campaignId?: number;
+      limit?: number;
+    } = {},
   ): Promise<
     Array<{
       id: number;
@@ -1450,7 +1352,7 @@ export class DatabaseClient {
       .select(
         "id, external_id, politician_id, campaign_id, sender_hash, reply_scheduled_at, received_at, reply_retry_count",
       )
-      .eq("processing_status", "processed") // Only pick up messages not already being sent or replied
+      .eq("processing_status", "unanswered") // Only pick up messages not already being sent or replied
       .is("reply_sent_at", null)
       .in("campaign_id", campaignIds)
       //      .eq("duplicate_rank", 0)
@@ -1464,6 +1366,13 @@ export class DatabaseClient {
     if (filters.campaignId !== undefined) {
       query = query.eq("campaign_id", filters.campaignId);
     }
+
+    if (filters.limit !== undefined) {
+      query = query.limit(filters.limit);
+    }
+
+    query = query.order("received_at", { ascending: true });
+
     const { data, error } = await query;
 
     if (error) {
@@ -1471,33 +1380,6 @@ export class DatabaseClient {
     }
 
     return data || [];
-  }
-
-  async getMessageReadyToSendById(messageId: number): Promise<{
-    id: number;
-    external_id: string;
-    politician_id: number;
-    campaign_id: number;
-    sender_hash: string;
-    reply_scheduled_at: string | null;
-    received_at: string;
-    reply_retry_count: number | null;
-  } | null> {
-    const { data, error } = await this.supabase
-      .from("messages")
-      .select(
-        "id, external_id, politician_id, campaign_id, sender_hash, reply_scheduled_at, received_at, reply_retry_count",
-      )
-      .eq("id", messageId)
-      .is("reply_sent_at", null)
-      .eq("duplicate_rank", 0)
-      .limit(1);
-
-    if (error) {
-      throw error;
-    }
-
-    return data && data.length > 0 ? data[0] : null;
   }
 
   async getCampaignById(campaignId: number): Promise<{
@@ -1523,10 +1405,13 @@ export class DatabaseClient {
     id: number;
     email: string;
     name: string;
+    party: string;
+    position: string;
+    reply_to: string | null;
   } | null> {
     const { data, error } = await this.supabase
       .from("politicians")
-      .select("id, email, name")
+      .select("id, email, name, reply_to, party,position")
       .eq("id", politicianId)
       .limit(1);
 
@@ -1593,7 +1478,7 @@ export class DatabaseClient {
       if (best.distance < 0.1) {
         return {
           campaign_id: best.id,
-          campaign_name: best.name,
+          campaign_slug: best.slug,
           confidence: 1 - best.distance, // Convert distance to confidence
         };
       }

@@ -1,0 +1,1 @@
+ALTER TABLE reply_templates DROP CONSTRAINT IF EXISTS reply_templates_layout_type_check;
