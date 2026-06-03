@@ -886,7 +886,7 @@ function createCliCompatibleDb(db: DatabaseClient): DatabaseClient {
       if (hintCampaign) {
         return {
           campaign_id: hintCampaign.id,
-          campaign_name: hintCampaign.name,
+          campaign_slug: hintCampaign.name,
           confidence: 0.95,
         };
       }
@@ -898,7 +898,7 @@ function createCliCompatibleDb(db: DatabaseClient): DatabaseClient {
       if (best.distance < 0.1) {
         return {
           campaign_id: best.id,
-          campaign_name: best.name,
+          campaign_slug: best.name,
           confidence: 1 - best.distance,
         };
       }
@@ -906,7 +906,7 @@ function createCliCompatibleDb(db: DatabaseClient): DatabaseClient {
 
     return {
       campaign_id: null,
-      campaign_name: null,
+      campaign_slug: null,
       confidence: 0.1,
     };
   };
@@ -1155,9 +1155,9 @@ async function runStalwartIngestion(
       if (result.success) {
         summary.processed += 1;
         console.log(
-          `Processed ${messageInput.external_id} -> campaign=${result.campaign_name || "unknown"} confidence=${result.confidence ?? "n/a"}`,
+          `Processed ${messageInput.external_id} -> campaign=${result.campaign_slug || "unknown"} confidence=${result.confidence ?? "n/a"}`,
         );
-        const folderPath = generateFolderPath(result.campaign_name);
+        const folderPath = generateFolderPath(result.campaign_slug);
         try {
           let mailboxId = mailboxCache.get(folderPath);
           if (!mailboxId) {

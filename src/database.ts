@@ -65,7 +65,7 @@ export interface ReplyTemplate {
 
 export interface ClassificationResult {
   campaign_id: number | null;
-  campaign_name: string | null;
+  campaign_slug: string | null;
   confidence: number;
 }
 
@@ -833,7 +833,7 @@ export class DatabaseClient {
     try {
       const { data, error } = await this.supabase
         .from("messages")
-        .select("*, campaigns(id, name)")
+        .select("*, campaigns(id, name, slug)")
         .eq("external_id", externalId)
         .eq("politician_id", politicianId)
         .eq("channel_source", channelSource)
@@ -1478,7 +1478,7 @@ export class DatabaseClient {
       if (best.distance < 0.1) {
         return {
           campaign_id: best.id,
-          campaign_name: best.name,
+          campaign_slug: best.slug,
           confidence: 1 - best.distance, // Convert distance to confidence
         };
       }
