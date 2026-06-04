@@ -1067,7 +1067,7 @@ export class DatabaseClient {
             politician_id: politicianId,
             sender_hash: senderHash,
             first_message_at: firstMessageAt || new Date().toISOString(),
-            last_message_at: new Date().toISOString(),
+            last_message_at: firstMessageAt || new Date().toISOString(),
           },
           { onConflict: "campaign_id,politician_id,sender_hash" },
         )
@@ -1752,13 +1752,12 @@ export class DatabaseClient {
     if (entries.length === 0) return;
 
     try {
-      const now = new Date().toISOString();
       const rows = entries.map((e) => ({
         campaign_id: e.campaignId,
         politician_id: e.politicianId,
         sender_hash: e.senderHash,
         first_message_at: e.firstMessageAt,
-        last_message_at: now,
+        last_message_at: e.firstMessageAt,
       }));
 
       await this.supabase
