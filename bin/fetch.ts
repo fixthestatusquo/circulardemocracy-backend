@@ -2,23 +2,19 @@
 
 import minimist from "minimist";
 import { DatabaseClient } from "../src/database.js";
-import {
-  jmapWellKnownSessionUrl,
-  resolveMailAccountIdFromSession,
-} from "../src/jmap_client.js";
-import { processMessage, PoliticianNotFoundError, type Ai, type MessageInput } from "../src/message_processor.js";
+import { jmapWellKnownSessionUrl } from "../src/jmap_client.js";
 import { processMessage, processMessageBatch, PoliticianNotFoundError, type Ai, type MessageInput } from "../src/message_processor.js";
 import {
   resolvePoliticianId,
   type CliFilters,
 } from "../src/cli_shared.js";
 import {
-  buildStalwartImpersonationLogin,
   emailHostedOnDomain,
-  encodeBasicAuth,
   normalizeMailDomain,
   resolveRelayImpersonationCredentials,
 } from "../src/stalwart_jmap.js";
+import { JmapClient } from "jmap-cli";
+import type { JmapMessage } from "jmap-cli";
 import { z } from "zod";
 import Turndown from "turndown";
 import { config as dotenv } from "dotenv";
@@ -80,25 +76,10 @@ interface StalwartFetchOptions extends CliFilters {
   password?: string;
 }
 
-interface JmapSessionResponse {
-  apiUrl: string;
-  primaryAccounts?: Record<string, string>;
-  accounts?: Record<string, unknown>;
-}
-
-interface JmapAddress {
-  email?: string;
-  name?: string;
-}
-
-interface JmapBodyPart {
-  partId?: string;
-}
-
-interface JmapBodyValue {
-  value?: string;
-}
-
+// Minimal JMAP types used by body extraction and conversion helpers.
+interface JmapAddress { email?: string; name?: string; }
+interface JmapBodyPart { partId?: string; }
+interface JmapBodyValue { value?: string; }
 interface JmapEmail {
   id: string;
   messageId?: string[];
@@ -362,74 +343,82 @@ function convertJmapEmailToMessageInput(email: JmapEmail): MessageInput {
   return MessageInputSchema.parse(messageInput);
 }
 
-async function fetchJmapSession(
-  endpoint: string,
-  authHeader: string,
-): Promise<JmapSessionResponse> {
-  const response = await fetch(endpoint, {
-    method: "GET",
-    headers: {
-      Authorization: authHeader,
-      Accept: "application/json",
-    },
-  });
-  if (!response.ok) {
-    const body = await response.text();
-    throw new Error(
-      `Failed to connect to ${endpoint} (${response.status}): ${body || "No response body"}`,
-    );
-  }
+// --- JMAP helper: Email/query + Email/get with body content ---
 
-  return (await response.json()) as JmapSessionResponse;
-}
+async function jmapQueryWithBodies(
+  client: JmapClient,
+  filter: Record<string, unknown> | null,
+  limit?: number,
+): Promise<JmapEmail[]> {
+  const session = await (client as any)._discoverSession();
+  const accountId = client.getAccountId(session);
+  const queryArgs: Record<string, unknown> = { accountId, limit: limit || 500 };
+  if (filter) queryArgs.filter = filter;
 
-async function jmapCall(
-  apiUrl: string,
-  authHeader: string,
-  methodCalls: unknown[],
-): Promise<any[][]> {
-  const response = await fetch(apiUrl, {
+  const json = await (client as any)._requestJson(session.apiUrl, {
     method: "POST",
-    headers: {
-      Authorization: authHeader,
-      "Content-Type": "application/json",
-      Accept: "application/json",
-    },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       using: ["urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail"],
-      methodCalls,
+      methodCalls: [
+        ["Email/query", queryArgs, "q"],
+        ["Email/get", {
+          accountId,
+          "#ids": { resultOf: "q", name: "Email/query", path: "/ids" },
+          properties: [
+            "id", "messageId", "receivedAt", "mailboxIds",
+            "subject", "from", "to", "cc", "replyTo",
+            "preview", "textBody", "htmlBody", "bodyValues",
+          ],
+          fetchTextBodyValues: true,
+          fetchHTMLBodyValues: true,
+        }, "g"],
+      ],
     }),
   });
 
-  if (!response.ok) {
-    const body = await response.text();
-    throw new Error(
-      `JMAP API request failed (${response.status}): ${body || "No response body"}`,
-    );
-  }
-
-  const json = await response.json() as { methodResponses?: any[][] };
-  if (!json.methodResponses) {
-    throw new Error("Invalid JMAP response: missing methodResponses");
-  }
-
-  return json.methodResponses;
+  const getResp = json.methodResponses?.find((r: any[]) => r[0] === "Email/get");
+  return Array.isArray(getResp?.[1]?.list) ? getResp[1].list : [];
 }
 
-function getMethodResponse(
-  methodResponses: any[][],
-  methodName: string,
-  callId: string,
-): any {
-  const response = methodResponses.find(
-    (entry) => entry[0] === methodName && entry[2] === callId,
-  );
+// --- JMAP helper: fetch single email by Message-ID header ---
 
-  if (!response) {
-    throw new Error(`JMAP response missing ${methodName} for callId=${callId}`);
-  }
+async function jmapFetchByMessageId(
+  client: JmapClient,
+  messageId: string,
+  mailboxFilter: Record<string, unknown>,
+): Promise<JmapEmail[]> {
+  const session = await (client as any)._discoverSession();
+  const accountId = client.getAccountId(session);
 
-  return response[1];
+  const json = await (client as any)._requestJson(session.apiUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      using: ["urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail"],
+      methodCalls: [
+        ["Email/query", {
+          accountId,
+          filter: { operator: "AND", conditions: [mailboxFilter, { header: ["Message-ID", messageId] }] },
+          limit: 1,
+        }, "q"],
+        ["Email/get", {
+          accountId,
+          "#ids": { resultOf: "q", name: "Email/query", path: "/ids" },
+          properties: [
+            "id", "messageId", "receivedAt", "mailboxIds",
+            "subject", "from", "to", "cc", "replyTo",
+            "preview", "textBody", "htmlBody", "bodyValues",
+          ],
+          fetchTextBodyValues: true,
+          fetchHTMLBodyValues: true,
+        }, "g"],
+      ],
+    }),
+  });
+
+  const getResp = json.methodResponses?.find((r: any[]) => r[0] === "Email/get");
+  return Array.isArray(getResp?.[1]?.list) ? getResp[1].list : [];
 }
 
 function generateFolderPath(campaignName?: string | null): string {
@@ -443,414 +432,37 @@ function generateFolderPath(campaignName?: string | null): string {
     .substring(0, 50) || "Unclassified";
 }
 
+// --- jmap-cli wrappers for mailbox & move operations ---
+
 async function ensureMailboxExists(
-  apiUrl: string,
-  authHeader: string,
-  accountId: string,
+  client: JmapClient,
   folderName: string,
 ): Promise<string> {
-  const queryResponses = await jmapCall(apiUrl, authHeader, [
-    [
-      "Mailbox/query",
-      {
-        accountId,
-        filter: { name: folderName },
-      },
-      "queryMailbox",
-    ],
-    [
-      "Mailbox/get",
-      {
-        accountId,
-        "#ids": {
-          resultOf: "queryMailbox",
-          name: "Mailbox/query",
-          path: "/ids",
-        },
-      },
-      "getMailbox",
-    ],
-  ]);
+  // Look up existing mailbox by name first (more reliable than createIfNotExist
+  // since jmap-cli's getMailbox returns different shapes for found vs created).
+  const mailboxes = await client.listMailboxes();
+  console.log(mailboxes);
+  const existing = mailboxes.find(
+    (mb) => mb.name?.toLowerCase() === folderName.toLowerCase(),
+  );
+  if (existing?.id) return existing.id;
 
-  const getData = getMethodResponse(queryResponses, "Mailbox/get", "getMailbox");
-  if (Array.isArray(getData.list) && getData.list.length > 0) {
-    return getData.list[0].id;
-  }
-
-  const createResponses = await jmapCall(apiUrl, authHeader, [
-    [
-      "Mailbox/set",
-      {
-        accountId,
-        create: {
-          newMailbox: { name: folderName },
-        },
-      },
-      "createMailbox",
-    ],
-  ]);
-
-  const setData = getMethodResponse(createResponses, "Mailbox/set", "createMailbox");
-  if (setData.created?.newMailbox?.id) {
-    return setData.created.newMailbox.id;
-  }
-
-  throw new Error(`Failed to create mailbox: ${folderName}`);
+  // Create the mailbox
+  const created = await client.createMailbox({ name: folderName });
+  const id = (created as any)?.id;
+  if (!id) throw new Error(`Could not create mailbox: ${folderName}`);
+  return id;
 }
 
 async function moveEmailToMailbox(
-  apiUrl: string,
-  authHeader: string,
-  accountId: string,
-  emailId: string,
-  targetMailboxId: string,
-): Promise<void> {
-  await jmapCall(apiUrl, authHeader, [
-    [
-      "Email/set",
-      {
-        accountId,
-        update: {
-          [emailId]: {
-            mailboxIds: {
-              [targetMailboxId]: true,
-            },
-          },
-        },
-      },
-      "moveEmail",
-    ],
-  ]);
-}
-
-async function resolveInboxMailboxId(
-  apiUrl: string,
-  authHeader: string,
-  accountId: string,
-): Promise<string> {
-  const queryResponses = await jmapCall(apiUrl, authHeader, [
-    [
-      "Mailbox/query",
-      {
-        accountId,
-        filter: { role: "inbox" },
-        position: 0,
-        limit: 1,
-      },
-      "queryInboxMailbox",
-    ],
-    [
-      "Mailbox/get",
-      {
-        accountId,
-        "#ids": {
-          resultOf: "queryInboxMailbox",
-          name: "Mailbox/query",
-          path: "/ids",
-        },
-      },
-      "getInboxMailbox",
-    ],
-  ]);
-
-  const getData = getMethodResponse(
-    queryResponses,
-    "Mailbox/get",
-    "getInboxMailbox",
-  );
-  if (Array.isArray(getData.list) && getData.list.length > 0 && getData.list[0]?.id) {
-    return getData.list[0].id as string;
-  }
-
-  throw new Error("Inbox mailbox not found for JMAP account");
-}
-
-async function resolveMailboxIdByName(
-  apiUrl: string,
-  authHeader: string,
-  accountId: string,
-  folderName: string,
-): Promise<string | null> {
-  const queryResponses = await jmapCall(apiUrl, authHeader, [
-    [
-      "Mailbox/query",
-      {
-        accountId,
-        filter: { name: folderName },
-        position: 0,
-        limit: 1,
-      },
-      "queryMailboxByName",
-    ],
-    [
-      "Mailbox/get",
-      {
-        accountId,
-        "#ids": {
-          resultOf: "queryMailboxByName",
-          name: "Mailbox/query",
-          path: "/ids",
-        },
-      },
-      "getMailboxByName",
-    ],
-  ]);
-
-  const getData = getMethodResponse(
-    queryResponses,
-    "Mailbox/get",
-    "getMailboxByName",
-  );
-  if (Array.isArray(getData.list) && getData.list.length > 0 && getData.list[0]?.id) {
-    return getData.list[0].id as string;
-  }
-
-  // Fallback: some servers/users vary mailbox casing ("Junk Mail" vs "junk mail").
-  // Scan available mailboxes and match case-insensitively before failing.
-  const allMailboxResponses = await jmapCall(apiUrl, authHeader, [
-    [
-      "Mailbox/get",
-      {
-        accountId,
-        properties: ["id", "name"],
-      },
-      "getAllMailboxes",
-    ],
-  ]);
-  const allMailboxes = getMethodResponse(
-    allMailboxResponses,
-    "Mailbox/get",
-    "getAllMailboxes",
-  );
-  const normalizedTarget = folderName.trim().toLowerCase();
-  if (Array.isArray(allMailboxes.list)) {
-    const match = allMailboxes.list.find((mailbox: any) => {
-      const name = typeof mailbox?.name === "string" ? mailbox.name.trim().toLowerCase() : "";
-      return name === normalizedTarget;
-    });
-    if (match?.id) {
-      return match.id as string;
-    }
-  }
-
-  return null;
-}
-
-function buildMailboxFilter(mailboxIds: string[]): Record<string, unknown> {
-  if (mailboxIds.length === 1) {
-    return { inMailbox: mailboxIds[0] };
-  }
-
-  return {
-    operator: "OR",
-    conditions: mailboxIds.map((mailboxId) => ({ inMailbox: mailboxId })),
-  };
-}
-
-async function fetchEmailPage(
-  apiUrl: string,
-  authHeader: string,
-  accountId: string,
-  filter: Record<string, unknown> | null,
-  position: number,
-  limit: number,
-): Promise<JmapEmail[]> {
-  const queryArgs: Record<string, unknown> = {
-    accountId,
-    position,
-    limit,
-  };
-  if (filter !== null) {
-    queryArgs.filter = filter;
-  }
-  const methodResponses = await jmapCall(apiUrl, authHeader, [
-    [
-      "Email/query",
-      queryArgs,
-      "query",
-    ],
-    [
-      "Email/get",
-      {
-        accountId,
-        "#ids": {
-          resultOf: "query",
-          name: "Email/query",
-          path: "/ids",
-        },
-        properties: [
-          "id",
-          "messageId",
-          "receivedAt",
-          "mailboxIds",
-          "subject",
-          "from",
-          "to",
-          "cc",
-          "replyTo",
-          "preview",
-          "textBody",
-          "htmlBody",
-          "bodyValues",
-        ],
-        fetchTextBodyValues: true,
-        fetchHTMLBodyValues: true,
-      },
-      "get",
-    ],
-  ]);
-
-  const queryData = getMethodResponse(methodResponses, "Email/query", "query");
-  const getData = getMethodResponse(methodResponses, "Email/get", "get");
-  const ids = Array.isArray(queryData.ids) ? queryData.ids : [];
-  const list = Array.isArray(getData.list) ? getData.list : [];
-
-  if (ids.length === 0) {
-    return [];
-  }
-
-  return list as JmapEmail[];
-}
-
-async function fetchAllEmails(
-  apiUrl: string,
-  authHeader: string,
-  accountId: string,
-  filter: Record<string, unknown> | null,
-): Promise<JmapEmail[]> {
-  const pageSize = 50;
-  let position = 0;
-  const emails: JmapEmail[] = [];
-
-  while (true) {
-    const page = await fetchEmailPage(
-      apiUrl,
-      authHeader,
-      accountId,
-      filter,
-      position,
-      pageSize,
-    );
-
-    if (page.length === 0) {
-      break;
-    }
-
-    emails.push(...page);
-
-    if (page.length < pageSize) {
-      break;
-    }
-
-    position += page.length;
-  }
-
-  return emails;
-}
-
-async function fetchEmailById(
-  apiUrl: string,
-  authHeader: string,
-  accountId: string,
-  sourceMailboxIds: string[],
+  client: JmapClient,
   messageId: string,
-): Promise<JmapEmail[]> {
-  const directGetResponses = await jmapCall(apiUrl, authHeader, [
-    [
-      "Email/get",
-      {
-        accountId,
-        ids: [messageId],
-        properties: [
-          "id",
-          "messageId",
-          "receivedAt",
-          "mailboxIds",
-          "subject",
-          "from",
-          "to",
-          "cc",
-          "replyTo",
-          "preview",
-          "textBody",
-          "htmlBody",
-          "bodyValues",
-        ],
-        fetchTextBodyValues: true,
-        fetchHTMLBodyValues: true,
-      },
-      "getById",
-    ],
-  ]);
-
-  const directGet = getMethodResponse(
-    directGetResponses,
-    "Email/get",
-    "getById",
-  );
-  if (Array.isArray(directGet.list) && directGet.list.length > 0) {
-    const directHits = (directGet.list as JmapEmail[]).filter(
-      (email) => sourceMailboxIds.some((mailboxId) => email.mailboxIds?.[mailboxId] === true),
-    );
-    if (directHits.length > 0) {
-      return directHits;
-    }
-  }
-
-  const queryResponses = await jmapCall(apiUrl, authHeader, [
-    [
-      "Email/query",
-      {
-        accountId,
-        filter: {
-          operator: "AND",
-          conditions: [
-            buildMailboxFilter(sourceMailboxIds),
-            { header: ["Message-ID", messageId] },
-          ],
-        },
-        position: 0,
-        limit: 1,
-      },
-      "queryByHeader",
-    ],
-    [
-      "Email/get",
-      {
-        accountId,
-        "#ids": {
-          resultOf: "queryByHeader",
-          name: "Email/query",
-          path: "/ids",
-        },
-        properties: [
-          "id",
-          "messageId",
-          "receivedAt",
-          "mailboxIds",
-          "subject",
-          "from",
-          "to",
-          "cc",
-          "replyTo",
-          "preview",
-          "textBody",
-          "htmlBody",
-          "bodyValues",
-        ],
-        fetchTextBodyValues: true,
-        fetchHTMLBodyValues: true,
-      },
-      "getByHeader",
-    ],
-  ]);
-
-  const byHeader = getMethodResponse(queryResponses, "Email/get", "getByHeader");
-  return Array.isArray(byHeader.list)
-    ? (byHeader.list as JmapEmail[]).filter(
-      (email) => sourceMailboxIds.some((mailboxId) => email.mailboxIds?.[mailboxId] === true),
-    )
-    : [];
+  mailboxId: string,
+): Promise<void> {
+  await (client as any).updateMessage({
+    messageId,
+    update: { mailboxIds: { [mailboxId]: true } },
+  });
 }
 
 function printStalwartDryRun(messages: MessageInput[]): void {
@@ -1062,83 +674,67 @@ async function runStalwartIngestion(
   jmapWellKnownUrl: string,
   logMailbox?: string,
 ): Promise<boolean> {
-  const authHeader = encodeBasicAuth(username, password);
   const prefix = logMailbox ? `[${logMailbox}] ` : "";
   const impersonationIdx = username.indexOf("%");
 
-  if (!(impersonationIdx > 0)) {
-    console.log(
-      `${prefix}direct Basic login as ${username}`,
-    );
+  // Build jmap-cli client
+  const baseUrl = jmapWellKnownUrl.replace(/\/\.well-known\/jmap\/?$/, "");
+  const [impersonate, login] = impersonationIdx > 0
+    ? [username.slice(0, impersonationIdx), username.slice(impersonationIdx + 1)]
+    : [undefined, username];
+
+  if (impersonationIdx > 0) {
+    console.log(`${prefix}Stalwart impersonation: ${impersonate} via ${login}`);
+  } else {
+    console.log(`${prefix}direct login as ${username}`);
   }
+
+  const client = new JmapClient({
+    baseUrl,
+    login: login!,
+    password,
+    impersonate,
+  });
 
   // Resolve politician ID for deduplication
   let politicianId = options.politicianId;
   if (politicianId === undefined) {
-    const mailboxEmail = logMailbox || (impersonationIdx > 0 ? username.slice(0, impersonationIdx) : username);
+    const mailboxEmail = logMailbox || (impersonate || login!);
     const politician = await db.findPoliticianByEmail(mailboxEmail);
     politicianId = politician?.id;
   }
 
-  const session = await fetchJmapSession(jmapWellKnownUrl, authHeader);
-  const accountId = resolveMailAccountIdFromSession(session);
-  const inboxMailboxId = await resolveInboxMailboxId(
-    session.apiUrl,
-    authHeader,
-    accountId,
-  );
-  const sourceMailboxIds = [inboxMailboxId];
+  // Resolve inbox and optional folder
+  const inbox = await client.getMailbox("inbox");
+  if (!inbox?.id) throw new Error("Inbox mailbox not found");
+  const sourceMailboxIds = [inbox.id];
   if (options.folder) {
-    const folderMailboxId = await resolveMailboxIdByName(
-      session.apiUrl,
-      authHeader,
-      accountId,
-      options.folder,
-    );
-    if (!folderMailboxId) {
-      throw new Error(`Mailbox not found for --folder: ${options.folder}`);
-    }
-    if (!sourceMailboxIds.includes(folderMailboxId)) {
-      sourceMailboxIds.push(folderMailboxId);
-    }
+    const folderMb = await client.getMailbox(options.folder);
+    if (!folderMb?.id) throw new Error(`Mailbox not found for --folder: ${options.folder}`);
+    if (!sourceMailboxIds.includes(folderMb.id)) sourceMailboxIds.push(folderMb.id);
   }
+
+  const buildMailboxFilter = () =>
+    sourceMailboxIds.length === 1
+      ? { inMailbox: sourceMailboxIds[0] }
+      : { operator: "OR" as const, conditions: sourceMailboxIds.map((id) => ({ inMailbox: id })) };
+
   const mailboxCache = new Map<string, string>();
 
   let rawEmails: JmapEmail[] = [];
   if (options.messageId) {
     console.log(`Fetching message by ID: ${options.messageId}`);
-    rawEmails = await fetchEmailById(
-      session.apiUrl,
-      authHeader,
-      accountId,
-      sourceMailboxIds,
-      options.messageId,
-    );
-  } else if (options.since) {
-    const sinceIso = toIsoDate(options.since);
-    const sourceInfo = options.folder
-      ? `Inbox + ${options.folder}`
-      : "Inbox";
-    console.log(`Fetching messages from ${sourceInfo} since ${sinceIso}`);
-    rawEmails = await fetchAllEmails(
-      session.apiUrl,
-      authHeader,
-      accountId,
-      {
-        operator: "AND",
-        conditions: [
-          buildMailboxFilter(sourceMailboxIds),
-          { after: sinceIso },
-        ],
-      },
-    );
-  } else if (options.processAll) {
-    rawEmails = await fetchAllEmails(
-      session.apiUrl,
-      authHeader,
-      accountId,
-      buildMailboxFilter(sourceMailboxIds),
-    );
+    rawEmails = await jmapFetchByMessageId(client, options.messageId, buildMailboxFilter());
+  } else {
+    const filter: Record<string, unknown> | null = options.since
+      ? { operator: "AND", conditions: [buildMailboxFilter(), { after: toIsoDate(options.since) }] }
+      : options.processAll
+        ? buildMailboxFilter()
+        : null;
+    const sourceInfo = options.folder ? `Inbox + ${options.folder}` : "Inbox";
+    const sinceInfo = options.since ? ` since ${toIsoDate(options.since)}` : "";
+    console.log(`Fetching messages from ${sourceInfo}${sinceInfo}`);
+    rawEmails = await jmapQueryWithBodies(client, filter);
   }
 
   const alreadyProcessed = await getAlreadyProcessedExternalIds(
@@ -1197,10 +793,10 @@ async function runStalwartIngestion(
     try {
       let mailboxId = mailboxCache.get(folderPath);
       if (!mailboxId) {
-        mailboxId = await ensureMailboxExists(session.apiUrl, authHeader, accountId, folderPath);
+        mailboxId = await ensureMailboxExists(client, folderPath);
         mailboxCache.set(folderPath, mailboxId);
       }
-      await moveEmailToMailbox(session.apiUrl, authHeader, accountId, rawEmail.id, mailboxId);
+      await moveEmailToMailbox(client, rawEmail.id, mailboxId);
       summary.moved += 1;
       console.log(`Moved already-processed ${rawEmail.id} -> folder=${folderPath}`);
     } catch (moveError) {
@@ -1234,10 +830,10 @@ async function runStalwartIngestion(
           try {
             let mailboxId = mailboxCache.get(folderPath);
             if (!mailboxId) {
-              mailboxId = await ensureMailboxExists(session.apiUrl, authHeader, accountId, folderPath);
+              mailboxId = await ensureMailboxExists(client, folderPath);
               mailboxCache.set(folderPath, mailboxId);
             }
-            await moveEmailToMailbox(session.apiUrl, authHeader, accountId, messageInput.external_id, mailboxId);
+            await moveEmailToMailbox(client, messageInput.external_id, mailboxId);
             summary.moved += 1;
             console.log(`Moved ${messageInput.external_id} -> folder=${folderPath}`);
           } catch (moveError) {
@@ -1276,10 +872,10 @@ async function runStalwartIngestion(
           try {
             let mailboxId = mailboxCache.get(folderPath);
             if (!mailboxId) {
-              mailboxId = await ensureMailboxExists(session.apiUrl, authHeader, accountId, folderPath);
+              mailboxId = await ensureMailboxExists(client, folderPath);
               mailboxCache.set(folderPath, mailboxId);
             }
-            await moveEmailToMailbox(session.apiUrl, authHeader, accountId, messageInput.external_id, mailboxId);
+            await moveEmailToMailbox(client, messageInput.external_id, mailboxId);
             summary.moved += 1;
             console.log(`Moved ${messageInput.external_id} -> folder=${folderPath}`);
           } catch (moveError) {
@@ -1421,10 +1017,7 @@ async function main() {
       let allOk = true;
       for (let i = 0; i < mailboxes.length; i++) {
         const mailbox = mailboxes[i];
-        const principal = buildStalwartImpersonationLogin(
-          relayCreds!.relayEmail,
-          mailbox,
-        );
+        const principal = `${mailbox}%${relayCreds!.relayEmail}`;
         const ok = await runStalwartIngestion(
           db,
           ai,
@@ -1452,10 +1045,7 @@ async function main() {
         );
         process.exit(1);
       }
-      ingestPrincipal = buildStalwartImpersonationLogin(
-        relayCreds!.relayEmail,
-        explicitMailbox,
-      );
+      ingestPrincipal = `${explicitMailbox}%${relayCreds!.relayEmail}`;
       logMailbox = explicitMailbox;
       const domainMailboxes =
         await db.listStalwartMailboxAddressesForDomain(domainKey);

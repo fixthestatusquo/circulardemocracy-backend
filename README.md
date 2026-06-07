@@ -27,7 +27,7 @@ For performance reasons, it should be noted that it's quite common that the same
 
 ### 🤖 Intelligent Message Classification
 
-- **AI-Powered Clustering**: Uses BGE-M3 embeddings via Cloudflare Workers AI for semantic message analysis
+- **AI-Powered Clustering**: Uses BGE-M3 embeddings for semantic message analysis
 - **Campaign Detection**: Automatically identifies which political campaign or issue a message relates to
 - **Multi-Language Support**: Processes messages in multiple languages with sentiment analysis capabilities
 - **Duplicate Detection**: Handles multiple messages from the same citizen with spam prevention
@@ -52,9 +52,9 @@ For performance reasons, it should be noted that it's quite common that the same
 
 - **Two-Tier Storage System**:
   - **Long-term**: Analytics data and model training (anonymized)
-  - **Short-term**: Personal information (deleted after reply sent)
-- **Data Minimization**: Personal data retained only as long as necessary
-- **Hashed Identifiers**: Citizen privacy protected through email hashing
+- **Data Minimization**: No personal data stored outside of the email server
+- **Hashed Identifiers**: Citizen privacy protected through email hashing in the database
+- **PII**: can de deleted as soon as the reply is sent
 
 ## Technical Architecture
 
@@ -62,9 +62,9 @@ For performance reasons, it should be noted that it's quite common that the same
 
 #### Message Processing Pipeline
 
-1. **Input Channels** → REST API, CLI, or Email (Stalwart webhook)
+1. **Input Channels** → REST API, CLI, or Email
 2. **Classification** → BGE-M3 embedding generation and campaign clustering
-3. **Storage** → Dual storage system (analytics + temporary personal data)
+3. **Storage** → Dual storage system (analytics + email with PII)
 4. **Response Management** → Template-based automated replies
 5. **Analytics** → Real-time dashboard and reporting
 
@@ -72,7 +72,7 @@ For performance reasons, it should be noted that it's quite common that the same
 
 **Long-term Storage (Analytics)**
 
-- Message ID (UUID)
+- Message ID
 - Channel source (API/email server)
 - Timestamp
 - Sender ID (hashed email)
