@@ -22,13 +22,15 @@ interface ImportArgs {
   mailboxEmail: string;
   csvFile: string;
   limit: number | null;
+  safe: boolean;
 }
 
 function parseArgs(): ImportArgs {
   const argv = minimist(process.argv.slice(2), {
     string: ["limit"],
-    boolean: ["help"],
+    boolean: ["help", "safe"],
     alias: { h: "help" },
+    default: { safe: true },
     unknown: (d: string) => {
       if (d[0] !== "-") return true;
       console.error(`Unknown option: ${d}`);
@@ -39,7 +41,7 @@ function parseArgs(): ImportArgs {
 
   if (argv.help) {
     console.error(
-      "Usage: npx tsx bin/import.ts <mailbox-email> <csv-file> [--limit N]",
+      "Usage: npx tsx bin/import.ts <mailbox-email> <csv-file> [--limit N] [--no-safe]",
     );
     process.exit(1);
   }
@@ -50,7 +52,7 @@ function parseArgs(): ImportArgs {
 
   if (!mailboxEmail || !csvFile) {
     console.error(
-      "Usage: npx tsx bin/import.ts <mailbox-email> <csv-file> [--limit N]",
+      "Usage: npx tsx bin/import.ts <mailbox-email> <csv-file> [--limit N] [--no-safe]",
     );
     process.exit(1);
   }
@@ -61,11 +63,11 @@ function parseArgs(): ImportArgs {
     process.exit(1);
   }
 
-  return { mailboxEmail, csvFile, limit };
+  return { mailboxEmail, csvFile, limit, safe: argv.safe };
 }
 
 async function main() {
-  const { mailboxEmail, csvFile, limit } = parseArgs();
+  const { mailboxEmail, csvFile, limit, safe } = parseArgs();
 
   // Read and parse CSV
   const csvContent = readFileSync(csvFile, "utf-8");
@@ -134,6 +136,43 @@ async function main() {
 
     // Strip template placeholders from the body text
     const bodyText = row.msg_body.replace(/\{\{target\.fields\.salutation\}\},\s*\n/g, "").trim();
+
+    // Safe mode: check if a message from this sender already exists nearby
+    if (safe) {
+      const rowTime = new Date(row.created_at).getTime();
+      const windowMs = 60 * 60 * 1000; // ±1 hour
+      const after = new Date(rowTime - windowMs).toISOString();
+      const before = new Date(rowTime + windowMs).toISOString();
+
+      const queryJson = await (client as any)._requestJson(session.apiUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          using: ["urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail"],
+          methodCalls: [
+            [
+              "Email/query",
+              {
+                accountId,
+                filter: {
+                  from: row.email,
+                  after,
+                  before,
+                },
+                limit: 1,
+              },
+              "c0",
+            ],
+          ],
+        }),
+      });
+
+      const ids = queryJson.methodResponses?.[0]?.[1]?.ids;
+      if (ids && ids.length > 0) {
+        console.log(`  Row ${i + 1}: Skipped (duplicate from ${row.email} near ${row.created_at})`);
+        continue;
+      }
+    }
 
     try {
       const json = await (client as any)._requestJson(session.apiUrl, {

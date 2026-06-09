@@ -1,6 +1,6 @@
 {
   "name": "circulardemocracy-backend",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Backend API for Circular Democracy - processing citizen messages to politicians",
   "main": "src/index.ts",
   "type": "module",
@@ -27,7 +27,7 @@
     "doc:build": "npm run doc:spec && npm run doc:html && npm run doc:md",
     "client:build": "npx swagger-typescript-api generate --path ./doc/openapi.json -o ./src/client -n api.ts",
     "db:start": "supabase start",
-   "type": "npx supabase gen types typescript --linked > src/types/supabase.ts",
+    "type": "npx supabase gen types typescript --linked > src/types/supabase.ts",
     "db:push": "npx supabase db push --linked",
     "db:diff": "supabase db diff -f",
     "functions:deploy": "supabase functions deploy",
@@ -38,10 +38,11 @@
     "@hono/zod-openapi": "^1.4.0",
     "@supabase/supabase-js": "^2.106.2",
     "@xenova/transformers": "^2.17.2",
+    "csv-parse": "^6.2.1",
     "dotenv": "^17.3.1",
     "hono": "^4.12.23",
-    "marked": "^18.0.4",
     "jmap-cli": "^2.3.0",
+    "marked": "^18.0.4",
     "zod": "^4.4.3"
   },
   "devDependencies": {
