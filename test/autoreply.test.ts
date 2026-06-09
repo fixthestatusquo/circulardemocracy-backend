@@ -178,7 +178,7 @@ describe("Scheduling", () => {
 
 describe("Email Layout", () => {
   describe("text_only layout", () => {
-    it("should render plain text only without HTML", () => {
+    it("should render plain text only with HTML version", () => {
       const result = renderEmailLayout({
         subject: "Test Subject",
         markdown_body: "# Hello\n\nThis is **bold** text.",
@@ -188,7 +188,10 @@ describe("Email Layout", () => {
       expect(result.subject).toBe("Test Subject");
       expect(result.textBody).toContain("Hello");
       expect(result.textBody).toContain("This is bold text");
-      expect(result.htmlBody).toBeUndefined();
+      expect(result.htmlBody).toBeTruthy();
+      expect(result.htmlBody).toContain("<h1>");
+      expect(result.htmlBody).toContain("Hello");
+      expect(result.htmlBody).toContain("<strong>");
     });
 
     it("should strip markdown formatting in text body", () => {
@@ -276,12 +279,14 @@ describe("Email Layout", () => {
         markdown_body: "Content",
         layout_type: "EP",
         politician_name: "John Doe",
+        politician_position: "Member of the European Parliament",
       });
 
       expect(result.htmlBody).toContain("🇪🇺");
-      expect(result.htmlBody).toContain("Member of the European Parliament: John Doe");
+      expect(result.htmlBody).toContain("Member of the European Parliament");
+      expect(result.htmlBody).toContain("John Doe");
       expect(result.textBody).toContain("🇪🇺");
-      expect(result.textBody).toContain("Member of the European Parliament: John Doe");
+      expect(result.textBody).toContain("Member of the European Parliament");
     });
   });
 

@@ -103,15 +103,20 @@ export class JMAPClient {
         to: email.to,
         subject: normalizeEmailSubject(email.subject),
         text: email.textBody || "",
-        htmlBody: email.htmlBody,
+        html: email.htmlBody,
         replyTo: email.replyTo,
         inReplyTo: email.inReplyTo?.[0],
         references: email.references,
       });
 
+      const emailSetResponse = (result as any)?.methodResponses?.[0]?.[1];
+      const createdEntry = emailSetResponse?.created;
+      const createdKey = createdEntry ? Object.keys(createdEntry)[0] : undefined;
+      const messageId = createdKey ? createdEntry[createdKey]?.id : undefined;
+
       return {
         success: true,
-        messageId: (result as any)?.created?.[Object.keys((result as any)?.created || {})[0]]?.id,
+        messageId,
       };
     } catch (error) {
       console.error("JMAP sendEmail failed:", error);

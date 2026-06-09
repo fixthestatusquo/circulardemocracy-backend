@@ -72,6 +72,30 @@ class MockDatabaseClient extends DatabaseClient {
     return null;
   }
 
+  async getMessageByExternalIdBare(externalId: string, channelSource: string) {
+    console.log(`[Mock DB] Message lookup bare: ${externalId}`);
+    if (externalId === "duplicate-id") {
+      return {
+        id: 999,
+        external_id: externalId,
+        channel: "api",
+        channel_source: channelSource,
+        politician_id: 1,
+        sender_hash: "hash",
+        campaign_id: 2,
+        classification_confidence: 0.9,
+        message_embedding: [0.1],
+        language: "en",
+        received_at: new Date().toISOString(),
+        duplicate_rank: 1,
+        processing_status: "unanswered",
+        // biome-ignore lint/suspicious/noExplicitAny: Mocking complex join result
+        campaigns: { id: 2, name: "Existing Campaign" } as any,
+      };
+    }
+    return null;
+  }
+
   async classifyAndAssignToCluster(
     _messageId: number,
     _embedding: number[],

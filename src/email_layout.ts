@@ -1,12 +1,12 @@
 // Email Layout Renderer - Renders email templates with different layouts
 // Supports text_only, standard_header, and EP layouts
 
-import { renderMarkdownToHtml, renderMarkdownToPlainText } from "./markdown";
 import {
-  renderStandardHeader,
-  renderEPHeader,
   type RenderedHeader,
+  renderEPHeader,
+  renderStandardHeader,
 } from "./headers";
+import { renderMarkdownToHtml, renderMarkdownToPlainText } from "./markdown";
 
 export type LayoutType = "text_only" | "standard_header" | "EP";
 
@@ -32,12 +32,13 @@ export interface RenderedEmail {
  */
 export function renderEmailLayout(input: EmailLayoutInput): RenderedEmail {
   const textBody = renderMarkdownToPlainText(input.markdown_body);
+  const htmlBody = renderMarkdownToHtml(input.markdown_body);
 
   if (input.layout_type === "text_only") {
-    return renderTextOnlyLayout(input.subject, textBody);
+    return renderTextOnlyLayout(input.subject, textBody, htmlBody);
   }
 
-  return renderWithHeader(input, textBody);
+  return renderWithHeader(input, textBody, htmlBody);
 }
 
 /**
@@ -46,11 +47,12 @@ export function renderEmailLayout(input: EmailLayoutInput): RenderedEmail {
 function renderTextOnlyLayout(
   subject: string,
   textBody: string,
+  htmlBody: string,
 ): RenderedEmail {
   return {
     subject,
     textBody,
-    htmlBody: undefined, // No HTML for text-only
+    htmlBody,
   };
 }
 
@@ -60,8 +62,9 @@ function renderTextOnlyLayout(
 function renderWithHeader(
   input: EmailLayoutInput,
   textBody: string,
+  htmlContent: string,
 ): RenderedEmail {
-  const htmlContent = renderMarkdownToHtml(input.markdown_body);
+  // htmlContent is pre-rendered from markdown by the caller
 
   let header: RenderedHeader;
   const headerInput = {

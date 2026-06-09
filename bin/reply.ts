@@ -26,10 +26,9 @@ export function parseArgs(args: string[]): CliFilters  {
     boolean: ["dry-run", "help"],
     alias: { h: "help" },
     unknown: (d: string) => {
-      const allowed = []; //merge with boolean and string?
       if (d[0] !== "-" ) return true;
-      if (allowed.includes(d.split("=")[0].slice(2))) return true;
-      console.error("unknown param", d);
+      console.error(`Unknown option: ${d}`);
+      process.exit(1);
       return false;
     },
   });
@@ -57,10 +56,6 @@ export function parseArgs(args: string[]): CliFilters  {
     console.error("--limit requires --politician-id");
     process.exit(1);
   }
-  if (argv.messageId !== undefined && politicianId === undefined) {
-    console.error("--message requires --politician-id");
-    process.exit(1);
-  }
 
   return {
     campaignId: typeof campaignId === "number" ? campaignId : undefined,
@@ -78,6 +73,15 @@ async function sendFilteredReplies(
   db: DatabaseClient,
   options: CliFilters,
 ): Promise<ProcessingResult> {
+  // If --message is given without --politician-id, resolve the politician from the message
+  if (options.messageId !== undefined && options.politicianId === undefined) {
+    const msg = await db.getMessageByExternalIdBare(options.messageId, "stalwart");
+    if (!msg) {
+      throw new Error(`Message ${options.messageId} not found`);
+    }
+    options.politicianId = msg.politician_id;
+  }
+
   if (options.messageId !== undefined && options.politicianId !== undefined) {
     console.log(`Processing specific message: ${options.messageId} for ${options.politicianId}`);
     return replyMessage(db, 
@@ -105,15 +109,24 @@ export async function previewReadyReplies(
   options: CliFilters,
 ): Promise<void> {
   let allReady: any[] = [];
-    const politicianId = await resolvePoliticianId(db, options);
   if (options.messageId !== undefined) {
-    const msg = await db.getMessageByExternalId
-      (options.messageId, 
-        "stalwart", 
-        options.politicianId || -1);
+    // If --message is given without --politician-id, resolve from the message
+    if (!options.politicianId) {
+      const msg = await db.getMessageByExternalIdBare(options.messageId, "stalwart");
+      if (msg) {
+        options.politicianId = msg.politician_id;
+      }
+    }
+    const politicianId = await resolvePoliticianId(db, options);
+    const msg = await db.getMessageByExternalId(
+      options.messageId, 
+      "stalwart", 
+      options.politicianId || -1,
+    );
     allReady = msg ? [msg] : [];
   } else {
     const campaignId = await resolveCampaignId(db, options);
+    const politicianId = await resolvePoliticianId(db, options);
 
     allReady = await db.getMessagesReadyToSend(MAX_RETRY_ATTEMPTS, {
       campaignId,

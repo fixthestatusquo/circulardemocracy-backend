@@ -852,6 +852,35 @@ export class DatabaseClient {
     }
   }
 
+  /**
+   * Looks up a message by external_id alone (without politician_id filter).
+   * Used by CLI when --message is provided without --politician-id.
+   */
+  async getMessageByExternalIdBare(
+    externalId: string,
+    channelSource: string,
+  ): Promise<(MessageInsert & { id: number; campaigns: Campaign }) | null> {
+    try {
+      const { data, error } = await this.supabase
+        .from("messages")
+        .select("*, campaigns(id, name, slug)")
+        .eq("external_id", externalId)
+        .eq("channel_source", channelSource)
+        .limit(1);
+
+      if (error) {
+        throw error;
+      }
+      if (!data || data.length === 0) {
+        return null;
+      }
+      return data[0] as MessageInsert & { id: number; campaigns: Campaign };
+    } catch (error) {
+      console.error("Error getting message by external ID:", error);
+      return null;
+    }
+  }
+
   // =============================================================================
   // REPLY TEMPLATE OPERATIONS
   // =============================================================================
@@ -1465,9 +1494,11 @@ export class DatabaseClient {
       embedding: number[];
       politicianId: number;
       campaignHint?: string;
-    }>
+    }>,
   ): Promise<ClassificationResult[]> {
-    const results: ClassificationResult[] = new Array(entries.length).fill(null);
+    const results: ClassificationResult[] = new Array(entries.length).fill(
+      null,
+    );
 
     // Step 1: Batch campaign hint lookup — one query for all unique hints
     const hintedEntries = entries
@@ -1534,7 +1565,11 @@ export class DatabaseClient {
     // Fill any remaining nulls (guard for correctness)
     for (let i = 0; i < results.length; i++) {
       if (!results[i]) {
-        results[i] = { campaign_id: null, campaign_slug: null, confidence: 0.1 };
+        results[i] = {
+          campaign_id: null,
+          campaign_slug: null,
+          confidence: 0.1,
+        };
       }
     }
 
@@ -1563,11 +1598,18 @@ export class DatabaseClient {
     try {
       const n = messageIds.length;
       const clusterIds: (number | null)[] = new Array(n).fill(null);
-      const orphans: Array<{ msgIdx: number; msgId: number; embedding: number[] }> = [];
+      const orphans: Array<{
+        msgIdx: number;
+        msgId: number;
+        embedding: number[];
+      }> = [];
 
       // Phase 1: Try to match each embedding to an existing cluster
       for (let i = 0; i < n; i++) {
-        const similarClusters = await this.findSimilarClusters(embeddings[i], 50);
+        const similarClusters = await this.findSimilarClusters(
+          embeddings[i],
+          50,
+        );
 
         if (similarClusters.length > 0) {
           const selectedCluster = [...similarClusters].sort((a, b) => {
@@ -1579,7 +1621,11 @@ export class DatabaseClient {
 
           clusterIds[i] = selectedCluster.clusterId;
         } else {
-          orphans.push({ msgIdx: i, msgId: messageIds[i], embedding: embeddings[i] });
+          orphans.push({
+            msgIdx: i,
+            msgId: messageIds[i],
+            embedding: embeddings[i],
+          });
         }
       }
 
@@ -1608,7 +1654,8 @@ export class DatabaseClient {
             (other, oj) =>
               oj !== oi &&
               clusterIds[other.msgIdx] === null &&
-              this._cosineDistance(orphans[oi].embedding, other.embedding) < 0.1,
+              this._cosineDistance(orphans[oi].embedding, other.embedding) <
+                0.1,
           );
 
           if (closeOrphans.length > 0) {
@@ -1780,7 +1827,10 @@ export class DatabaseClient {
   ): Promise<void> {
     if (updates.length === 0) return;
 
-    const groups = new Map<string, { fields: Record<string, unknown>; ids: number[] }>();
+    const groups = new Map<
+      string,
+      { fields: Record<string, unknown>; ids: number[] }
+    >();
     for (const u of updates) {
       const key = JSON.stringify(u.fields);
       if (!groups.has(key)) {
@@ -1791,10 +1841,7 @@ export class DatabaseClient {
 
     await Promise.all(
       [...groups.values()].map(({ fields, ids }) =>
-        this.supabase
-          .from("messages")
-          .update(fields)
-          .in("id", ids),
+        this.supabase.from("messages").update(fields).in("id", ids),
       ),
     );
   }
