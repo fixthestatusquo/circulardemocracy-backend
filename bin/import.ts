@@ -22,15 +22,16 @@ interface ImportArgs {
   mailboxEmail: string;
   csvFile: string;
   limit: number | null;
+  start: number;
   safe: boolean;
 }
 
 function parseArgs(): ImportArgs {
   const argv = minimist(process.argv.slice(2), {
-    string: ["limit"],
+    string: ["limit", "start"],
     boolean: ["help", "safe"],
     alias: { h: "help" },
-    default: { safe: true },
+    default: { safe: true, start: "0" },
     unknown: (d: string) => {
       if (d[0] !== "-") return true;
       console.error(`Unknown option: ${d}`);
@@ -41,7 +42,7 @@ function parseArgs(): ImportArgs {
 
   if (argv.help) {
     console.error(
-      "Usage: npx tsx bin/import.ts <mailbox-email> <csv-file> [--limit N] [--no-safe]",
+      "Usage: npx tsx bin/import.ts <mailbox-email> <csv-file> [--limit N] [--start N] [--no-safe]",
     );
     process.exit(1);
   }
@@ -52,7 +53,7 @@ function parseArgs(): ImportArgs {
 
   if (!mailboxEmail || !csvFile) {
     console.error(
-      "Usage: npx tsx bin/import.ts <mailbox-email> <csv-file> [--limit N] [--no-safe]",
+      "Usage: npx tsx bin/import.ts <mailbox-email> <csv-file> [--limit N] [--start N] [--no-safe]",
     );
     process.exit(1);
   }
@@ -63,11 +64,17 @@ function parseArgs(): ImportArgs {
     process.exit(1);
   }
 
-  return { mailboxEmail, csvFile, limit, safe: argv.safe };
+  const start = Number(argv.start);
+  if (isNaN(start) || start < 0) {
+    console.error("Error: --start must be a non-negative integer");
+    process.exit(1);
+  }
+
+  return { mailboxEmail, csvFile, limit, start, safe: argv.safe };
 }
 
 async function main() {
-  const { mailboxEmail, csvFile, limit, safe } = parseArgs();
+  const { mailboxEmail, csvFile, limit, start, safe } = parseArgs();
 
   // Read and parse CSV
   const csvContent = readFileSync(csvFile, "utf-8");
@@ -83,7 +90,16 @@ async function main() {
     process.exit(1);
   }
 
-  const toImport = limit ? rows.slice(0, limit) : rows;
+  const sliced = start > 0 ? rows.slice(start) : rows;
+  if (sliced.length === 0) {
+    console.error(`Error: --start=${start} skips all ${rows.length} rows`);
+    process.exit(1);
+  }
+  if (start > 0) {
+    console.log(`Skipped first ${start} rows (${rows.length - sliced.length} of ${rows.length}), importing from row ${start + 1}`);
+  }
+
+  const toImport = limit ? sliced.slice(0, limit) : sliced;
 
   console.log(`Importing ${toImport.length} messages into ${mailboxEmail}...`);
 
@@ -127,6 +143,41 @@ async function main() {
   let imported = 0;
   let failed = 0;
 
+  /**
+   * Make a JMAP request, retrying up to 5 times on 429 rate-limit responses
+   * with a 1-second delay between attempts.
+   */
+  async function requestWithRetry(
+    client: any,
+    url: string,
+    options: { method: string; headers: Record<string, string>; body: string },
+    retries = 5,
+  ): Promise<any> {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        const result = await (client as any)._requestJson(url, options);
+        if (result?.status === 429) {
+          console.log("waiting ...");
+          await new Promise((r) => setTimeout(r, 1000));
+          continue;
+        }
+        return result;
+      } catch (err: any) {
+        const isRateLimit =
+          err?.status === 429 ||
+          err?.cause?.status === 429 ||
+          (typeof err === "object" && err?.type === "about:blank" && err?.status === 429);
+
+        if (isRateLimit && attempt < retries) {
+          console.log(`  Rate limited (attempt ${attempt}/${retries}), waiting 1s before retry…`);
+          await new Promise((r) => setTimeout(r, 1000));
+          continue;
+        }
+        throw err;
+      }
+    }
+  }
+
   for (let i = 0; i < toImport.length; i++) {
     const row = toImport[i];
     const senderName = `${row.first_name} ${row.last_name}`.trim();
@@ -144,7 +195,7 @@ async function main() {
       const after = new Date(rowTime - windowMs).toISOString();
       const before = new Date(rowTime + windowMs).toISOString();
 
-      const queryJson = await (client as any)._requestJson(session.apiUrl, {
+      const queryJson = await requestWithRetry(client, session.apiUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -175,7 +226,7 @@ async function main() {
     }
 
     try {
-      const json = await (client as any)._requestJson(session.apiUrl, {
+      const json = await requestWithRetry(client, session.apiUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -215,6 +266,7 @@ async function main() {
         console.error(
           `Row ${i + 1}: Failed to import - ${JSON.stringify(notCreated)}`,
         );
+        console.log (json); process.exit(1);
         failed++;
       }
     } catch (err) {
