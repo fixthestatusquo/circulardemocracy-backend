@@ -186,7 +186,7 @@ async function main() {
       : new Date().toISOString();
 
     // Strip template placeholders from the body text
-    const bodyText = row.msg_body.replace(/\{\{target\.fields\.salutation\}\},\s*\n/g, "").trim();
+    const bodyText = row.msg_body.replace(/\{\{target\.fields\.salutation\}\},?\s*\n/g, "").trim();
 
     // Safe mode: check if a message from this sender already exists nearby
     if (safe) {
@@ -220,7 +220,7 @@ async function main() {
 
       const ids = queryJson.methodResponses?.[0]?.[1]?.ids;
       if (ids && ids.length > 0) {
-        console.log(`  Row ${i + 1}: Skipped (duplicate from ${row.email} near ${row.created_at})`);
+        console.log(`  Row ${start + i + 1}: Skipped (duplicate from ${row.email} near ${row.created_at})`);
         continue;
       }
     }
@@ -264,13 +264,13 @@ async function main() {
         const notCreated =
           json.methodResponses?.[0]?.[1]?.notCreated?.[`msg-${i}`];
         console.error(
-          `Row ${i + 1}: Failed to import - ${JSON.stringify(notCreated)}`,
+          `Row ${start + i + 1}: Failed to import - ${JSON.stringify(notCreated)}`,
         );
         console.log (json); process.exit(1);
         failed++;
       }
     } catch (err) {
-      console.error(`Row ${i + 1}: Error - ${err}`);
+      console.error(`Row ${start + i + 1}: Error - ${err}`);
       failed++;
     }
   }
