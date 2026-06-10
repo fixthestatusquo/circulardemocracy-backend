@@ -1377,6 +1377,7 @@ export class DatabaseClient {
       politicianId?: number;
       campaignId?: number;
       limit?: number;
+      desc?: boolean;
     } = {},
   ): Promise<
     Array<{
@@ -1403,7 +1404,7 @@ export class DatabaseClient {
       .eq("processing_status", "unanswered") // Only pick up messages not already being sent or replied
       .is("reply_sent_at", null)
       .in("campaign_id", campaignIds)
-      //      .eq("duplicate_rank", 0)
+      .eq("duplicate_rank", 0)
       .lt("reply_retry_count", maxRetryAttempts)
       .or("reply_scheduled_at.is.null,reply_scheduled_at.lte.now()");
 
@@ -1419,7 +1420,7 @@ export class DatabaseClient {
       query = query.limit(filters.limit);
     }
 
-    query = query.order("received_at", { ascending: true });
+    query = query.order("received_at", { ascending: !filters.desc });
 
     const { data, error } = await query;
 

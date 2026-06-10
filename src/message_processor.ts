@@ -187,6 +187,7 @@ export async function processMessage(
     await db.updateMessageFields(messageId, {
       duplicate_rank: duplicateRank,
       classification_confidence: classification.confidence,
+      ...(duplicateRank > 0 ? { processing_status: "ignored" } : {}),
     });
 
     await db.upsertSupporter(
@@ -370,7 +371,10 @@ export async function processMessageBatch(
 
       rankUpdates.push({
         messageId: messageIds[i],
-        fields: { duplicate_rank: rank },
+        fields: {
+          duplicate_rank: rank,
+          ...(rank > 0 ? { processing_status: "ignored" } : {}),
+        },
       });
 
       supporterEntries.push({

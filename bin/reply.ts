@@ -23,7 +23,7 @@ const MAX_RETRY_ATTEMPTS = 10;
 export function parseArgs(args: string[]): CliFilters  {
   const argv = minimist(args, {
     string: ["campaign-name", "politician-name", "campaign-id","politician-id","limit","politician-name","message"],
-    boolean: ["dry-run", "help"],
+    boolean: ["dry-run", "help", "desc"],
     alias: { h: "help" },
     unknown: (d: string) => {
       if (d[0] !== "-" ) return true;
@@ -64,6 +64,7 @@ export function parseArgs(args: string[]): CliFilters  {
     politicianName:
       typeof politicianName === "string" ? politicianName : undefined,
     dryRun: argv["dry-run"] === true,
+    desc: argv.desc === true,
     limit: Number(argv.limit) || undefined,
     messageId: argv.message,
   };
@@ -101,6 +102,7 @@ async function sendFilteredReplies(
     campaignId,
     politicianId,
     limit: options.limit,
+    desc: options.desc,
   });
 }
 
@@ -132,6 +134,7 @@ export async function previewReadyReplies(
       campaignId,
       politicianId,
       limit: options.limit,
+      desc: options.desc,
     });
   }
 
@@ -184,6 +187,7 @@ OPTIONS:
   --politician-name <hint> Filter by politician (email exact or partial)
   --limit <n>             Limit the number of emails processed (requires --politician-id)
   --message <id>          Process only this specific message ID
+  --desc                  Process newest messages first (default: oldest first)
   --dry-run               Preview what would be sent without sending mail
   -h, --help              Show this help message
 

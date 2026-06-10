@@ -8,6 +8,7 @@ export interface CliFilters {
   dryRun?: boolean;
   limit?: number;
   messageId?: string;
+  desc?: boolean;
 }
 
 export async function resolveCampaignId(
