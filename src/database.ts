@@ -374,7 +374,7 @@ export class DatabaseClient {
         console.log(
           `  🔍 RPC returned ${data.length} messages, distances: ${data
             .slice(0, 3)
-            .map((m: any) => m.distance?.toFixed(4))
+            .map((m: any) => m.distance?.toFixed(6))
             .join(", ")}`,
         );
       }
@@ -420,12 +420,27 @@ export class DatabaseClient {
     embedding: number[],
     politicianId: number,
   ): Promise<number | null> {
+    return this._retryAssignToCluster(messageId, embedding, politicianId, 0);
+  }
+
+  private async _retryAssignToCluster(
+    messageId: number,
+    embedding: number[],
+    politicianId: number,
+    attempt: number,
+    maxRetries = 10,
+  ): Promise<number | null> {
     const lockAcquired = await this.acquireGlobalClusteringLock();
 
     if (!lockAcquired) {
-      console.log(`  ⏳ Could not acquire global clustering lock, retrying...`);
-      await new Promise((resolve) => setTimeout(resolve, 100));
-      return this.assignMessageToCluster(messageId, embedding, politicianId);
+      if (attempt >= maxRetries) {
+        console.log(`  ⏳ Could not acquire global clustering lock after ${maxRetries} retries, skipping`);
+        return null;
+      }
+      const delay = 100 * Math.pow(2, attempt);
+      console.log(`  ⏳ Could not acquire global clustering lock, retrying (${attempt + 1}/${maxRetries}, delay ${delay}ms)...`);
+      await new Promise((resolve) => setTimeout(resolve, delay));
+      return this._retryAssignToCluster(messageId, embedding, politicianId, attempt + 1, maxRetries);
     }
 
     try {
@@ -1587,12 +1602,26 @@ export class DatabaseClient {
     _politicianId: number,
   ): Promise<(number | null)[]> {
     if (messageIds.length === 0) return [];
+    return this._retryBatchAssign(messageIds, embeddings, _politicianId, 0);
+  }
 
+  private async _retryBatchAssign(
+    messageIds: number[],
+    embeddings: number[][],
+    _politicianId: number,
+    attempt: number,
+    maxRetries = 10,
+  ): Promise<(number | null)[]> {
     const lockAcquired = await this.acquireGlobalClusteringLock();
     if (!lockAcquired) {
-      console.log("  ⏳ Could not acquire global clustering lock, retrying...");
-      await new Promise((resolve) => setTimeout(resolve, 100));
-      return this.batchAssignToClusters(messageIds, embeddings, _politicianId);
+      if (attempt >= maxRetries) {
+        console.log(`  ⏳ Could not acquire global clustering lock after ${maxRetries} retries, skipping batch`);
+        return new Array(messageIds.length).fill(null);
+      }
+      const delay = 100 * Math.pow(2, attempt);
+      console.log(`  ⏳ Could not acquire global clustering lock, retrying (${attempt + 1}/${maxRetries}, delay ${delay}ms)...`);
+      await new Promise((resolve) => setTimeout(resolve, delay));
+      return this._retryBatchAssign(messageIds, embeddings, _politicianId, attempt + 1, maxRetries);
     }
 
     try {
