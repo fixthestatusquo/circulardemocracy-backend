@@ -242,7 +242,7 @@ describe("DatabaseClient", () => {
       );
 
       expect(result.campaign_id).toBe(4);
-      expect(result.campaign_name).toBe("Healthcare Reform");
+      expect(result.campaign_slug).toBe("Healthcare Reform");
       expect(result.confidence).toBe(0.95); // 1 - distance = 1 - 0.05 = 0.95
     });
   });
@@ -255,7 +255,8 @@ describe("DatabaseClient", () => {
 
       const result = await db.getDuplicateRank("hash123", 1, 2);
 
-      expect(result).toBe(3);
+      // 3 total rows in DB → rank 2 (2 prior messages from this sender)
+      expect(result).toBe(2);
     });
 
     it("should return 0 when no duplicates found", async () => {

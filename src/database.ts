@@ -791,7 +791,11 @@ export class DatabaseClient {
       if (error) {
         throw error;
       }
-      return count || 0;
+      // Count includes the current message already in the DB, so subtract 1
+      // to get the number of prior messages from this sender.
+      // Rank 0 = first message (eligible for auto-reply).
+      const rank = Math.max(0, (count || 0) - 1);
+      return rank;
     } catch (error) {
       console.error("Error getting duplicate rank:", error);
       return 0;
@@ -1797,15 +1801,35 @@ export class DatabaseClient {
 
       if (error) throw error;
 
-      const counter = new Map<string, number>();
+      // Count total rows in DB per (sender_hash, politician_id, campaign_id)
+      const totalCounter = new Map<string, number>();
       for (const row of data || []) {
         const key = `${row.sender_hash}:${politicianId}:${row.campaign_id}`;
-        counter.set(key, (counter.get(key) || 0) + 1);
+        totalCounter.set(key, (totalCounter.get(key) || 0) + 1);
       }
+
+      // Count how many entries in this batch share each key
+      const batchCounter = new Map<string, number>();
+      for (const entry of entries) {
+        const key = `${entry.senderHash}:${entry.politicianId}:${entry.campaignId}`;
+        batchCounter.set(key, (batchCounter.get(key) || 0) + 1);
+      }
+
+      // Track position within batch per key to assign sequential ranks
+      const batchPosition = new Map<string, number>();
 
       for (const entry of entries) {
         const key = `${entry.senderHash}:${entry.politicianId}:${entry.campaignId}`;
-        result.set(key, counter.get(key) || 0);
+        const totalInDb = totalCounter.get(key) || 0;
+        const batchCount = batchCounter.get(key) || 0;
+        const pos = batchPosition.get(key) || 0;
+        batchPosition.set(key, pos + 1);
+
+        // Messages in this batch are already inserted, so subtract batch count
+        // to get pre-existing count, then add position within batch.
+        // Rank 0 = first message from this sender (eligible for auto-reply).
+        const rank = Math.max(0, totalInDb - batchCount + pos);
+        result.set(key, rank);
       }
     } catch (error) {
       console.error("Error in batchGetDuplicateRanks:", error);

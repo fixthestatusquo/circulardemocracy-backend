@@ -58,7 +58,7 @@ describe("message_processor", () => {
       id: 1,
       campaign_id: 2,
       duplicate_rank: 5,
-      campaigns: { id: 2, name: "Existing Campaign" },
+      campaigns: { id: 2, name: "Existing Campaign", slug: "Existing Campaign" },
     } as any);
 
     const result = await processMessage(mockDb, mockAi as any, validInput);
@@ -66,7 +66,7 @@ describe("message_processor", () => {
     expect(result.success).toBe(false);
     expect(result.status).toBe("duplicate");
     expect(result.campaign_id).toBe(2);
-    expect(result.campaign_name).toBe("Existing Campaign");
+    expect(result.campaign_slug).toBe("Existing Campaign");
     expect(mockDb.getMessageByExternalId).toHaveBeenCalledWith(
       "ext-123",
       "unknown",

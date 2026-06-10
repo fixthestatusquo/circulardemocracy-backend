@@ -119,7 +119,6 @@ export async function processMessage(
 
   if (existingMessage) {
     console.log("existing message", existingMessage);
-    process.exit(1);
     let campaignName = "Unknown";
     let campaignId = existingMessage.campaign_id;
 
@@ -178,8 +177,6 @@ export async function processMessage(
     politician.id,
     data.campaign_hint,
   );
-  console.log("new", classification);
-  process.exit(1);
   let duplicateRank = 0;
   if (classification.campaign_id !== null) {
     duplicateRank = await db.getDuplicateRank(
