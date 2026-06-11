@@ -43,7 +43,8 @@ Options:
 
 The script also looks up an existing user with the same email in the auth
 system and grants them staff access to this politician (politician_staff row).
-Requires SUPABASE_SERVICE_ROLE_KEY for the staff lookup.
+If the user doesn't exist, it creates one (requires SUPABASE_KEY with
+sufficient admin permissions, e.g. a service_role key).
 `);
     return;
   }
@@ -57,21 +58,15 @@ Requires SUPABASE_SERVICE_ROLE_KEY for the staff lookup.
 
   const supabaseUrl = process.env.SUPABASE_URL;
   const supabaseKey = process.env.SUPABASE_KEY;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
   if (!supabaseUrl || !supabaseKey) {
     console.error("Error: SUPABASE_URL and SUPABASE_KEY must be set");
     process.exit(1);
   }
 
-  // Use service role key for admin operations if available
-  const adminClient = serviceRoleKey
-    ? createClient(supabaseUrl, serviceRoleKey, {
-        auth: { autoRefreshToken: false, persistSession: false },
-      })
-    : null;
-
-  const client = createClient(supabaseUrl, supabaseKey);
+  const client = createClient(supabaseUrl, supabaseKey, {
+    auth: { autoRefreshToken: false, persistSession: false },
+  });
 
   // Derive name from email if not provided (first.last@domain → First Last)
   const derivedName =
@@ -131,44 +126,63 @@ Requires SUPABASE_SERVICE_ROLE_KEY for the staff lookup.
     console.log(JSON.stringify(politician, null, 2));
 
     // Step 2: Grant staff access to user with same email
-    if (!adminClient) {
-      console.log(
-        "\n⚠️  SUPABASE_SERVICE_ROLE_KEY not set — skipping staff access grant.\n" +
-          "   Set it and re-run, or manually insert a row in politician_staff:\n" +
+    console.log(`\n🔍 Looking up auth user by email: ${email}`);
+
+    let userId: string | null = null;
+
+    // Try to find existing user via admin API
+    const { data: authUsers, error: listError } =
+      await client.auth.admin.listUsers();
+
+    if (!listError && authUsers?.users) {
+      const matched = authUsers.users.find(
+        (u) => u.email?.toLowerCase() === email.toLowerCase(),
+      );
+      if (matched) {
+        userId = matched.id;
+        console.log(`✅ Found existing user: ${matched.email}`);
+      }
+    }
+
+    // Create user if not found
+    if (!userId) {
+      console.log(`ℹ️  No user found with email ${email}, creating...`);
+      const { data: newUser, error: createUserError } =
+        await client.auth.admin.createUser({
+          email,
+          email_confirm: true,
+        });
+
+      if (createUserError) {
+        console.error(
+          `❌ Failed to create user: ${createUserError.message}`,
+        );
+        if (listError) {
+          console.error(
+            `   Also failed to list users: ${listError.message}`,
+          );
+        }
+        console.log(
+          `\n   To create manually:\n` +
           `   INSERT INTO politician_staff (user_id, politician_id, role)\n` +
           `   VALUES ('<auth-user-uuid>', ${politician.id}, 'staff');`,
-      );
-      return;
+        );
+        process.exit(1);
+      }
+
+      userId = newUser.user.id;
+      console.log(`✅ Created user: ${newUser.user.email} (${userId})`);
     }
 
-    console.log(`\n🔍 Looking up auth user by email: ${email}`);
-    const { data: authUsers, error: listError } =
-      await adminClient.auth.admin.listUsers();
-
-    if (listError) {
-      console.error(`❌ Failed to list auth users: ${listError.message}`);
-      process.exit(1);
-    }
-
-    const matchedUser = authUsers?.users?.find(
-      (u) => u.email?.toLowerCase() === email.toLowerCase(),
+    // Insert or update politician_staff row
+    const { error: staffError } = await client.from("politician_staff").upsert(
+      {
+        user_id: userId,
+        politician_id: politician.id,
+        role: "staff",
+      },
+      { onConflict: "user_id, politician_id" },
     );
-
-    if (!matchedUser) {
-      console.log(
-        `ℹ️  No auth user found with email ${email}. Staff access not granted.`,
-      );
-      return;
-    }
-
-    const userId = matchedUser.id;
-    console.log(`✅ Found user: ${matchedUser.email} (${userId})`);
-
-    const { error: staffError } = await client.from("politician_staff").insert({
-      user_id: userId,
-      politician_id: politician.id,
-      role: "staff",
-    });
 
     if (staffError) {
       console.error(`❌ Error granting staff access: ${staffError.message}`);
@@ -176,7 +190,7 @@ Requires SUPABASE_SERVICE_ROLE_KEY for the staff lookup.
     }
 
     console.log(
-      `✅ Staff access granted for ${matchedUser.email} on politician ${politician.id}`,
+      `✅ Staff access granted for ${email} on politician ${politician.id}`,
     );
   } catch (error) {
     console.error(
