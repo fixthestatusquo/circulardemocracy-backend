@@ -854,7 +854,7 @@ async function runStalwartIngestion(
     while (pageNum < maxPages && (!hasExplicitLimit || totalValid < options.limit!)) {
       const result = await jmapQueryWithBodies(client, filter, batchSize, position);
       if (result.emails.length === 0) {
-        console.log(`${prefix}No more emails returned at position ${position}/${result.total}.`);
+        console.log(`${prefix}End of mailbox (fetched ${rawEmails.length} total).`);
         break;
       }
       // Detect duplicate pages (server ignoring position parameter)
