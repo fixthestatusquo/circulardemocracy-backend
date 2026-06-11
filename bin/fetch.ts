@@ -853,7 +853,10 @@ async function runStalwartIngestion(
 
     while (pageNum < maxPages && (!hasExplicitLimit || totalValid < options.limit!)) {
       const result = await jmapQueryWithBodies(client, filter, batchSize, position);
-      if (result.emails.length === 0) break;
+      if (result.emails.length === 0) {
+        console.log(`${prefix}No more emails returned at position ${position}/${result.total}.`);
+        break;
+      }
       // Detect duplicate pages (server ignoring position parameter)
       const alreadySeen = pageNum > 0 && rawEmails.length > 0 && rawEmails[0].id === result.emails[0].id;
       if (alreadySeen) {
@@ -863,6 +866,12 @@ async function runStalwartIngestion(
       rawEmails.push(...result.emails);
       position = result.position + result.emails.length;
       pageNum++;
+
+      // Stop if we've reached the total known results
+      if (result.total > 0 && position >= result.total) {
+        console.log(`${prefix}Reached end of mailbox (${result.total} total).`);
+        break;
+      }
 
       // Check which emails in this page are already processed
       const pageAlreadyProcessed = await getAlreadyProcessedExternalIds(
