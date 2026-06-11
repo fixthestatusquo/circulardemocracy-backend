@@ -110,6 +110,7 @@ const turndownService = new Turndown({
 function parseStalwartArgs(args: string[]): StalwartFetchOptions {
   const argv = minimist(args, {
     string: [
+      "politician-id",
       "politician-name",
       "since",
       "message-id",
@@ -120,6 +121,12 @@ function parseStalwartArgs(args: string[]): StalwartFetchOptions {
     ],
     boolean: ["process-all", "dry-run", "help"],
     alias: { h: "help" },
+    unknown: (d: string) => {
+      if (d[0] !== "-") return true;
+      console.error(`Unknown option: ${d}`);
+      process.exit(1);
+      return false;
+    },
   });
 
   if (argv.help) {
@@ -127,13 +134,19 @@ function parseStalwartArgs(args: string[]): StalwartFetchOptions {
     process.exit(0);
   }
 
-  const politicianId = argv["politician-id"];
+  const politicianIdRaw = argv["politician-id"];
   const politicianName = argv["politician-name"];
 
-  if (politicianId !== undefined && politicianName !== undefined) {
+  if (politicianIdRaw !== undefined && politicianName !== undefined) {
     console.error("Use only one of --politician-id or --politician-name");
     process.exit(1);
   }
+
+  const politicianId = typeof politicianIdRaw === "string"
+    ? Number.parseInt(politicianIdRaw, 10)
+    : typeof politicianIdRaw === "number"
+      ? politicianIdRaw
+      : undefined;
 
   const sinceValue = argv.since;
   if (typeof sinceValue === "string" && Number.isNaN(Date.parse(sinceValue))) {
@@ -525,7 +538,7 @@ function createCliCompatibleDb(db: DatabaseClient): DatabaseClient {
       if (hintCampaign) {
         return {
           campaign_id: hintCampaign.id,
-          campaign_slug: hintCampaign.name,
+          campaign_slug: hintCampaign.slug,
           confidence: 0.95,
         };
       }
