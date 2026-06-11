@@ -863,11 +863,13 @@ async function runStalwartIngestion(
         if (pageAlreadyProcessed.has(rawEmail.id)) continue;
 
         // Detect and handle bounce (DSN) emails
-        if (isBounceEmail(rawEmail)) {
+        const bounceAttach: { blobId?: string; type?: string } | undefined =
+          ((rawEmail as any).attachments || []).find(
+            (a: { type?: string }) => a.type === "message/rfc822",
+          );
+        const isBounce = isBounceEmail(rawEmail) || !!bounceAttach;
+        if (isBounce) {
           summary.bounced++;
-          const attachments: Array<{ blobId?: string; type?: string }> | undefined =
-            (rawEmail as any).attachments;
-          const bounceAttach = attachments?.find((a) => a.type === "message/rfc822");
           if (bounceAttach?.blobId) {
             try {
               const session = await (client as any)._discoverSession();
@@ -880,16 +882,28 @@ async function runStalwartIngestion(
                 await db.updateMessageFields(bouncedId, {
                   processing_status: "bounced",
                 });
-                console.log(`Bounced message ${rawEmail.id} -> matched message ${bouncedId}`);
+                console.log(`Bounced ${rawEmail.id} -> matched message ${bouncedId}`);
               } else {
-                console.log(`Bounced message ${rawEmail.id} (no matching reply Message-ID found)`);
+                console.log(`Bounced ${rawEmail.id} (no matching reply Message-ID)`);
               }
             } catch (dlError) {
               console.warn(`Failed to process bounce ${rawEmail.id}: ${dlError}`);
             }
           } else {
-            console.log(`Bounced message ${rawEmail.id} (no message/rfc822 attachment)`);
+            console.log(`Bounced ${rawEmail.id} (no message/rfc822 attachment)`);
           }
+
+          // Move the bounce email to trash
+          try {
+            const trashId = await ensureMailboxExists(client, "Trash");
+            if (trashId) {
+              await moveEmailToMailbox(client, rawEmail.id, trashId);
+              console.log(`Moved bounce ${rawEmail.id} to Trash`);
+            }
+          } catch (moveError) {
+            console.warn(`Failed to move bounce ${rawEmail.id} to Trash: ${moveError}`);
+          }
+
           continue;
         }
 

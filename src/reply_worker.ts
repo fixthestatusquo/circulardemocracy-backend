@@ -241,7 +241,7 @@ async function sendPoliticianBatch(
     }
 
     // Process messages in batches via sendEmails (single JMAP request per group).
-    const CHUNK_SIZE = 10;
+    const CHUNK_SIZE = 20;
     for (let i = 0; i < messages.length; i += CHUNK_SIZE) {
       const chunk = messages.slice(i, i + CHUNK_SIZE);
 
@@ -341,7 +341,7 @@ async function sendPoliticianBatch(
           });
 
           const domain = outboundIdentity.fromEmail.split("@")[1] || "circulardemocracy.org";
-          const replyMessageId = `<reply-${encode32(message.id)}@${domain}>`;
+          const replyMessageId = `reply-${encode32(message.id)}@${domain}`;
 
           const email: EmailMessage = {
             from: outboundIdentity.fromEmail,
@@ -433,8 +433,6 @@ async function sendPoliticianBatch(
           }
         }
       }
-      });
-      await Promise.all(tasks);
     }
 
     return result;
@@ -665,7 +663,7 @@ async function sendReply(
   });
 
   const domain = outboundIdentity.fromEmail.split("@")[1] || "circulardemocracy.org";
-  const replyMessageId = `<reply-${encode32(message.id)}@${domain}>`;
+  const replyMessageId = `reply-${encode32(message.id)}@${domain}`;
 
   const email: EmailMessage = {
     from: outboundIdentity.fromEmail,

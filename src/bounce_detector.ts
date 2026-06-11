@@ -33,7 +33,7 @@ const DSN_SUBJECT_PATTERNS = [
   "bounce",
 ];
 
-const REPLY_MESSAGE_ID_RE = /^Message-ID:\s*<reply-([A-Za-z0-9]+)@/im;
+const REPLY_MESSAGE_ID_RE = /^Message-ID:\s*<?reply-([A-Za-z0-9]+)@/im;
 
 /**
  * Check whether a JMAP email looks like a bounce/DSN based on its

@@ -223,7 +223,6 @@ async function main(): Promise<void> {
     }
 
     const result = await sendFilteredReplies(db, options);
-    console.log(JSON.stringify(result, null, 2));
 
     if (result.failed > 0) {
       process.exit(1);
