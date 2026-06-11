@@ -811,32 +811,36 @@ async function runStalwartIngestion(
       }
     }
   } else {
-    const filter: Record<string, unknown> | null = options.since
-      ? { operator: "AND", conditions: [buildMailboxFilter(), { after: toIsoDate(options.since) }] }
-      : options.processAll
-        ? buildMailboxFilter()
-        : null;
     const sourceInfo = options.folder ? `Inbox + ${options.folder}` : "Inbox";
     const sinceInfo = options.since ? ` since ${toIsoDate(options.since)}` : "";
     console.log(`Fetching messages from ${sourceInfo}${sinceInfo}`);
 
-    // Paginate through messages until we have enough valid (unprocessed) ones
+    // Paginate through messages until we have enough valid (unprocessed) ones.
+    // Using date-based pagination (after) instead of position to avoid
+    // cursor invalidation when messages are moved out of the inbox.
     const batchSize = 50;
     const hasExplicitLimit = options.limit !== undefined;
-    let position = 0;
+    let afterTimestamp = options.since ? toIsoDate(options.since) : null;
     let pageNum = 0;
     const maxPages = 100;
     let totalValid = 0;
 
+    const buildPageFilter = (after: string | null): Record<string, unknown> | null => {
+      const conditions: Record<string, unknown>[] = [buildMailboxFilter()];
+      if (after) conditions.push({ after });
+      return { operator: "AND", conditions };
+    };
+
     if (options.dryRun) {
       // For dry run: collect all valid messages first, then print
       while (pageNum < maxPages && (!hasExplicitLimit || validMessages.length < options.limit!)) {
-        const result = await jmapQueryWithBodies(client, filter, batchSize, position);
+        const pageFilter = buildPageFilter(afterTimestamp);
+        const result = await jmapQueryWithBodies(client, pageFilter, batchSize);
         if (result.emails.length === 0) break;
         const alreadySeen = pageNum > 0 && rawEmails.length > 0 && rawEmails[0].id === result.emails[0].id;
         if (alreadySeen) { console.log(`${prefix}Server returned same page; stopping.`); break; }
         rawEmails.push(...result.emails);
-        position = result.position + result.emails.length;
+        afterTimestamp = toIsoDate(result.emails[result.emails.length - 1].receivedAt);
         pageNum++;
         const pa = await getAlreadyProcessedExternalIds(db, result.emails.map((e) => e.id), politicianId);
         for (const [id, info] of pa) allAlreadyProcessed.set(id, info);
@@ -852,7 +856,8 @@ async function runStalwartIngestion(
     }
 
     while (pageNum < maxPages && (!hasExplicitLimit || totalValid < options.limit!)) {
-      const result = await jmapQueryWithBodies(client, filter, batchSize, position);
+      const pageFilter = buildPageFilter(afterTimestamp);
+      const result = await jmapQueryWithBodies(client, pageFilter, batchSize);
       if (result.emails.length === 0) {
         console.log(`${prefix}End of mailbox (fetched ${rawEmails.length} total).`);
         break;
@@ -864,14 +869,8 @@ async function runStalwartIngestion(
         break;
       }
       rawEmails.push(...result.emails);
-      position = result.position + result.emails.length;
+      afterTimestamp = toIsoDate(result.emails[result.emails.length - 1].receivedAt);
       pageNum++;
-
-      // Stop if we've reached the total known results
-      if (result.total > 0 && position >= result.total) {
-        console.log(`${prefix}Reached end of mailbox (${result.total} total).`);
-        break;
-      }
 
       // Check which emails in this page are already processed
       const pageAlreadyProcessed = await getAlreadyProcessedExternalIds(
