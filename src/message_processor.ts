@@ -118,7 +118,6 @@ export async function processMessage(
   );
 
   if (existingMessage) {
-    console.log("existing message", existingMessage);
     let campaignName = "Unknown";
     let campaignId = existingMessage.campaign_id;
 

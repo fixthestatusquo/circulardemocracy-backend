@@ -686,7 +686,6 @@ async function sendReply(
   const sendResult = await jmapClient.sendEmail(email);
 
   if (!sendResult.success) {
-    console.log(sendResult);
     const errorMsg = "JMAP send failed";
     console.error(
       `[Reply Worker] ✗ Failed to send reply for message ${message.id}: ${errorMsg}`,

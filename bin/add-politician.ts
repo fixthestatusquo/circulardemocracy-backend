@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env -S ./node_modules/.bin/tsx
 
 import minimist from "minimist";
 import { createClient } from "@supabase/supabase-js";
@@ -32,7 +32,8 @@ Usage: add-politician --email <email> --name <name> [options]
 
 Options:
   --email <email>       Required. Politician's email address
-  --name <name>         Required. Politician's full name
+  --name <name>         Politician's full name (default: derived from email
+                        when in first.last@domain format)
   --country <ISO2>      Country code (e.g. US, FR)
   --region <region>     Region (e.g. CA-12)
   --level <level>       Government level (e.g. local, state, federal)
@@ -49,8 +50,8 @@ Requires SUPABASE_SERVICE_ROLE_KEY for the staff lookup.
 
   const { email, name, country, region, level, position, party } = argv;
 
-  if (!email || !name) {
-    console.error("Error: --email and --name are required");
+  if (!email) {
+    console.error("Error: --email is required");
     process.exit(1);
   }
 
@@ -72,11 +73,21 @@ Requires SUPABASE_SERVICE_ROLE_KEY for the staff lookup.
 
   const client = createClient(supabaseUrl, supabaseKey);
 
+  // Derive name from email if not provided (first.last@domain → First Last)
+  const derivedName =
+    name ||
+    email
+      .split("@")[0]
+      .split(".")
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join(" ") ||
+    email;
+
   try {
     // Step 1: Create the politician
     const insertData: Record<string, unknown> = {
       email,
-      name,
+      name: derivedName,
       active: true,
       country: country || null,
       region: region || null,
@@ -85,7 +96,7 @@ Requires SUPABASE_SERVICE_ROLE_KEY for the staff lookup.
       party: party || null,
     };
 
-    console.log(`💾 Creating politician: ${name} <${email}>`);
+    console.log(`💾 Creating politician: ${derivedName} <${email}>`);
     const { data: politician, error: createError } = await client
       .from("politicians")
       .insert(insertData)
