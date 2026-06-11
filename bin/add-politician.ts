@@ -96,19 +96,38 @@ Requires SUPABASE_SERVICE_ROLE_KEY for the staff lookup.
       party: party || null,
     };
 
+    let politician: Record<string, unknown> | null = null;
+
     console.log(`💾 Creating politician: ${derivedName} <${email}>`);
-    const { data: politician, error: createError } = await client
+    const { data: created, error: createError } = await client
       .from("politicians")
       .insert(insertData)
       .select()
       .single();
 
     if (createError) {
-      console.error(`❌ Error creating politician: ${createError.message}`);
-      process.exit(1);
+      if (createError.message.includes("duplicate key") || createError.code === "23505") {
+        console.log(`ℹ️  Politician with email ${email} already exists, fetching...`);
+        const { data: existing } = await client
+          .from("politicians")
+          .select()
+          .eq("email", email)
+          .single();
+        if (!existing) {
+          console.error(`❌ Politician with email ${email} not found after duplicate error`);
+          process.exit(1);
+        }
+        politician = existing;
+        console.log(`📎 Using existing politician (id: ${politician.id})`);
+      } else {
+        console.error(`❌ Error creating politician: ${createError.message}`);
+        process.exit(1);
+      }
+    } else {
+      politician = created;
+      console.log(`✅ Politician created (id: ${politician.id})`);
     }
 
-    console.log(`✅ Politician created (id: ${politician.id})`);
     console.log(JSON.stringify(politician, null, 2));
 
     // Step 2: Grant staff access to user with same email
