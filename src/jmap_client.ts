@@ -192,6 +192,29 @@ export class JMAPClient {
     }
   }
 
+  /** Send multiple emails in a single JMAP request. */
+  async sendEmails(emails: EmailMessage[]): Promise<JMAPSendResult[]> {
+    const upstreamEmails = emails.map((e) => ({
+      from: e.from,
+      fromName: e.fromName || e.from.split("@")[0],
+      to: e.to,
+      subject: normalizeEmailSubject(e.subject),
+      text: e.textBody || "",
+      html: e.htmlBody,
+      replyTo: e.replyTo,
+      inReplyTo: e.inReplyTo?.[0],
+      references: e.references,
+      messageId: e.messageId?.[0],
+    }));
+
+    const results = await (this.upstream as any).sendEmails(upstreamEmails);
+    return (results || []).map((r: any) => ({
+      success: r.success === true,
+      messageId: r.messageId,
+      error: r.error,
+    }));
+  }
+
   /** Download a blob by its JMAP blobId. Returns raw text content. */
   async downloadBlob(blobId: string): Promise<string> {
     return (this.upstream as any)._downloadBlob(blobId);

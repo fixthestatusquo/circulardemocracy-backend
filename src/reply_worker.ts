@@ -240,12 +240,20 @@ async function sendPoliticianBatch(
       );
     }
 
-    // Process messages in parallel with a concurrency limit.
-    // Stalwart limits concurrent requests; keep this well below that threshold.
-    const CONCURRENCY = 3;
-    for (let i = 0; i < messages.length; i += CONCURRENCY) {
-      const chunk = messages.slice(i, i + CONCURRENCY);
-      const tasks = chunk.map(async (message) => {
+    // Process messages in batches via sendEmails (single JMAP request per group).
+    const CHUNK_SIZE = 10;
+    for (let i = 0; i < messages.length; i += CHUNK_SIZE) {
+      const chunk = messages.slice(i, i + CHUNK_SIZE);
+
+      // Pre-process: resolve templates, campaigns, build email objects
+      interface BatchEntry {
+        message: typeof messages[0];
+        jmapClient: JMAPClient;
+        email: EmailMessage;
+      }
+      const batchEntries: BatchEntry[] = [];
+
+      for (const message of chunk) {
         try {
           const jmapEmail = jmapEmailCache.get(message.external_id);
           if (!jmapEmail) {
@@ -275,7 +283,11 @@ async function sendPoliticianBatch(
             campaignCache.set(message.campaign_id, campaign);
           }
 
-          const imp = jmapResolve.config.stalwartImpersonation;
+          const senderEmail = jmapEmail.replyTo || jmapEmail.from;
+          if (!senderEmail) {
+            throw new Error(`sender not found for message ${message.id}`);
+          }
+
           const outboundIdentity = resolveOutboundEmailIdentity(
             {
               id: politician.id,
@@ -296,6 +308,57 @@ async function sendPoliticianBatch(
               `No From/Reply-To for campaign ${message.campaign_id}`,
             );
           }
+
+          const imp = jmapResolve.config.stalwartImpersonation;
+          if (imp) {
+            if (!emailHostedOnDomain(outboundIdentity.fromEmail, imp.allDomainLower)) {
+              throw new Error(
+                `ALL_DOMAIN is ${imp.allDomainLower} but outbound From is not on that domain`,
+              );
+            }
+          }
+
+          const tokens = {
+            subject: jmapEmail.subject || "",
+            sender: jmapEmail.fromName || jmapEmail.from || "",
+            date: jmapEmail.receivedAt
+              ? new Date(jmapEmail.receivedAt).toLocaleDateString()
+              : "",
+          };
+
+          const personalizedSubject = replaceTokens(template.subject, tokens);
+          const personalizedBody = replaceTokens(template.body, tokens);
+
+          const emailContent = renderEmailLayout({
+            subject: personalizedSubject,
+            markdown_body: personalizedBody,
+            layout_type: template.layout_type as any,
+            campaign_name: campaign.name,
+            politician_name: politician.name,
+            politician_email: politician.email,
+            politician_party: politician.party,
+            politician_position: politician.position,
+          });
+
+          const domain = outboundIdentity.fromEmail.split("@")[1] || "circulardemocracy.org";
+          const replyMessageId = `<reply-${encode32(message.id)}@${domain}>`;
+
+          const email: EmailMessage = {
+            from: outboundIdentity.fromEmail,
+            fromName: outboundIdentity.fromDisplayName,
+            to: [senderEmail],
+            replyTo: outboundIdentity.replyToEmail,
+            subject: emailContent.subject,
+            textBody: emailContent.textBody,
+            htmlBody: emailContent.htmlBody,
+            messageId: [replyMessageId],
+          };
+
+          if (jmapEmail.messageId) {
+            email.inReplyTo = jmapEmail.messageId;
+            email.references = jmapEmail.messageId;
+          }
+
           const clientKey = imp
             ? `imp:${outboundIdentity.fromEmail}`
             : "relay:default";
@@ -308,28 +371,68 @@ async function sendPoliticianBatch(
             jmapClientCache.set(clientKey, jmapClient);
           }
 
-          await sendReply(db, message, {
-            politician,
-            jmapConfig: jmapResolve.config,
-            template,
-            campaign,
-            jmapEmail,
-            jmapClient,
-          });
-          result.sent++;
+          batchEntries.push({ message, jmapClient, email });
         } catch (error) {
           result.failed++;
-          const errorMsg =
-            error instanceof Error ? error.message : "Unknown error";
-          result.errors.push({
-            message_id: message.id,
-            error: errorMsg,
-          });
+          const errorMsg = error instanceof Error ? error.message : "Unknown error";
+          result.errors.push({ message_id: message.id, error: errorMsg });
           console.error(
-            `[Reply Worker] ✗ Failed to send reply for message ${message.id}:`,
+            `[Reply Worker] ✗ Failed to prepare reply for message ${message.id}:`,
             errorMsg,
           );
         }
+      }
+
+      if (batchEntries.length === 0) continue;
+
+      // Group by JMAP client and send each group in a single request
+      const clientGroups = new Map<JMAPClient, BatchEntry[]>();
+      for (const entry of batchEntries) {
+        const list = clientGroups.get(entry.jmapClient) || [];
+        list.push(entry);
+        clientGroups.set(entry.jmapClient, list);
+      }
+
+      for (const [client, entries] of clientGroups) {
+        const emails = entries.map((e) => e.email);
+        try {
+          const sendResults = await client.sendEmails(emails);
+          for (let j = 0; j < sendResults.length; j++) {
+            const sr = sendResults[j];
+            const entry = entries[j];
+            if (sr.success) {
+              await db.markMessageReplyDelivered(entry.message.id, {
+                reply_id: sr.messageId,
+              });
+              result.sent++;
+              const sentIdSuffix = sr.messageId ? ` (sent ID: ${sr.messageId})` : "";
+              console.log(
+                `[Reply Worker] ✓ Sent reply for message ${entry.message.id} (${entry.message.external_id})${sentIdSuffix}`,
+              );
+            } else {
+              result.failed++;
+              const errorMsg = sr.error || "JMAP send failed";
+              result.errors.push({ message_id: entry.message.id, error: errorMsg });
+              await handleSendFailure(db, entry.message, errorMsg);
+              console.error(
+                `[Reply Worker] ✗ Failed to send reply for message ${entry.message.id}:`,
+                errorMsg,
+              );
+            }
+          }
+        } catch (error) {
+          const errorMsg = error instanceof Error ? error.message : "Unknown error";
+          for (const entry of entries) {
+            result.failed++;
+            result.errors.push({ message_id: entry.message.id, error: errorMsg });
+            await handleSendFailure(db, entry.message, errorMsg);
+            console.error(
+              `[Reply Worker] ✗ Failed to send reply for message ${entry.message.id}:`,
+              errorMsg,
+            );
+          }
+        }
+      }
       });
       await Promise.all(tasks);
     }
