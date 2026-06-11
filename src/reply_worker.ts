@@ -240,8 +240,9 @@ async function sendPoliticianBatch(
       );
     }
 
-    // Process messages in parallel with a concurrency limit
-    const CONCURRENCY = 10;
+    // Process messages in parallel with a concurrency limit.
+    // Stalwart limits concurrent requests; keep this well below that threshold.
+    const CONCURRENCY = 3;
     for (let i = 0; i < messages.length; i += CONCURRENCY) {
       const chunk = messages.slice(i, i + CONCURRENCY);
       const tasks = chunk.map(async (message) => {
