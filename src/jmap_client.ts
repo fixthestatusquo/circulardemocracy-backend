@@ -107,12 +107,45 @@ export class JMAPClient {
         replyTo: email.replyTo,
         inReplyTo: email.inReplyTo?.[0],
         references: email.references,
+        messageId: email.messageId?.[0],
       });
 
-      const emailSetResponse = (result as any)?.methodResponses?.[0]?.[1];
-      const createdEntry = emailSetResponse?.created;
-      const createdKey = createdEntry ? Object.keys(createdEntry)[0] : undefined;
-      const messageId = createdKey ? createdEntry[createdKey]?.id : undefined;
+      // Find the Email/set response by method name (more reliable than index)
+      const methodResponses: Array<[string, any]> = (result as any)?.methodResponses ?? [];
+      const emailSetResponse = methodResponses.find((r) => r[0] === "Email/set")?.[1];
+
+      // Extract the created email ID from the response.
+      // Try the Email/set created entry first, then fall back to looking
+      // for the email ID in the EmailSubmission/set response.
+      let messageId: string | undefined;
+
+      if (emailSetResponse?.created) {
+        const createdKey = Object.keys(emailSetResponse.created)[0];
+        if (createdKey) {
+          messageId = emailSetResponse.created[createdKey]?.id;
+        }
+      }
+
+      // Fallback: try EmailSubmission/set response
+      if (!messageId) {
+        const submissionResponse = methodResponses.find(
+          (r) => r[0] === "EmailSubmission/set",
+        )?.[1];
+        if (submissionResponse?.created) {
+          const subKey = Object.keys(submissionResponse.created)[0];
+          if (subKey) {
+            messageId = submissionResponse.created[subKey]?.id;
+          }
+        }
+      }
+
+      if (!messageId) {
+        console.error(
+          "JMAP sendEmail response (no created entry found):",
+          JSON.stringify(result),
+        );
+        throw new Error("Failed to extract sent email ID from JMAP response");
+      }
 
       return {
         success: true,
@@ -157,6 +190,11 @@ export class JMAPClient {
       console.error("JMAP getEmails failed:", error);
       throw error;
     }
+  }
+
+  /** Download a blob by its JMAP blobId. Returns raw text content. */
+  async downloadBlob(blobId: string): Promise<string> {
+    return (this.upstream as any)._downloadBlob(blobId);
   }
 
   /** Tests the JMAP connection. */

@@ -1,6 +1,7 @@
 // Reply Worker - Background worker for sending scheduled auto-replies
 // Runs periodically to process pending and scheduled reply emails
 
+import { encode32 } from "dxid";
 import type { DatabaseClient } from "./database";
 import { resolveOutboundEmailIdentity } from "./email_impersonation";
 import { renderEmailLayout } from "./email_layout";
@@ -315,7 +316,6 @@ async function sendPoliticianBatch(
             jmapClient,
           });
           result.sent++;
-          console.log(`[Reply Worker] ✓ Sent reply for message ${message.id}`);
         } catch (error) {
           result.failed++;
           const errorMsg =
@@ -560,6 +560,9 @@ async function sendReply(
     politician_position: politician.position,
   });
 
+  const domain = outboundIdentity.fromEmail.split("@")[1] || "circulardemocracy.org";
+  const replyMessageId = `<reply-${encode32(message.id)}@${domain}>`;
+
   const email: EmailMessage = {
     from: outboundIdentity.fromEmail,
     fromName: outboundIdentity.fromDisplayName,
@@ -568,6 +571,7 @@ async function sendReply(
     subject: emailContent.subject,
     textBody: emailContent.textBody,
     htmlBody: emailContent.htmlBody,
+    messageId: [replyMessageId],
   };
 
   // Add threading headers if we have the original message-id
@@ -590,8 +594,9 @@ async function sendReply(
   }
 
   // 10. Log success and finalize
+  const sentIdSuffix = sendResult.messageId ? ` (sent ID: ${sendResult.messageId})` : "";
   console.log(
-    `[Reply Worker] ✓ Sent reply for message ${message.id} (sent ID: ${sendResult.messageId})`,
+    `[Reply Worker] ✓ Sent reply for message ${message.id} (${message.external_id})${sentIdSuffix}`,
   );
 
   await db.markMessageReplyDelivered(message.id, {
