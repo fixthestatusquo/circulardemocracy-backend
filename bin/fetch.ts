@@ -826,7 +826,7 @@ async function runStalwartIngestion(
     let position = 0;
     let pageNum = 0;
     const maxPages = 100;
-
+    let totalValid = 0;
 
     if (options.dryRun) {
       // For dry run: collect all valid messages first, then print
@@ -851,7 +851,7 @@ async function runStalwartIngestion(
       return true;
     }
 
-    while (pageNum < maxPages && (!hasExplicitLimit || validMessages.length < options.limit!)) {
+    while (pageNum < maxPages && (!hasExplicitLimit || totalValid < options.limit!)) {
       const result = await jmapQueryWithBodies(client, filter, batchSize, position);
       if (result.emails.length === 0) {
         console.log(`${prefix}End of mailbox (fetched ${rawEmails.length} total).`);
@@ -880,8 +880,7 @@ async function runStalwartIngestion(
       for (const [id, info] of pageAlreadyProcessed) allAlreadyProcessed.set(id, info);
 
       // Build page valid messages (skipping bounces and already-processed)
-      // Note: we do NOT process or move messages during pagination to avoid
-      // invalidating the JMAP position cursor when messages leave the mailbox.
+      const pageValid: MessageInput[] = [];
       for (const rawEmail of result.emails) {
         if (pageAlreadyProcessed.has(rawEmail.id)) continue;
 
@@ -915,7 +914,8 @@ async function runStalwartIngestion(
           } else {
             console.log(`Bounced ${rawEmail.id} (no message/rfc822 attachment)`);
           }
-          // Move the bounce email to trash (does not affect inbox cursor)
+
+          // Move the bounce email to trash
           try {
             const trashId = await ensureMailboxExists(client, "Trash");
             if (trashId) {
@@ -925,6 +925,7 @@ async function runStalwartIngestion(
           } catch (moveError) {
             console.warn(`Failed to move bounce ${rawEmail.id} to Trash: ${moveError}`);
           }
+
           continue;
         }
 
@@ -943,7 +944,7 @@ async function runStalwartIngestion(
           continue;
         }
 
-        try { validMessages.push(convertJmapEmailToMessageInput(rawEmail)); }
+        try { pageValid.push(convertJmapEmailToMessageInput(rawEmail)); }
         catch (error) {
           skippedCount += 1;
           const reason = error instanceof Error ? error.message : "Unknown validation error";
@@ -952,59 +953,26 @@ async function runStalwartIngestion(
       }
 
       // Cap at limit if explicit
-      if (hasExplicitLimit && validMessages.length > options.limit!) {
-        validMessages.length = options.limit!;
+      if (hasExplicitLimit && totalValid + pageValid.length > options.limit!) {
+        pageValid.length = options.limit! - totalValid;
       }
+      totalValid += pageValid.length;
 
       console.log(
         `${prefix}Fetched page ${pageNum}: ${result.emails.length} messages` +
-        ` (${validMessages.length} collected so far)`,
+        ` (${pageValid.length} new, ${totalValid} valid total)`,
       );
-    }
-    if (pageNum >= maxPages) {
-      console.log(`${prefix}Reached max ${maxPages} pages without exhausting results.`);
-    }
 
-    // --- Now process all collected messages ---
-    const totalToProcess = validMessages.length;
-    if (totalToProcess > 0) {
-      console.log(`\n${prefix}Processing ${totalToProcess} collected messages...`);
-
-      for (let i = 0; i < validMessages.length; i += 50) {
-        const chunk = validMessages.slice(i, i + 50);
+      // --- Process this page immediately ---
+      if (pageValid.length > 1) {
         try {
-          if (chunk.length > 1) {
-            const batchResults = await processMessageBatch(db, ai, chunk);
-            for (let j = 0; j < batchResults.length; j++) {
-              const r = batchResults[j];
-              const mi = chunk[j];
-              if (r.success) {
-                summary.processed++;
-                console.log(`Processed ${mi.external_id} -> campaign=${r.campaign_slug || "unknown"}`);
-                const folderPath = generateFolderPath(r.campaign_slug);
-                try {
-                  let mId = mailboxCache.get(folderPath);
-                  if (!mId) { mId = await ensureMailboxExists(client, folderPath); mailboxCache.set(folderPath, mId); }
-                  await moveEmailToMailbox(client, mi.external_id, mId);
-                  summary.moved++;
-                } catch (moveError) {
-                  const reason = moveError instanceof Error ? moveError.message : "Unknown error";
-                  console.warn(`Failed to move ${mi.external_id}: ${reason}`);
-                }
-              } else if (r.status === "duplicate") {
-                summary.duplicates++;
-                console.log(`Duplicate ${mi.external_id}`);
-              } else {
-                summary.failed++;
-                console.log(`Failed ${mi.external_id}: ${(r.errors || []).join(", ")}`);
-              }
-            }
-          } else {
-            const mi = chunk[0];
-            const r = await processMessage(db, ai, mi);
+          const batchResults = await processMessageBatch(db, ai, pageValid);
+          for (let i = 0; i < batchResults.length; i++) {
+            const r = batchResults[i];
+            const mi = pageValid[i];
             if (r.success) {
               summary.processed++;
-              console.log(`Processed ${mi.external_id} -> campaign=${r.campaign_slug || "unknown"}`);
+              console.log(`Processed ${mi.external_id} -> campaign=${r.campaign_slug || "unknown"} confidence=${r.confidence ?? "n/a"}`);
               const folderPath = generateFolderPath(r.campaign_slug);
               try {
                 let mId = mailboxCache.get(folderPath);
@@ -1025,30 +993,69 @@ async function runStalwartIngestion(
           }
         } catch (error) {
           if (error instanceof PoliticianNotFoundError) {
-            summary.politicianNotFound += chunk.length;
+            summary.politicianNotFound += pageValid.length;
             console.log(`Politician not found: ${error.message}`);
           } else {
-            summary.failed += chunk.length;
+            summary.failed += pageValid.length;
             const reason = error instanceof Error ? error.message : "Unknown error";
             console.log(`Error processing batch: ${reason}`);
           }
         }
+      } else if (pageValid.length === 1) {
+        const mi = pageValid[0];
+        try {
+          const r = await processMessage(db, ai, mi);
+          if (r.success) {
+            summary.processed++;
+            console.log(`Processed ${mi.external_id} -> campaign=${r.campaign_slug || "unknown"} confidence=${r.confidence ?? "n/a"}`);
+            const folderPath = generateFolderPath(r.campaign_slug);
+            try {
+              let mId = mailboxCache.get(folderPath);
+              if (!mId) { mId = await ensureMailboxExists(client, folderPath); mailboxCache.set(folderPath, mId); }
+              await moveEmailToMailbox(client, mi.external_id, mId);
+              summary.moved++;
+            } catch (moveError) {
+              const reason = moveError instanceof Error ? moveError.message : "Unknown error";
+              console.warn(`Failed to move ${mi.external_id}: ${reason}`);
+            }
+          } else if (r.status === "duplicate") {
+            summary.duplicates++;
+            console.log(`Duplicate ${mi.external_id}`);
+          } else {
+            summary.failed++;
+            console.log(`Failed ${mi.external_id}: ${(r.errors || []).join(", ")}`);
+          }
+        } catch (error) {
+          if (error instanceof PoliticianNotFoundError) {
+            summary.politicianNotFound++;
+            console.log(`Politician not found: ${error.message}`);
+          } else {
+            summary.failed++;
+            const reason = error instanceof Error ? error.message : "Unknown error";
+            console.log(`Error processing ${mi.external_id}: ${reason}`);
+          }
+        }
+      }
+
+      // Move already-processed messages in this page out of the inbox
+      for (const rawEmail of result.emails) {
+        const info = pageAlreadyProcessed.get(rawEmail.id);
+        if (!info) continue;
+        const folderPath = generateFolderPath(info.campaign_slug);
+        try {
+          let mId = mailboxCache.get(folderPath);
+          if (!mId) { mId = await ensureMailboxExists(client, folderPath); mailboxCache.set(folderPath, mId); }
+          await moveEmailToMailbox(client, rawEmail.id, mId);
+          summary.moved++;
+          console.log(`Moved already-processed ${rawEmail.id} -> folder=${folderPath}`);
+        } catch (moveError) {
+          const reason = moveError instanceof Error ? moveError.message : "Unknown error";
+          console.warn(`Failed to move already-processed ${rawEmail.id}: ${reason}`);
+        }
       }
     }
-
-    // Move already-processed messages out of the inbox
-    for (const [id, info] of allAlreadyProcessed) {
-      const folderPath = generateFolderPath(info.campaign_slug);
-      try {
-        let mId = mailboxCache.get(folderPath);
-        if (!mId) { mId = await ensureMailboxExists(client, folderPath); mailboxCache.set(folderPath, mId); }
-        await moveEmailToMailbox(client, id, mId);
-        summary.moved++;
-        console.log(`Moved already-processed ${id} -> folder=${folderPath}`);
-      } catch (moveError) {
-        const reason = moveError instanceof Error ? moveError.message : "Unknown error";
-        console.warn(`Failed to move already-processed ${id}: ${reason}`);
-      }
+    if (pageNum >= maxPages) {
+      console.log(`${prefix}Reached max ${maxPages} pages without exhausting results.`);
     }
   }
 
