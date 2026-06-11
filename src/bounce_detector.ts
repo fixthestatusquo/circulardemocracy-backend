@@ -35,6 +35,20 @@ const DSN_SUBJECT_PATTERNS = [
 
 const REPLY_MESSAGE_ID_RE = /^Message-ID:\s*<?reply-([A-Za-z0-9]+)@/im;
 
+// Header patterns for automated replies (case-insensitive)
+const AUTO_REPLY_HEADERS = [
+  { name: "auto-submitted", value: "auto-replied" },
+  { name: "auto-submitted", value: "auto-generated" },
+  { name: "x-autoreply", value: "yes" },
+  { name: "x-autorespond", value: "yes" },
+  { name: "precedence", value: "auto_reply" },
+  { name: "precedence", value: "bulk" },
+  { name: "precedence", value: "junk" },
+];
+
+// Subject patterns for auto-replies
+const AUTO_REPLY_SUBJECT_RE = /^(auto-?reply|automatic reply|out of office|out of the office)/i;
+
 /**
  * Check whether a JMAP email looks like a bounce/DSN based on its
  * From address and Subject — fields that are already available without
@@ -90,4 +104,36 @@ export function extractBouncedMessageId(blobText: string): number | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * Check whether an email is an auto-reply / out-of-office / automatic
+ * response that should not be processed as a constituent message.
+ *
+ * Uses both Subject heuristics and JMAP Email headers (when available).
+ */
+export function isAutoReply(email: {
+  subject?: string;
+  headers?: Array<{ name?: string; value?: string }>;
+}): boolean {
+  // Check subject line
+  if (email.subject && AUTO_REPLY_SUBJECT_RE.test(email.subject.trim())) {
+    return true;
+  }
+
+  // Check JMAP Email headers (fetched when "headers" is in Email/get properties)
+  if (email.headers && email.headers.length > 0) {
+    for (const { name: headerName, value: headerValue } of email.headers) {
+      if (!headerName || !headerValue) continue;
+      const lowerName = headerName.toLowerCase();
+      const lowerValue = headerValue.toLowerCase();
+      for (const pattern of AUTO_REPLY_HEADERS) {
+        if (lowerName === pattern.name && lowerValue.startsWith(pattern.value)) {
+          return true;
+        }
+      }
+    }
+  }
+
+  return false;
 }

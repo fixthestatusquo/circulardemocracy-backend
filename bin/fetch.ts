@@ -19,7 +19,7 @@ import { z } from "zod";
 import Turndown from "turndown";
 import { config as dotenv } from "dotenv";
 import { pipeline, type FeatureExtractionPipeline } from "@xenova/transformers";
-import { isBounceEmail, extractBouncedMessageId } from "../src/bounce_detector";
+import { isBounceEmail, extractBouncedMessageId, isAutoReply } from "../src/bounce_detector";
 
 // Load `.env` once; all config is read from `process.env` below (no env.ts wrapper).
 dotenv({ quiet: true });
@@ -390,7 +390,7 @@ async function jmapQueryWithBodies(
           properties: [
             "id", "messageId", "receivedAt", "mailboxIds",
             "subject", "from", "to", "cc", "replyTo",
-            "preview", "textBody", "htmlBody", "bodyValues", "attachments",
+            "preview", "textBody", "htmlBody", "bodyValues", "attachments", "headers",
           ],
           fetchTextBodyValues: true,
           fetchHTMLBodyValues: true,
@@ -436,7 +436,7 @@ async function jmapFetchByMessageId(
           properties: [
             "id", "messageId", "receivedAt", "mailboxIds",
             "subject", "from", "to", "cc", "replyTo",
-            "preview", "textBody", "htmlBody", "bodyValues", "attachments",
+            "preview", "textBody", "htmlBody", "bodyValues", "attachments", "headers",
           ],
           fetchTextBodyValues: true,
           fetchHTMLBodyValues: true,
@@ -757,6 +757,7 @@ async function runStalwartIngestion(
     processed: 0,
     duplicates: 0,
     bounced: 0,
+    autoreplied: 0,
     politicianNotFound: 0,
     failed: 0,
     moved: 0,
@@ -920,6 +921,21 @@ async function runStalwartIngestion(
           continue;
         }
 
+        // Detect and skip auto-reply / out-of-office emails
+        if (isAutoReply(rawEmail)) {
+          summary.autoreplied++;
+          console.log(`Auto-reply ${rawEmail.id} (${rawEmail.subject})`);
+          try {
+            const trashId = await ensureMailboxExists(client, "Trash");
+            if (trashId) {
+              await moveEmailToMailbox(client, rawEmail.id, trashId);
+            }
+          } catch (moveError) {
+            console.warn(`Failed to move auto-reply ${rawEmail.id} to Trash: ${moveError}`);
+          }
+          continue;
+        }
+
         try { pageValid.push(convertJmapEmailToMessageInput(rawEmail)); }
         catch (error) {
           skippedCount += 1;
@@ -1039,6 +1055,7 @@ async function runStalwartIngestion(
   console.log(`${prefix}Processed: ${summary.processed}`);
   console.log(`${prefix}Duplicates: ${summary.duplicates}`);
   console.log(`${prefix}Bounced: ${summary.bounced}`);
+  console.log(`${prefix}Auto-replies: ${summary.autoreplied}`);
   console.log(`${prefix}Politician not found: ${summary.politicianNotFound}`);
   console.log(`${prefix}Failed: ${summary.failed}`);
   console.log(`${prefix}Moved to folders: ${summary.moved}`);
