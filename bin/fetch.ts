@@ -469,7 +469,6 @@ async function ensureMailboxExists(
   // Look up existing mailbox by name first (more reliable than createIfNotExist
   // since jmap-cli's getMailbox returns different shapes for found vs created).
   const mailboxes = await client.listMailboxes();
-  console.log(mailboxes);
   const existing = mailboxes.find(
     (mb) => mb.name?.toLowerCase() === folderName.toLowerCase(),
   );
