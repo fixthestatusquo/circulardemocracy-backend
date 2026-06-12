@@ -1081,14 +1081,22 @@ async function runStalwartIngestion(
     }
   }
 
-  console.log(`\n${prefix}=== Stalwart Ingestion Summary ===`);
-  console.log(`${prefix}Processed: ${summary.processed}`);
-  console.log(`${prefix}Duplicates: ${summary.duplicates}`);
-  console.log(`${prefix}Bounced: ${summary.bounced}`);
-  console.log(`${prefix}Auto-replies: ${summary.autoreplied}`);
-  console.log(`${prefix}Politician not found: ${summary.politicianNotFound}`);
-  console.log(`${prefix}Failed: ${summary.failed}`);
-  console.log(`${prefix}Moved to folders: ${summary.moved}`);
+  const lines = [
+    ["Processed", summary.processed],
+    ["Duplicates", summary.duplicates],
+    ["Bounced", summary.bounced],
+    ["Auto-replies", summary.autoreplied],
+    ["Politician not found", summary.politicianNotFound],
+    ["Failed", summary.failed],
+    ["Moved to folders", summary.moved],
+  ].filter(([, count]) => count !== 0);
+
+  if (lines.length > 0) {
+    console.log(`\n${prefix}Summary:`);
+    for (const [label, count] of lines) {
+      console.log(`${prefix}  ${label}: ${count}`);
+    }
+  }
 
   return summary.failed === 0;
 }
