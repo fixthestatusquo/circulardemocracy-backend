@@ -229,23 +229,31 @@ async function sendPoliticianBatch(
     jmapClientCache.set(fetchClientKey, jmapClientForFetch);
 
     try {
-      // Fetch in parallel chunks, each with its own JMAP client instance
-      // to avoid concurrent-request conflicts on shared session state.
+      // Fetch in small batches with limited concurrency to avoid
+      // overwhelming the JMAP server with parallel session discoveries.
       const externalIds = messages.map((m) => m.external_id);
       const FETCH_CHUNK = 20;
-      const fetchPromises: Promise<Map<string, EmailMessage>>[] = [];
+      const MAX_CONCURRENT = 3;
+      const chunks: string[][] = [];
       for (let i = 0; i < externalIds.length; i += FETCH_CHUNK) {
-        const ids = externalIds.slice(i, i + FETCH_CHUNK);
-        const chunkClient = createJMAPClient(
-          jmapResolve.config,
-          politician.email,
-        );
-        fetchPromises.push(chunkClient.getEmails(ids));
+        chunks.push(externalIds.slice(i, i + FETCH_CHUNK));
       }
-      const results = await Promise.all(fetchPromises);
-      for (const chunkResult of results) {
-        for (const [id, email] of chunkResult) {
-          jmapEmailCache.set(id, email);
+
+      for (let i = 0; i < chunks.length; i += MAX_CONCURRENT) {
+        const batch = chunks.slice(i, i + MAX_CONCURRENT);
+        const batchResults = await Promise.all(
+          batch.map((ids) => {
+            const chunkClient = createJMAPClient(
+              jmapResolve.config,
+              politician.email,
+            );
+            return chunkClient.getEmails(ids);
+          }),
+        );
+        for (const chunkResult of batchResults) {
+          for (const [id, email] of chunkResult) {
+            jmapEmailCache.set(id, email);
+          }
         }
       }
     } catch (error) {
