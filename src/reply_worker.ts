@@ -174,6 +174,54 @@ export async function sendScheduledReplies(
 }
 
 /**
+ * Build a reply EmailMessage from template, tokens, outbound identity, and original email.
+ */
+function buildReplyEmail(
+  message: MessageToProcess,
+  template: { subject: string; body: string; layout_type: string },
+  tokens: { subject: string; sender: string; date: string },
+  outboundIdentity: { fromEmail: string; fromDisplayName: string; replyToEmail: string },
+  campaign: { name: string },
+  politician: { name: string; email: string; party?: string; position?: string },
+  jmapEmail: { messageId?: string[]; subject?: string; fromName?: string; from?: string; receivedAt?: string; replyTo?: string },
+): EmailMessage {
+  const personalizedSubject = replaceTokens(template.subject, tokens);
+  const personalizedBody = replaceTokens(template.body, tokens);
+
+  const emailContent = renderEmailLayout({
+    subject: personalizedSubject,
+    markdown_body: personalizedBody,
+    layout_type: template.layout_type as any,
+    campaign_name: campaign.name,
+    politician_name: politician.name,
+    politician_email: politician.email,
+    politician_party: politician.party,
+    politician_position: politician.position,
+  });
+
+  const domain = outboundIdentity.fromEmail.split("@")[1] || "circulardemocracy.org";
+  const replyMessageId = `reply-${encode32(message.id)}@${domain}`;
+
+  const email: EmailMessage = {
+    from: outboundIdentity.fromEmail,
+    fromName: outboundIdentity.fromDisplayName,
+    to: [jmapEmail.replyTo || jmapEmail.from || ""],
+    replyTo: outboundIdentity.replyToEmail,
+    subject: emailContent.subject,
+    textBody: emailContent.textBody,
+    htmlBody: emailContent.htmlBody,
+    messageId: [replyMessageId],
+  };
+
+  if (jmapEmail.messageId) {
+    email.inReplyTo = jmapEmail.messageId;
+    email.references = jmapEmail.messageId;
+  }
+
+  return email;
+}
+
+/**
  * Processes all messages for a single politician.
  * Resolves JMAP configuration once and reuses it for the entire batch.
  */
@@ -350,38 +398,10 @@ async function sendPoliticianBatch(
               : "",
           };
 
-          const personalizedSubject = replaceTokens(template.subject, tokens);
-          const personalizedBody = replaceTokens(template.body, tokens);
-
-          const emailContent = renderEmailLayout({
-            subject: personalizedSubject,
-            markdown_body: personalizedBody,
-            layout_type: template.layout_type as any,
-            campaign_name: campaign.name,
-            politician_name: politician.name,
-            politician_email: politician.email,
-            politician_party: politician.party,
-            politician_position: politician.position,
-          });
-
-          const domain = outboundIdentity.fromEmail.split("@")[1] || "circulardemocracy.org";
-          const replyMessageId = `reply-${encode32(message.id)}@${domain}`;
-
-          const email: EmailMessage = {
-            from: outboundIdentity.fromEmail,
-            fromName: outboundIdentity.fromDisplayName,
-            to: [senderEmail],
-            replyTo: outboundIdentity.replyToEmail,
-            subject: emailContent.subject,
-            textBody: emailContent.textBody,
-            htmlBody: emailContent.htmlBody,
-            messageId: [replyMessageId],
-          };
-
-          if (jmapEmail.messageId) {
-            email.inReplyTo = jmapEmail.messageId;
-            email.references = jmapEmail.messageId;
-          }
+          const email = buildReplyEmail(
+            message, template, tokens, outboundIdentity,
+            campaign, politician, jmapEmail,
+          );
 
           const clientKey = imp
             ? `imp:${outboundIdentity.fromEmail}`
@@ -672,40 +692,16 @@ async function sendReply(
       : "",
   };
 
-  const personalizedSubject = replaceTokens(templateSubject, tokens);
-  const personalizedBody = replaceTokens(templateBody, tokens);
-
-  // 4. Render and build email
-  const emailContent = renderEmailLayout({
-    subject: personalizedSubject,
-    markdown_body: personalizedBody,
-    layout_type: layout_type as any,
-    campaign_name: campaign.name,
-    politician_name: politician.name,
-    politician_email: politician.email,
-    politician_party: politician.party,
-    politician_position: politician.position,
-  });
-
-  const domain = outboundIdentity.fromEmail.split("@")[1] || "circulardemocracy.org";
-  const replyMessageId = `reply-${encode32(message.id)}@${domain}`;
-
-  const email: EmailMessage = {
-    from: outboundIdentity.fromEmail,
-    fromName: outboundIdentity.fromDisplayName,
-    to: [senderEmail],
-    replyTo: outboundIdentity.replyToEmail,
-    subject: emailContent.subject,
-    textBody: emailContent.textBody,
-    htmlBody: emailContent.htmlBody,
-    messageId: [replyMessageId],
-  };
-
-  // Add threading headers if we have the original message-id
-  if (jmapEmail.messageId) {
-    email.inReplyTo = jmapEmail.messageId;
-    email.references = jmapEmail.messageId;
-  }
+  // 4. Render and build email via shared helper
+  const email = buildReplyEmail(
+    message,
+    { subject: templateSubject, body: templateBody, layout_type },
+    tokens,
+    outboundIdentity,
+    campaign,
+    politician,
+    jmapEmail,
+  );
 
   // 9. Send via JMAP
   const sendResult = await jmapClient.sendEmail(email);
