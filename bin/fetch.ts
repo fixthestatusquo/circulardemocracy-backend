@@ -891,6 +891,7 @@ async function runStalwartIngestion(
           );
         const isBounce = isBounceEmail(rawEmail) || !!bounceAttach;
         if (isBounce) {
+          let statusType = "bounced"; // 5xx permanent (default)
           if (bounceAttach?.blobId) {
             try {
               // Determine bounce vs delay from the DSN status
@@ -898,7 +899,6 @@ async function runStalwartIngestion(
                 ((rawEmail as any).attachments || []).find(
                   (a: { type?: string }) => a.type === "message/delivery-status",
                 );
-              let statusType = "bounced"; // default
               if (dsnAttach?.blobId) {
                 const session = await (client as any)._discoverSession();
                 const accountId = client.getAccountId(session);
@@ -909,7 +909,6 @@ async function runStalwartIngestion(
                   statusType = "delayed";
                 }
               }
-              summary[statusType as "bounced" | "delayed"]++;
 
               const session = await (client as any)._discoverSession();
               const accountId = client.getAccountId(session);
@@ -956,11 +955,14 @@ async function runStalwartIngestion(
             console.log(`Bounced ${rawEmail.id} (no message/rfc822 attachment)`);
           }
 
-          // Move the bounce email to trash
+          summary[statusType as "bounced" | "delayed"]++;
+
+          // Move to Delayed folder (temporary) or Trash (permanent)
+          const targetFolder = statusType === "delayed" ? "Delayed" : "Trash";
           try {
-            const trashId = await ensureMailboxExists(client, "Trash");
-            if (trashId) {
-              await moveEmailToMailbox(client, rawEmail.id, trashId);
+            const folderId = await ensureMailboxExists(client, targetFolder);
+            if (folderId) {
+              await moveEmailToMailbox(client, rawEmail.id, folderId);
             }
           } catch (moveError) {
             console.warn(`Failed to move bounce ${rawEmail.id} to Trash: ${moveError}`);
