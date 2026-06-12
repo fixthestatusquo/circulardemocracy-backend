@@ -756,6 +756,7 @@ async function runStalwartIngestion(
     processed: 0,
     duplicates: 0,
     bounced: 0,
+    delayed: 0,
     autoreplied: 0,
     politicianNotFound: 0,
     failed: 0,
@@ -890,9 +891,26 @@ async function runStalwartIngestion(
           );
         const isBounce = isBounceEmail(rawEmail) || !!bounceAttach;
         if (isBounce) {
-          summary.bounced++;
           if (bounceAttach?.blobId) {
             try {
+              // Determine bounce vs delay from the DSN status
+              const dsnAttach: { blobId?: string; type?: string } | undefined =
+                ((rawEmail as any).attachments || []).find(
+                  (a: { type?: string }) => a.type === "message/delivery-status",
+                );
+              let statusType = "bounced"; // default
+              if (dsnAttach?.blobId) {
+                const session = await (client as any)._discoverSession();
+                const accountId = client.getAccountId(session);
+                const dsnText: string = await (client as any)._downloadBlob(
+                  dsnAttach.blobId, accountId,
+                );
+                if (/^Status:\s*4\./im.test(dsnText)) {
+                  statusType = "delayed";
+                }
+              }
+              summary[statusType as "bounced" | "delayed"]++;
+
               const session = await (client as any)._discoverSession();
               const accountId = client.getAccountId(session);
               const blobText: string = await (client as any)._downloadBlob(
@@ -900,18 +918,19 @@ async function runStalwartIngestion(
               );
               const bouncedId = extractBouncedMessageId(blobText);
               if (bouncedId !== null) {
-                // Mark the matched message as bounced and get its sender_hash
+                // Mark the matched message as bounced/delayed and get its sender_hash
                 const { data: bouncedMsg } = await (db as any).supabase
                   .from("messages")
-                  .update({ processing_status: "bounced" })
+                  .update({ processing_status: statusType })
                   .eq("id", bouncedId)
                   .select("sender_hash")
                   .single();
 
                 console.log(`Bounced ${rawEmail.id} -> matched message ${bouncedId}`);
 
-                // Cascade to all unanswered messages with the same sender_hash
-                if (bouncedMsg?.sender_hash) {
+                // Cascade bounce to all unanswered messages with the same sender_hash
+                // Only for permanent bounces (5xx), not temporary delays (4xx)
+                if (bouncedMsg?.sender_hash && statusType === "bounced") {
                   const { data: cascaded, error: cascadeError } = await (db as any).supabase
                     .from("messages")
                     .update({ processing_status: "bounced" })
@@ -1084,6 +1103,7 @@ async function runStalwartIngestion(
     ["Processed", summary.processed],
     ["Duplicates", summary.duplicates],
     ["Bounced", summary.bounced],
+    ["Delayed", summary.delayed],
     ["Auto-replies", summary.autoreplied],
     ["Politician not found", summary.politicianNotFound],
     ["Failed", summary.failed],
