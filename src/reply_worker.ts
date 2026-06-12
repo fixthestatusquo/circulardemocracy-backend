@@ -258,9 +258,10 @@ async function sendPoliticianBatch(
       }
     } catch (error) {
       console.error(
-        `[Reply Worker] Bulk email fetch failed for politician ${politicianId}:`,
-        error,
+        `[Reply Worker] Bulk email fetch FATAL for politician ${politicianId}:`,
+        error instanceof Error ? error.stack : error,
       );
+      process.exit(1);
     }
 
     // Process messages in batches via sendEmails (single JMAP request per group).
