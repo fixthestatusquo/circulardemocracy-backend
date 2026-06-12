@@ -37,12 +37,12 @@ const MessageInputSchema = z.object({
     .describe("Full name of the message sender"),
   sender_email: z
     .string()
-    .email()
+    .min(3)
     .max(255)
     .describe("Email address of the sender"),
   recipient_email: z
     .string()
-    .email()
+    .min(3)
     .max(255)
     .describe("Email address of the target politician"),
   subject: z.string().max(500).describe("Message subject line"),
@@ -942,7 +942,6 @@ async function runStalwartIngestion(
             const trashId = await ensureMailboxExists(client, "Trash");
             if (trashId) {
               await moveEmailToMailbox(client, rawEmail.id, trashId);
-              console.log(`Moved bounce ${rawEmail.id} to Trash`);
             }
           } catch (moveError) {
             console.warn(`Failed to move bounce ${rawEmail.id} to Trash: ${moveError}`);
