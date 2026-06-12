@@ -187,18 +187,6 @@ export async function updateReplyTemplate(
 }
 
 /**
- * Ensures only one template is active per politician-campaign pair
- */
-export async function ensureSingleActiveTemplate(
-  db: DatabaseClient,
-  campaignId: number,
-  politicianId: number,
-  activeTemplateId: number,
-): Promise<void> {
-  await db.deactivateOtherTemplates(campaignId, politicianId, activeTemplateId);
-}
-
-/**
  * Gets the active template for a specific politician and campaign
  */
 export async function getActiveTemplate(
@@ -207,14 +195,4 @@ export async function getActiveTemplate(
   politicianId: number,
 ): Promise<ReplyTemplate | null> {
   return await db.getActiveTemplateForCampaign(campaignId, politicianId);
-}
-
-/**
- * Validates that a politician owns a template (for authorization)
- */
-export async function validateTemplateOwnership(
-  db: DatabaseClient,
-  templateId: number,
-): Promise<boolean> {
-  return await db.verifyPoliticianOwnsTemplate(templateId);
 }

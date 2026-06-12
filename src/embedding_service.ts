@@ -107,14 +107,4 @@ export async function generateEmbedding(
   }
 }
 
-/**
- * Cleanup function to free model resources
- * Call this when shutting down the server
- */
-export async function cleanupEmbeddingService(): Promise<void> {
-  if (embeddingPipeline) {
-    // Transformers.js doesn't have explicit cleanup, but we can null the reference
-    embeddingPipeline = null;
-    console.log("🧹 Embedding service cleaned up");
-  }
-}
+

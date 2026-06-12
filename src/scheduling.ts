@@ -157,19 +157,6 @@ function getCESTOffset(date: Date): number {
   return Math.round(diff / (1000 * 60));
 }
 
-export function formatCESTTime(date: Date): string {
-  return date.toLocaleString("en-US", {
-    timeZone: OFFICE_HOURS.timezone,
-    weekday: "short",
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    timeZoneName: "short",
-  });
-}
-
 /** True when reply_scheduled_at is null (immediate) or the scheduled time has passed. */
 export function isReadyToSend(scheduledAt: string | null): boolean {
   if (!scheduledAt) {
