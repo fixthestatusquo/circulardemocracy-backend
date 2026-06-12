@@ -900,29 +900,31 @@ async function runStalwartIngestion(
               );
               const bouncedId = extractBouncedMessageId(blobText);
               if (bouncedId !== null) {
-                // Mark the matched message as bounced
-                await db.updateMessageFields(bouncedId, {
-                  processing_status: "bounced",
-                });
-                console.log(`Bounced ${rawEmail.id} -> matched message ${bouncedId}`);
-
-                // Also bounce all unanswered messages with the same sender_hash
+                // Mark the matched message as bounced and get its sender_hash
                 const { data: bouncedMsg } = await (db as any).supabase
                   .from("messages")
-                  .select("sender_hash")
+                  .update({ processing_status: "bounced" })
                   .eq("id", bouncedId)
+                  .select("sender_hash")
                   .single();
 
+                console.log(`Bounced ${rawEmail.id} -> matched message ${bouncedId}`);
+
+                // Cascade to all unanswered messages with the same sender_hash
                 if (bouncedMsg?.sender_hash) {
-                  const { error: cascadeError } = await (db as any).supabase
+                  const { data: cascaded, error: cascadeError } = await (db as any).supabase
                     .from("messages")
                     .update({ processing_status: "bounced" })
                     .eq("sender_hash", bouncedMsg.sender_hash)
                     .eq("processing_status", "unanswered")
-                    .neq("id", bouncedId);
+                    .neq("id", bouncedId)
+                    .select("id");
 
                   if (!cascadeError) {
-                    console.log(`  ↳ Cascaded bounce to other unanswered messages with same sender_hash`);
+                    const cascadeCount = cascaded?.length || 0;
+                    if (cascadeCount > 0) {
+                      console.log(`  ↳ Cascaded bounce to ${cascadeCount} other unanswered message(s) with same sender_hash`);
+                    }
                   }
                 }
               } else {
