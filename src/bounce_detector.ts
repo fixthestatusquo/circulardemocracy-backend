@@ -61,6 +61,13 @@ export function isBounceEmail(email: {
   // Check From address
   const fromEmail = email.from?.[0]?.email?.toLowerCase() || "";
   const fromName = email.from?.[0]?.name?.toLowerCase() || "";
+  // Delay/warning notifications are temporary, not hard bounces — skip them
+  const subject = email.subject || "";
+  const lowerSubject = subject.toLowerCase();
+  if (lowerSubject.includes("delay") || lowerSubject.includes("warning")) {
+    return false;
+  }
+
   const fromText = `${fromEmail} ${fromName}`;
 
   for (const pattern of DSN_FROM_PATTERNS) {
@@ -69,10 +76,7 @@ export function isBounceEmail(email: {
     }
   }
 
-  // Check Subject line
-  const subject = email.subject || "";
-  const lowerSubject = subject.toLowerCase();
-
+  // Check Subject line for bounce keywords
   for (const pattern of DSN_SUBJECT_PATTERNS) {
     if (lowerSubject.includes(pattern.toLowerCase())) {
       return true;
