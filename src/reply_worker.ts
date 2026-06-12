@@ -228,19 +228,10 @@ async function sendPoliticianBatch(
     jmapClientCache.set(fetchClientKey, jmapClientForFetch);
 
     try {
-      // Fetch JMAP emails in parallel chunks to speed up the lookup
       const externalIds = messages.map((m) => m.external_id);
-      const FETCH_CHUNK = 20;
-      const fetchChunks: Promise<Map<string, EmailMessage>>[] = [];
-      for (let i = 0; i < externalIds.length; i += FETCH_CHUNK) {
-        const ids = externalIds.slice(i, i + FETCH_CHUNK);
-        fetchChunks.push(jmapClientForFetch.getEmails(ids));
-      }
-      const results = await Promise.all(fetchChunks);
-      for (const chunkResult of results) {
-        for (const [id, email] of chunkResult) {
-          jmapEmailCache.set(id, email);
-        }
+      const emails = await jmapClientForFetch.getEmails(externalIds);
+      for (const [id, email] of emails) {
+        jmapEmailCache.set(id, email);
       }
     } catch (error) {
       console.error(

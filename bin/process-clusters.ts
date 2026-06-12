@@ -95,37 +95,58 @@ Options:
 
       const currentVector = campaign?.reference_vector;
 
+      let snapshotId: number | null = null;
+
       if (!dryRun) {
         if (currentVector) {
           const vectorStr = Array.isArray(currentVector)
             ? `[${currentVector.join(",")}]`
             : currentVector;
 
-          await supabase.from("message_clusters").insert({
-            centroid_vector: vectorStr,
-            message_count: null,
-            status: "snapshot",
-            campaign_id: cluster.campaign_id,
-          });
-          console.log(`  📸 Campaign vector snapshotted`);
+          const { data: snapshot } = await supabase
+            .from("message_clusters")
+            .insert({
+              centroid_vector: vectorStr,
+              message_count: null,
+              status: "snapshot",
+              campaign_id: cluster.campaign_id,
+            })
+            .select("id")
+            .single();
+
+          snapshotId = snapshot?.id ?? null;
+          console.log(`  📸 Campaign vector snapshotted (id: ${snapshotId})`);
         } else {
           console.log(`  📝 No existing campaign vector to snapshot`);
         }
 
-        // 1b. Assign messages in the cluster to the campaign
+        // 1b. Assign cluster messages to the campaign
         const { error: assignError } = await supabase
           .from("messages")
           .update({ campaign_id: cluster.campaign_id })
           .eq("cluster_id", cluster.id);
 
         if (assignError) {
-          console.error(`  ❌ Error assigning messages: ${assignError.message}`);
+          console.error(`  ❌ Error assigning cluster messages: ${assignError.message}`);
           errors++;
           continue;
         }
+        console.log(`  ✅ ${cluster.message_count ?? 0} cluster messages → campaign ${cluster.campaign_id}`);
 
-        const assignedCount = cluster.message_count ?? 0;
-        console.log(`  ✅ ${assignedCount} messages assigned to campaign ${cluster.campaign_id}`);
+        // 1c. Link existing campaign messages to the snapshot (distance reference)
+        if (snapshotId) {
+          const { error: linkError } = await supabase
+            .from("messages")
+            .update({ cluster_id: snapshotId })
+            .eq("campaign_id", cluster.campaign_id)
+            .is("cluster_id", null);
+
+          if (linkError) {
+            console.warn(`  ⚠️  Failed to link messages to snapshot: ${linkError.message}`);
+          } else {
+            console.log(`  🔗 Existing campaign messages linked to snapshot ${snapshotId}`);
+          }
+        }
       } else {
         console.log(`  📸 Would snapshot campaign vector: ${currentVector ? "(present)" : "(none)"}`);
         console.log(`  ✅ Would assign ${cluster.message_count ?? "?"} messages to campaign ${cluster.campaign_id}`);
