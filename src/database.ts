@@ -1410,23 +1410,12 @@ export class DatabaseClient {
 
     if (filters.recover) {
       // Only pick up stale 'sending' messages (crashed mid-send, >1 hour old)
-      const cutoff = new Date(Date.now() - 3600000).toISOString();
-      console.log("[DB] Recover mode: looking for sending messages older than", cutoff);
       query = query
         .eq("processing_status", "sending")
-        .lt("processed_at", cutoff);
+        .lt("processed_at", new Date(Date.now() - 3600000).toISOString());
     } else {
       query = query.eq("processing_status", "unanswered");
     }
-
-    // Log effective filter for debugging
-    console.log("[DB] getMessagesReadyToSend filters:", {
-      recover: filters.recover ?? false,
-      politicianId: filters.politicianId,
-      campaignId: filters.campaignId,
-      limit: filters.limit,
-      desc: filters.desc,
-    });
 
     if (filters.politicianId !== undefined) {
       query = query.eq("politician_id", filters.politicianId);
@@ -1448,7 +1437,6 @@ export class DatabaseClient {
       throw error;
     }
 
-    console.log(`[DB] getMessagesReadyToSend returned ${data?.length || 0} messages`);
     return data || [];
   }
 
