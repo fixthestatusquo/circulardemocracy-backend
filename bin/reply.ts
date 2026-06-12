@@ -23,7 +23,7 @@ const MAX_RETRY_ATTEMPTS = 10;
 export function parseArgs(args: string[]): CliFilters  {
   const argv = minimist(args, {
     string: ["campaign-name", "politician-name", "campaign-id","politician-id","limit","politician-name","message"],
-    boolean: ["dry-run", "help", "desc"],
+    boolean: ["dry-run", "help", "desc", "recover"],
     alias: { h: "help" },
     unknown: (d: string) => {
       if (d[0] !== "-" ) return true;
@@ -65,6 +65,7 @@ export function parseArgs(args: string[]): CliFilters  {
       typeof politicianName === "string" ? politicianName : undefined,
     dryRun: argv["dry-run"] === true,
     desc: argv.desc === true,
+    recover: argv.recover === true,
     limit: Number(argv.limit) || undefined,
     messageId: argv.message,
   };
@@ -103,6 +104,7 @@ async function sendFilteredReplies(
     politicianId,
     limit: options.limit,
     desc: options.desc,
+    recover: options.recover,
   });
 }
 
@@ -135,6 +137,7 @@ export async function previewReadyReplies(
       politicianId,
       limit: options.limit,
       desc: options.desc,
+      recover: options.recover,
     });
   }
 
@@ -187,6 +190,7 @@ OPTIONS:
   --politician-name <hint> Filter by politician (email exact or partial)
   --limit <n>             Limit the number of emails processed (requires --politician-id)
   --message <id>          Process only this specific message ID
+  --recover               Also pick up stale 'sending' messages (>1 hour old)
   --desc                  Process newest messages first (default: oldest first)
   --dry-run               Preview what would be sent without sending mail
   -h, --help              Show this help message

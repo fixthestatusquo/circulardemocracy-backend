@@ -111,6 +111,7 @@ export async function sendScheduledReplies(
     campaignId?: number;
     limit?: number;
     desc?: boolean;
+    recover?: boolean;
   } = {},
 ): Promise<ProcessingResult> {
   const result: ProcessingResult = {
@@ -561,6 +562,7 @@ async function getMessagesReadyToSend(
     campaignId?: number;
     limit?: number;
     desc?: boolean;
+    recover?: boolean;
   } = {},
 ): Promise<MessageToProcess[]> {
   try {

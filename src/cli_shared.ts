@@ -9,6 +9,7 @@ export interface CliFilters {
   limit?: number;
   messageId?: string;
   desc?: boolean;
+  recover?: boolean;
 }
 
 export async function resolveCampaignId(

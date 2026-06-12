@@ -1378,6 +1378,7 @@ export class DatabaseClient {
       campaignId?: number;
       limit?: number;
       desc?: boolean;
+      recover?: boolean;
     } = {},
   ): Promise<
     Array<{
@@ -1401,12 +1402,21 @@ export class DatabaseClient {
       .select(
         "id, external_id, politician_id, campaign_id, sender_hash, reply_scheduled_at, received_at, reply_retry_count",
       )
-      .eq("processing_status", "unanswered") // Only pick up messages not already being sent or replied
       .is("reply_sent_at", null)
       .in("campaign_id", campaignIds)
       .eq("duplicate_rank", 0)
       .lt("reply_retry_count", maxRetryAttempts)
       .or("reply_scheduled_at.is.null,reply_scheduled_at.lte.now()");
+
+    if (filters.recover) {
+      // Also pick up stale 'sending' messages (crashed mid-send, >1 hour old)
+      query = query.or(
+        `processing_status.eq.unanswered,` +
+        `and(processing_status.eq.sending,processed_at.lt.${new Date(Date.now() - 3600000).toISOString()})`,
+      );
+    } else {
+      query = query.eq("processing_status", "unanswered");
+    }
 
     if (filters.politicianId !== undefined) {
       query = query.eq("politician_id", filters.politicianId);
