@@ -1409,11 +1409,10 @@ export class DatabaseClient {
       .or("reply_scheduled_at.is.null,reply_scheduled_at.lte.now()");
 
     if (filters.recover) {
-      // Also pick up stale 'sending' messages (crashed mid-send, >1 hour old)
-      query = query.or(
-        `processing_status.eq.unanswered,` +
-        `and(processing_status.eq.sending,processed_at.lt.${new Date(Date.now() - 3600000).toISOString()})`,
-      );
+      // Only pick up stale 'sending' messages (crashed mid-send, >1 hour old)
+      query = query
+        .eq("processing_status", "sending")
+        .lt("processed_at", new Date(Date.now() - 3600000).toISOString());
     } else {
       query = query.eq("processing_status", "unanswered");
     }

@@ -190,7 +190,7 @@ OPTIONS:
   --politician-name <hint> Filter by politician (email exact or partial)
   --limit <n>             Limit the number of emails processed (requires --politician-id)
   --message <id>          Process only this specific message ID
-  --recover               Also pick up stale 'sending' messages (>1 hour old)
+  --recover               Only process stale 'sending' messages (>1 hour old)
   --desc                  Process newest messages first (default: oldest first)
   --dry-run               Preview what would be sent without sending mail
   -h, --help              Show this help message
