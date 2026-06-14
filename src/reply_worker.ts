@@ -112,6 +112,7 @@ export async function sendScheduledReplies(
     limit?: number;
     desc?: boolean;
     recover?: boolean;
+    skipDomains?: string[];
   } = {},
 ): Promise<ProcessingResult> {
   const result: ProcessingResult = {
@@ -155,6 +156,7 @@ export async function sendScheduledReplies(
         db,
         politicianId,
         batch,
+        filters.skipDomains,
       );
 
       result.sent += politicianResult.sent;
@@ -229,6 +231,7 @@ async function sendPoliticianBatch(
   db: DatabaseClient,
   politicianId: number,
   messages: MessageToProcess[],
+  skipDomains?: string[],
 ): Promise<ProcessingResult> {
   const result: ProcessingResult = {
     total: messages.length,
@@ -358,6 +361,16 @@ async function sendPoliticianBatch(
           const senderEmail = jmapEmail.replyTo || jmapEmail.from;
           if (!senderEmail) {
             throw new Error(`sender not found for message ${message.id}`);
+          }
+
+          // Skip paused domains
+          if (skipDomains && skipDomains.length > 0) {
+            const recipientDomain = senderEmail.split("@")[1]?.toLowerCase();
+            if (recipientDomain && skipDomains.includes(recipientDomain)) {
+              console.log(`[Reply Worker] ⏸ Skipping ${message.id} (${senderEmail}) — domain in skip list`);
+              await db.updateMessageFields(message.id, { processing_status: "paused" });
+              continue;
+            }
           }
 
           const outboundIdentity = resolveOutboundEmailIdentity(
@@ -592,6 +605,7 @@ async function getMessagesReadyToSend(
     limit?: number;
     desc?: boolean;
     recover?: boolean;
+    skipDomains?: string[];
   } = {},
 ): Promise<MessageToProcess[]> {
   try {

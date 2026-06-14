@@ -10,6 +10,7 @@ export interface CliFilters {
   messageId?: string;
   desc?: boolean;
   recover?: boolean;
+  skipDomains?: string[];
 }
 
 export async function resolveCampaignId(

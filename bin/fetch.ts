@@ -20,6 +20,7 @@ import Turndown from "turndown";
 import { config as dotenv } from "dotenv";
 import { pipeline, type FeatureExtractionPipeline } from "@xenova/transformers";
 import { isBounceEmail, extractBouncedMessageId, isAutoReply } from "../src/bounce_detector";
+import { jmapQueryWithBodies } from "../src/jmap_query";
 
 // Load `.env` once; all config is read from `process.env` below (no env.ts wrapper).
 dotenv({ quiet: true });
@@ -359,55 +360,7 @@ function convertJmapEmailToMessageInput(email: JmapEmail): MessageInput {
 
 // --- JMAP helper: Email/query + Email/get with body content ---
 
-interface JmapQueryResult {
-  emails: JmapEmail[];
-  total: number;
-  position: number;
-}
 
-async function jmapQueryWithBodies(
-  client: JmapClient,
-  filter: Record<string, unknown> | null,
-  limit = 50,
-  position?: number,
-): Promise<JmapQueryResult> {
-  const session = await (client as any)._discoverSession();
-  const accountId = client.getAccountId(session);
-  const queryArgs: Record<string, unknown> = { accountId, limit };
-  if (filter) queryArgs.filter = filter;
-  if (position !== undefined) queryArgs.position = position;
-
-  const json = await (client as any)._requestJson(session.apiUrl, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      using: ["urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail"],
-      methodCalls: [
-        ["Email/query", queryArgs, "q"],
-        ["Email/get", {
-          accountId,
-          "#ids": { resultOf: "q", name: "Email/query", path: "/ids" },
-          properties: [
-            "id", "messageId", "receivedAt", "mailboxIds",
-            "subject", "from", "to", "cc", "replyTo",
-            "preview", "textBody", "htmlBody", "bodyValues", "attachments", "headers",
-          ],
-          fetchTextBodyValues: true,
-          fetchHTMLBodyValues: true,
-        }, "g"],
-      ],
-    }),
-  });
-
-  const queryResp = json.methodResponses?.find((r: any[]) => r[0] === "Email/query");
-  const getResp = json.methodResponses?.find((r: any[]) => r[0] === "Email/get");
-
-  const emails = Array.isArray(getResp?.[1]?.list) ? getResp[1].list : [];
-  const total = queryResp?.[1]?.total ?? 0;
-  const respPosition = queryResp?.[1]?.position ?? 0;
-
-  return { emails, total, position: respPosition };
-}
 
 // --- JMAP helper: fetch single email by Message-ID header ---
 
@@ -461,6 +414,16 @@ function generateFolderPath(campaignName?: string | null): string {
 }
 
 // --- jmap-cli wrappers for mailbox & move operations ---
+
+async function ensureTrashMailbox(client: JmapClient): Promise<string | null> {
+  try {
+    const mb = await client.getMailbox("trash"); // role-based lookup
+    if (mb?.id) return mb.id;
+  } catch {
+    // fallback to "Trash" by name
+  }
+  return ensureMailboxExists(client, "Trash");
+}
 
 async function ensureMailboxExists(
   client: JmapClient,
@@ -958,14 +921,15 @@ async function runStalwartIngestion(
           summary[statusType as "bounced" | "delayed"]++;
 
           // Move to Delayed folder (temporary) or Trash (permanent)
-          const targetFolder = statusType === "delayed" ? "Delayed" : "Trash";
           try {
-            const folderId = await ensureMailboxExists(client, targetFolder);
+            const folderId = statusType === "delayed"
+              ? await ensureMailboxExists(client, "Delayed")
+              : await ensureTrashMailbox(client);
             if (folderId) {
               await moveEmailToMailbox(client, rawEmail.id, folderId);
             }
           } catch (moveError) {
-            console.warn(`Failed to move bounce ${rawEmail.id} to Trash: ${moveError}`);
+            console.warn(`Failed to move bounce ${rawEmail.id}: ${moveError}`);
           }
 
           continue;
@@ -976,12 +940,12 @@ async function runStalwartIngestion(
           summary.autoreplied++;
           console.log(`Auto-reply ${rawEmail.id} (${rawEmail.subject})`);
           try {
-            const trashId = await ensureMailboxExists(client, "Trash");
+            const trashId = await ensureTrashMailbox(client);
             if (trashId) {
               await moveEmailToMailbox(client, rawEmail.id, trashId);
             }
           } catch (moveError) {
-            console.warn(`Failed to move auto-reply ${rawEmail.id} to Trash: ${moveError}`);
+            console.warn(`Failed to move auto-reply ${rawEmail.id}: ${moveError}`);
           }
           continue;
         }

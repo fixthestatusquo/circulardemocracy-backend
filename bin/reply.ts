@@ -22,7 +22,7 @@ const MAX_RETRY_ATTEMPTS = 10;
 
 export function parseArgs(args: string[]): CliFilters  {
   const argv = minimist(args, {
-    string: ["campaign-name", "politician-name", "campaign-id","politician-id","limit","politician-name","message"],
+    string: ["campaign-name", "politician-name", "campaign-id","politician-id","limit","politician-name","message", "skip-domain"],
     boolean: ["dry-run", "help", "desc", "recover"],
     alias: { h: "help" },
     unknown: (d: string) => {
@@ -66,6 +66,9 @@ export function parseArgs(args: string[]): CliFilters  {
     dryRun: argv["dry-run"] === true,
     desc: argv.desc === true,
     recover: argv.recover === true,
+    skipDomains: typeof argv["skip-domain"] === "string"
+      ? argv["skip-domain"].split(",").map((d: string) => d.trim().toLowerCase()).filter(Boolean)
+      : undefined,
     limit: Number(argv.limit) || undefined,
     messageId: argv.message,
   };
@@ -105,6 +108,7 @@ async function sendFilteredReplies(
     limit: options.limit,
     desc: options.desc,
     recover: options.recover,
+    skipDomains: options.skipDomains,
   });
 }
 
@@ -190,6 +194,7 @@ OPTIONS:
   --politician-name <hint> Filter by politician (email exact or partial)
   --limit <n>             Limit the number of emails processed (requires --politician-id)
   --message <id>          Process only this specific message ID
+  --skip-domain <domain>  Comma-separated domains to skip (mark as paused)
   --recover               Only process stale 'sending' messages (>1 hour old)
   --desc                  Process newest messages first (default: oldest first)
   --dry-run               Preview what would be sent without sending mail
