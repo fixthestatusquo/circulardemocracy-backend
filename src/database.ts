@@ -1317,6 +1317,55 @@ export class DatabaseClient {
     }
   }
 
+  async logEmailEvent(
+    eventType: string,
+    messageId: number | null,
+    politicianId: number,
+    senderHash: string,
+  ): Promise<void> {
+    try {
+      const { error } = await this.supabase.from("email_events").insert({
+        event_type: eventType,
+        message_id: messageId,
+        politician_id: politicianId,
+        sender_hash: senderHash,
+      });
+
+      if (error) {
+        console.error("Error logging email event:", error);
+        throw error;
+      }
+    } catch (error) {
+      console.error("Error logging email event:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Returns true if the sender's latest event for this politician is 'unsubscribe'.
+   */
+  async isOptedOut(senderHash: string, politicianId: number): Promise<boolean> {
+    try {
+      const { data, error } = await this.supabase
+        .from("email_events")
+        .select("event_type")
+        .eq("sender_hash", senderHash)
+        .eq("politician_id", politicianId)
+        .order("created_at", { ascending: false })
+        .limit(1);
+
+      if (error) {
+        console.error("Error checking opt-out status:", error);
+        throw error;
+      }
+
+      return data && data.length > 0 && data[0].event_type === "unsubscribe";
+    } catch (error) {
+      console.error("Error checking opt-out status:", error);
+      throw error;
+    }
+  }
+
   async getMessageForReplyScheduling(messageId: number): Promise<{
     id: number;
     campaign_id: number | null;

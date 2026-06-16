@@ -43,6 +43,8 @@ export interface EmailMessage {
   receivedAt?: string;
   sentAt?: string;
   messageId?: [string];
+  /** Custom email headers (e.g. Feedback-ID, List-Unsubscribe) */
+  headers?: Array<{ name: string; value: string }>;
 }
 
 export interface JMAPSendResult {
@@ -108,6 +110,7 @@ export class JMAPClient {
         inReplyTo: email.inReplyTo?.[0],
         references: email.references,
         messageId: email.messageId?.[0],
+        headers: email.headers,
       });
 
       // Find the Email/set response by method name (more reliable than index)
@@ -205,6 +208,7 @@ export class JMAPClient {
       inReplyTo: e.inReplyTo?.[0],
       references: e.references,
       messageId: e.messageId?.[0],
+      headers: e.headers,
     }));
 
     const results = await (this.upstream as any).sendEmails(upstreamEmails);

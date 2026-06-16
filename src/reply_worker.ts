@@ -100,8 +100,13 @@ interface SendContext {
   supporterId: number | null;
 }
 
+/** Batch size for each DB fetch + processing cycle. */
+const SEND_BATCH_SIZE = 50;
+
 /**
  * Main worker function to process and send scheduled replies.
+ * Fetches and processes messages in batches, firing off the next DB fetch
+ * while the current batch is being processed (pipelined I/O).
  * Groups messages by politician to reuse JMAP authentication/connections.
  */
 export async function sendScheduledReplies(
@@ -122,46 +127,71 @@ export async function sendScheduledReplies(
     errors: [],
   };
 
+  const effectiveLimit = filters.limit ?? Infinity;
+  const batchSize = Math.min(SEND_BATCH_SIZE, effectiveLimit);
+
   try {
-    // 1. Get messages ready to send with optional filters
-    const messages = await getMessagesReadyToSend(db, filters);
-    if (messages.length === 0) {
-      return result;
-    }
+    // Pipeline state: the in-flight DB fetch for the *next* batch.
+    // Start by fetching the first batch.
+    let nextBatchPromise: Promise<MessageToProcess[]> =
+      getMessagesReadyToSend(db, { ...filters, limit: batchSize });
 
-    // 2. Claim messages by setting status to 'sending' to prevent concurrency issues
-    const messageIds = messages.map((m) => m.id);
-    await db.bulkUpdateMessageStatus(messageIds, "sending");
+    while (true) {
+      // ── Fetch this batch ──────────────────────────────────────────
+      const messages = await nextBatchPromise;
+      if (messages.length === 0) break;
+      const alreadyClaimed = result.total; // before claiming
 
-    result.total = messages.length;
-    console.log(
-      `[Reply Worker] Claimed ${messages.length} messages for processing`,
-    );
-
-    // 3. Group messages by politician to reuse auth
-    const byPolitician = new Map<number, MessageToProcess[]>();
-    for (const msg of messages) {
-      const list = byPolitician.get(msg.politician_id) ?? [];
-      list.push(msg);
-      byPolitician.set(msg.politician_id, list);
-    }
-
-    console.log(
-      `[Reply Worker] Grouped into ${byPolitician.size} politician batch(es)`,
-    );
-
-    // 4. Process each politician batch
-    for (const [politicianId, batch] of byPolitician.entries()) {
-      const politicianResult = await sendPoliticianBatch(
-        db,
-        politicianId,
-        batch,
-        filters.skipDomains,
+      // Claim messages to prevent concurrent workers picking them up
+      await db.bulkUpdateMessageStatus(
+        messages.map((m) => m.id),
+        "sending",
       );
 
-      result.sent += politicianResult.sent;
-      result.failed += politicianResult.failed;
-      result.errors.push(...politicianResult.errors);
+      result.total += messages.length;
+
+      // Log a combined batch summary (first batch also logs the grouping)
+      const politicianIds = new Set(messages.map((m) => m.politician_id));
+      console.log(
+        `[Reply Worker] Batch ${alreadyClaimed + 1}–${result.total}: ` +
+          `${messages.length} message(s) across ${politicianIds.size} politician(s) claimed`,
+      );
+
+      // ── Fire off the DB fetch for the NEXT batch while we process this one ──
+      if (result.total < effectiveLimit) {
+        const remaining = effectiveLimit - result.total;
+        nextBatchPromise = getMessagesReadyToSend(db, {
+          ...filters,
+          limit: Math.min(batchSize, remaining),
+        });
+      } else {
+        // Signal loop to stop after this batch
+        nextBatchPromise = Promise.resolve([]);
+      }
+
+      // ── Process this batch ────────────────────────────────────────
+      const byPolitician = new Map<number, MessageToProcess[]>();
+      for (const msg of messages) {
+        const list = byPolitician.get(msg.politician_id) ?? [];
+        list.push(msg);
+        byPolitician.set(msg.politician_id, list);
+      }
+
+      for (const [politicianId, batch] of byPolitician.entries()) {
+        const politicianResult = await sendPoliticianBatch(
+          db,
+          politicianId,
+          batch,
+          filters.skipDomains,
+        );
+        result.sent += politicianResult.sent;
+        result.failed += politicianResult.failed;
+        result.errors.push(...politicianResult.errors);
+      }
+
+      console.log(
+        `[Reply Worker] Batch done: ${result.sent} sent, ${result.failed} failed (of ${result.total} total claimed)`,
+      );
     }
 
     console.log(
@@ -213,6 +243,9 @@ function buildReplyEmail(
     textBody: emailContent.textBody,
     htmlBody: emailContent.htmlBody,
     messageId: [replyMessageId],
+    headers: [
+      { name: "Feedback-ID", value: `campaign:${campaign.id}:${politician.id}:${domain}` },
+    ],
   };
 
   if (jmapEmail.messageId) {
